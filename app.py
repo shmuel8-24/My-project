@@ -38,9 +38,30 @@ def test_ai():
     if not message:
         return jsonify({"error": "message is required"}), 400
 
+    doc_count = collection.count()
+    n_results = min(3, doc_count) if doc_count > 0 else 0
+
+    if n_results > 0:
+        query_vector = embeddings_model.embed_query(message)
+        results = collection.query(
+            query_embeddings=[query_vector],
+            n_results=n_results,
+            include=["documents"],
+        )
+        context = "\n---\n".join(results["documents"][0])
+    else:
+        context = ""
+
+    prompt = (
+        "You are a helpful assistant for students. Use the following context to answer the question. "
+        "If the answer isn't in the context, say you don't know.\n\n"
+        f"Context: {context}\n"
+        f"Question: {message}"
+    )
+
     response = client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[{"role": "user", "content": message}],
+        messages=[{"role": "user", "content": prompt}],
     )
     return jsonify({"reply": response.choices[0].message.content}), 200
 
