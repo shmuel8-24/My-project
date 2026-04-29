@@ -16,13 +16,22 @@ cp .env.example .env   # then fill in real values
 python app.py
 ```
 
-Default port is `5001` (macOS port 5000 is occupied by AirPlay). Override via the `PORT` env var.
+Default port is `5003` (macOS port 5000 is occupied by AirPlay). Override via the `PORT` env var.
 
 ## Verify the server is up
 
 ```bash
-curl http://localhost:5001/health
+curl http://localhost:5003/health
 # → {"status": "ok"}
+```
+
+## Test the AI endpoint
+
+```bash
+curl -X POST http://localhost:5003/test-ai \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello"}'
+# → {"reply": "..."}
 ```
 
 ## Environment variables
@@ -32,9 +41,16 @@ All secrets live in `.env` (gitignored). `.env.example` is the committed templat
 | Variable | Purpose |
 |---|---|
 | `OPENAI_API_KEY` | OpenAI API access |
-| `PORT` | Server port (default `5001`) |
+| `PORT` | Server port (default `5003`) |
 | `FLASK_ENV` | Set to `development` to enable Flask debug mode |
 
 ## Architecture
 
-This is an early-stage AI backend. The single entry point is `app.py`, which creates the Flask `app` object. All routes will be registered on that object (or on Blueprints imported into it as the codebase grows).
+This is an early-stage AI backend. The single entry point is `app.py`, which creates the Flask `app` object and a module-level `OpenAI` client (instantiated once at startup from `OPENAI_API_KEY`). All routes are registered on the `app` object directly; use Flask Blueprints when the route count grows.
+
+### Current endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/health` | Liveness check |
+| `POST` | `/test-ai` | Send `{"message": "..."}`, get `{"reply": "..."}` from `gpt-4o-mini` |
