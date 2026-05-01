@@ -41,6 +41,7 @@ htmlcov/
 
 # ChromaDB vector store (large, auto-rebuilt from PDFs)
 chroma_storage/
+db/
 
 # Node / Next.js
 node_modules/

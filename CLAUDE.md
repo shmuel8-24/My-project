@@ -31,17 +31,20 @@ Node.js lives at `/usr/local/bin/node` (v24). If `npm`/`npx` are not found, pref
 ## Backend commands
 
 ```bash
-# Liveness
+# Liveness (also reports total chunk count)
 curl http://localhost:5003/health
 
 # Upload a PDF
 curl -X POST http://localhost:5003/upload-pdf \
   -F "file=@path/to/doc.pdf"
 
-# Ask a question (requires at least one PDF uploaded)
+# Ask a question with optional conversation history
 curl -X POST http://localhost:5003/ask \
   -H "Content-Type: application/json" \
-  -d '{"message": "What is this document about?"}'
+  -d '{"message": "What is this document about?", "history": []}'
+
+# List all documents currently in the vector database
+curl http://localhost:5003/documents
 
 # Legacy general-purpose chat (also context-aware when docs exist)
 curl -X POST http://localhost:5003/test-ai \
@@ -71,7 +74,7 @@ All secrets live in `.env` (gitignored). `.env.example` is the committed templat
 
 ## Architecture
 
-This is a full-stack RAG (Retrieval-Augmented Generation) application for Hebrew-speaking university students.
+Full-stack RAG (Retrieval-Augmented Generation) app for Hebrew-speaking university students. Students upload PDF study materials and ask questions in Hebrew or English.
 
 ### Backend — `app.py`
 
@@ -79,31 +82,32 @@ Single Flask file. All module-level singletons are instantiated once at startup:
 
 | Singleton | Purpose |
 |---|---|
-| `client` | `openai.OpenAI` — used for chat completions (`gpt-4o-mini`) |
-| `chroma_client` | `chromadb.PersistentClient` — writes to `./chroma_storage/` |
-| `collection` | ChromaDB collection named `pdf_documents` |
-| `embeddings_model` | LangChain `OpenAIEmbeddings` with `text-embedding-3-small` |
-| `text_splitter` | `RecursiveCharacterTextSplitter` (chunk 1000, overlap 200) |
+| `client` | `openai.OpenAI` — chat completions (`gpt-4o-mini`) |
+| `chroma_client` | `chromadb.PersistentClient` — writes to `./db/` |
+| `collection` | ChromaDB collection `pdf_documents` with cosine similarity |
+| `embeddings_model` | LangChain `OpenAIEmbeddings` (`text-embedding-3-small`) |
+| `text_splitter` | `RecursiveCharacterTextSplitter` (chunk 1500, overlap 300) |
 
 **RAG pipeline (`/upload-pdf`):**
-PDF bytes → `pdfplumber` text extraction (in-memory) → split into chunks → embed with `text-embedding-3-small` → upsert into ChromaDB. Chunk IDs are deterministic (`{filename}_chunk_{i}`), so re-uploading the same filename overwrites its chunks.
+PDF bytes → PyMuPDF (`fitz`) text extraction in-memory (correct logical order for Hebrew/RTL) → split into chunks → embed → upsert into ChromaDB. Old chunks for the same filename are purged before upserting (delete by `source` metadata field). Chunk IDs follow `{filename}_chunk_{i}`.
 
 **Q&A flow (`/ask`):**
-`message` string → embed → ChromaDB similarity search (top 5) → inject context into GPT-4o-mini system prompt → return `{answer, sources, chunks_used}`.
+Accepts `{message, history}`. Short follow-ups (< 5 words) are enriched with the last user question before embedding to avoid retrieval drift. Retrieves `TOP_K=8` chunks → injects context into GPT-4o-mini → returns `{answer, sources, chunks_used}`. History is trimmed to the last `MAX_HISTORY_MESSAGES=10` turns before being sent to the LLM, but is intentionally **not** mixed into the embedding query.
 
-> **Note:** `/ask` reads the key `message` from the JSON body (not `question`). The frontend currently stubs this as a TODO.
+**`/documents`** returns all unique sources currently in the vector DB with chunk counts.
 
-**`/test-ai`** is a legacy endpoint that also does a ChromaDB context lookup (top 3) when documents exist, making it implicitly RAG-capable.
+**`/test-ai`** is a legacy endpoint — does RAG when docs exist, plain chat otherwise.
 
 ### Frontend — `frontend/`
 
 Next.js 16 · React 19 · TypeScript · Tailwind CSS v4 · `react-dropzone` v15
 
-**Key conventions:**
-- **Tailwind v4** uses a CSS-first config — there is no `tailwind.config.ts`. Configuration lives entirely in `app/globals.css` via `@import "tailwindcss"` and `@theme inline`.
-- **RTL Hebrew** is set globally via `<html lang="he" dir="rtl">` in `app/layout.tsx`. In RTL `flex-row`, the first DOM child appears on the **right**. Chat message alignment uses `justify-start` (→ right, user) and `justify-end` (→ left, AI).
-- **Heebo font** (Hebrew + Latin) is loaded via `next/font/google`, exposed as CSS variable `--font-heebo`, and mapped to `--font-sans` in `@theme inline` so it applies everywhere.
-- All UI lives in a single client component: `app/page.tsx` (`'use client'`). Components: `PdfUploader`, `ChatInterface`, `Home`.
-- API calls to the Flask backend are **stubbed** — look for `// TODO:` comments in `page.tsx` to wire them up. The backend URL is `http://127.0.0.1:5003`.
+> **Warning:** `frontend/AGENTS.md` (loaded via `frontend/CLAUDE.md`) notes that this Next.js version has breaking changes from older releases. Read `node_modules/next/dist/docs/` before writing Next.js-specific code.
 
-**Resetting `ChatInterface` state:** the component is given `key={String(hasDoc)}` in `Home`, so removing a document remounts it with clean state without needing a `useEffect` + `setState`.
+**Key conventions:**
+- **Tailwind v4** — CSS-first config only. No `tailwind.config.ts`. All config lives in `app/globals.css` via `@import "tailwindcss"` and `@theme inline`.
+- **RTL Hebrew** — `<html lang="he" dir="rtl">` in `app/layout.tsx`. In RTL flex-row, the first DOM child appears on the **right**. Chat uses `justify-start` (→ right, user) and `justify-end` (→ left, AI).
+- **Heebo font** — loaded via `next/font/google`, mapped to `--font-sans` in `@theme inline`.
+- All UI is one client component: `app/page.tsx` (`'use client'`). Components: `PdfUploader`, `ChatInterface`, `Home`.
+- `ChatInterface` is given `key={String(hasDoc)}` in `Home` so removing a document remounts it with clean state — no `useEffect` reset needed.
+- Backend URL is hardcoded as `http://127.0.0.1:5003` in `page.tsx`. Both `/upload-pdf` and `/ask` (with history) are fully wired.
