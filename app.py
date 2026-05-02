@@ -21,10 +21,48 @@ import chromadb
 import fitz  # PyMuPDF — correct logical-order extraction for Hebrew/RTL text
 import json
 import re
+import threading
 import numpy as np
+from datetime import datetime, timezone
 from rank_bm25 import BM25Okapi
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey, func as sql_func
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
 load_dotenv()
+
+# Set the non-interactive Agg backend before pyplot is first imported anywhere
+# (including inside exec() in execute_python_code). Must run at module level.
+import matplotlib
+matplotlib.use("Agg")
+
+# ── SQLite chat-history DB ────────────────────────────────────────────────────
+_Base = declarative_base()
+
+class ChatSession(_Base):
+    __tablename__ = "sessions"
+    id         = Column(Integer, primary_key=True, index=True)
+    title      = Column(String(200), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    messages   = relationship(
+        "ChatMessage", back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="ChatMessage.created_at",
+    )
+
+class ChatMessage(_Base):
+    __tablename__ = "messages"
+    id         = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False)
+    role       = Column(String(20), nullable=False)   # "user" | "assistant"
+    content    = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    session    = relationship("ChatSession", back_populates="messages")
+
+_db_engine  = create_engine("sqlite:///./chat.db", connect_args={"check_same_thread": False})
+_Base.metadata.create_all(bind=_db_engine)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_db_engine)
+# ─────────────────────────────────────────────────────────────────────────────
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # 100 MB — handles huge PDFs
@@ -60,6 +98,34 @@ SEARCH_TOOL = {
                 }
             },
             "required": ["query"],
+        },
+    },
+}
+
+CODE_INTERPRETER_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "code_interpreter",
+        "description": (
+            "Execute Python code for mathematical calculations, physics/engineering simulations, "
+            "numerical analysis, statistics, or data visualizations. Use proactively whenever "
+            "the user asks to calculate, simulate, plot, or analyse anything numerical. "
+            "Available libraries: numpy (as np), scipy (integrate, optimize, stats, linalg, fft), "
+            "matplotlib (as plt), math. Always use print() for text output. "
+            "Use plt.figure() / plt.plot() etc. for charts — do NOT call plt.show()."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "description": (
+                        "Well-commented Python code to execute. Use print() for every "
+                        "result you want to surface. Figures are captured automatically."
+                    ),
+                }
+            },
+            "required": ["code"],
         },
     },
 }
@@ -211,6 +277,97 @@ def hybrid_search(query_text: str, n_results: int) -> tuple[list[str], list[dict
 rebuild_bm25()
 
 
+def _save_ai_message(session_id: int, content: str) -> None:
+    """Persist an AI response inside the SSE generator (opens its own DB session)."""
+    try:
+        db = SessionLocal()
+        try:
+            db.add(ChatMessage(session_id=session_id, role="assistant", content=content))
+            db.commit()
+        finally:
+            db.close()
+    except Exception as exc:
+        print(f"[DB] failed to save AI message for session {session_id}: {exc}")
+
+
+def execute_python_code(code: str, timeout: int = 25) -> dict:
+    """
+    Execute Python code with numpy / scipy / matplotlib in a daemon thread.
+
+    Returns:
+        {
+          "output": str,          # everything printed to stdout
+          "error":  str | None,   # traceback if an exception occurred
+          "images": list[str],    # base64-encoded PNG strings (one per figure)
+        }
+
+    Security note: this is intentionally a permissive sandbox for a trusted
+    single-developer environment.  Do NOT expose this endpoint publicly.
+    """
+    import io as _io
+    import base64 as _b64
+    import contextlib as _ctx
+    import traceback as _tb
+
+    result: dict = {"output": "", "error": None, "images": []}
+
+    def _run() -> None:
+        import numpy as _np
+        import matplotlib.pyplot as _plt
+        import math as _math
+
+        exec_globals: dict = {
+            "__builtins__": __builtins__,
+            "np": _np, "numpy": _np,
+            "plt": _plt, "matplotlib": matplotlib,
+            "math": _math,
+        }
+        try:
+            import scipy
+            import scipy.integrate, scipy.optimize, scipy.stats
+            import scipy.linalg, scipy.signal, scipy.fft
+            exec_globals.update({
+                "scipy": scipy,
+                "integrate": scipy.integrate,
+                "optimize": scipy.optimize,
+                "stats": scipy.stats,
+                "linalg": scipy.linalg,
+                "fft": scipy.fft,
+            })
+        except ImportError:
+            pass
+
+        stdout_buf = _io.StringIO()
+        try:
+            with _ctx.redirect_stdout(stdout_buf):
+                exec(compile(code, "<code_interpreter>", "exec"), exec_globals)  # noqa: S102
+        except Exception:
+            result["error"] = _tb.format_exc()
+
+        result["output"] = stdout_buf.getvalue()
+
+        images: list[str] = []
+        for fig_num in _plt.get_fignums():
+            buf = _io.BytesIO()
+            _plt.figure(fig_num).savefig(
+                buf, format="png", dpi=150,
+                bbox_inches="tight", facecolor="white", edgecolor="none",
+            )
+            buf.seek(0)
+            images.append(_b64.b64encode(buf.read()).decode("utf-8"))
+        _plt.close("all")
+        result["images"] = images
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    thread.join(timeout=timeout)
+
+    if thread.is_alive():
+        result["error"] = f"Execution timed out after {timeout}s."
+
+    return result
+
+
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok", "chunks_in_db": collection.count()}), 200
@@ -304,58 +461,65 @@ def upload_pdf():
     return jsonify(resp), 200
 
 
-MAX_HISTORY_MESSAGES = 10  # keep last 5 full turns to stay within token limits
+MAX_HISTORY_MESSAGES = 10  # last 5 full turns kept for LLM context
 
 
 @app.route("/ask", methods=["POST"])
 def ask():
     data = request.get_json()
 
-    # ── LOG 1: exact incoming payload ────────────────────────────────────────
-    print("\n" + "━" * 62)
-    print("▶ /ask  INCOMING PAYLOAD")
-    print(f"  message : {(data or {}).get('message', '')!r}")
-    raw_history = (data or {}).get("history", [])
-    h_count = len(raw_history) if isinstance(raw_history, list) else "not-a-list"
-    print(f"  history : {h_count} message(s)")
-    if isinstance(raw_history, list):
-        for i, m in enumerate(raw_history):
-            role    = m.get("role", "?")    if isinstance(m, dict) else "?"
-            preview = (m.get("content", "") if isinstance(m, dict) else str(m))[:70]
-            print(f"    [{i}] {role}: {preview!r}")
-    print("━" * 62)
-    # ─────────────────────────────────────────────────────────────────────────
-
     question = data.get("message") if data else None
     if not question:
         return jsonify({"error": "message is required"}), 400
 
-    # history: [{role: "user"|"assistant", content: "..."}] — optional, sent by frontend
-    history = data.get("history", []) if data else []
-    if not isinstance(history, list):
-        history = []
-    # Sanitise: keep only the fields OpenAI expects and only known roles
-    history = [
-        {"role": m["role"], "content": m["content"]}
-        for m in history
-        if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content")
-    ]
+    session_id_in = data.get("session_id") if data else None
+
+    print("\n" + "━" * 62)
+    print("▶ /ask  INCOMING PAYLOAD")
+    print(f"  message    : {question!r}")
+    print(f"  session_id : {session_id_in!r}")
+    print("━" * 62)
 
     doc_count = collection.count()
     if doc_count == 0:
         return jsonify({"error": "no documents in the knowledge base — upload a PDF first"}), 400
 
+    # ── DB: get/create session, load history, save user message ──────────────
+    db = SessionLocal()
+    try:
+        if session_id_in:
+            chat_session = db.query(ChatSession).filter(ChatSession.id == int(session_id_in)).first()
+            if not chat_session:
+                return jsonify({"error": "session not found"}), 404
+        else:
+            chat_session = ChatSession(title=question[:80].strip())
+            db.add(chat_session)
+            db.flush()
+
+        session_id: int = chat_session.id
+
+        # Load history BEFORE saving the new user message so it isn't included.
+        past = (
+            db.query(ChatMessage)
+            .filter(ChatMessage.session_id == session_id)
+            .order_by(ChatMessage.created_at.asc())
+            .all()
+        )
+        history = [{"role": m.role, "content": m.content} for m in past[-MAX_HISTORY_MESSAGES:]]
+
+        db.add(ChatMessage(session_id=session_id, role="user", content=question))
+        chat_session.updated_at = datetime.now(timezone.utc)
+        db.commit()
+    finally:
+        db.close()
+    # ─────────────────────────────────────────────────────────────────────────
+
     # ── BUILD SEARCH QUERY (ChromaDB only) ───────────────────────────────────
     # CRITICAL SEPARATION:
     #   • ChromaDB needs a clean, focused semantic query → use the current question.
     #   • The LLM needs the full conversation history   → passed separately below.
-    # Mixing history wholesale into the embedding vector dilutes cosine similarity
-    # and causes retrieval drift on follow-up questions.
-    #
-    # The one exception: very short follow-ups (< 5 words) like "על הכל" or
-    # "הסבר יותר" have no semantic content on their own. For those only, we
-    # prepend the single immediately-prior user question to give ChromaDB
-    # enough signal. We use ONE prior question, not two — two would over-blend.
+    # Short follow-ups (< 5 words) are enriched with the immediately-prior user
+    # question to give the embedder enough signal — one prior question, not two.
     search_query = question
     if len(question.split()) < 5 and history:
         last_user_q = next(
@@ -364,15 +528,11 @@ def ask():
         if last_user_q:
             search_query = f"{last_user_q} {question}"
 
-    # ── LOG 2: exact string going into embed_query (BEFORE the call) ─────────
     print(f"\n▶ EMBED_QUERY INPUT → {search_query!r}")
     if search_query != question:
         print(f"  (raw question was → {question!r}  — enriched: < 5 words)")
     print()
-    # ─────────────────────────────────────────────────────────────────────────
 
-    # All expensive work runs inside the generator so status events reach the
-    # client before the first OpenAI call finishes.
     def generate():
         try:
             yield f"data: {json.dumps({'type': 'status', 'phase': 'thinking'})}\n\n"
@@ -382,23 +542,24 @@ def ask():
             # No PDF matches and no web search → early exit
             if not chunks and not tavily_client:
                 print("▶ CHUNKS: 0 — hybrid search returned no results, Tavily unavailable")
+                no_result_answer = "לא נמצאו קטעים רלוונטיים במסמך לשאלה זו. נסה לנסח אחרת."
+                _save_ai_message(session_id, no_result_answer)
                 payload = json.dumps({
                     "type": "result",
-                    "answer": "לא נמצאו קטעים רלוונטיים במסמך לשאלה זו. נסה לנסח אחרת.",
+                    "answer": no_result_answer,
                     "sources": [],
                     "chunks_used": 0,
                     "searched_web": False,
                     "web_sources": [],
+                    "session_id": session_id,
                 }, ensure_ascii=False)
                 yield f"data: {payload}\n\n"
                 return
 
-            # ── LOG 3: retrieved chunks ───────────────────────────────────────
             print(f"▶ CHUNKS RETRIEVED: {len(chunks)}")
             for i, (chunk, meta) in enumerate(zip(chunks, metadatas)):
                 print(f"  [{i}] {meta.get('source')!r} chunk#{meta.get('chunk_index')} "
                       f"| {chunk[:80]!r}...")
-            # ─────────────────────────────────────────────────────────────────
 
             context_blocks = (
                 [
@@ -411,11 +572,9 @@ def ask():
             context = "\n\n".join(context_blocks)
             sources = sorted({m.get("source", "Unknown") for m in metadatas}) if metadatas else []
 
-            # ── LOG 4: context stats + preview ───────────────────────────────
             print(f"\n▶ CONTEXT: {len(chunks)} chunks · {len(context):,} chars total")
             print(f"  preview → {context[:200]!r}")
             print()
-            # ─────────────────────────────────────────────────────────────────
 
             web_search_instruction = ""
             if tavily_client:
@@ -423,16 +582,37 @@ def ask():
                     "\n\nWEB SEARCH: You have a search_web tool. "
                     "Use it when the PDF context is insufficient, the question asks about "
                     "current events or real-world facts, or the user requests external info. "
-                    "Do NOT use it when the PDF context already answers the question. "
-                    "Cite PDF sources as (מקור: filename) and web sources as (מקור: title)."
+                    "Do NOT use it when the PDF context already answers the question.\n"
+                    "CITATION RULES FOR WEB SOURCES — CRITICAL:\n"
+                    "  • NEVER paste a raw URL (e.g., https://example.com) anywhere in your response.\n"
+                    "  • Always embed web citations as a Markdown link with a short, human-readable "
+                    "label of 2–4 words: [Label](URL). "
+                    "Good examples: [Wikipedia – Recursion](https://en.wikipedia.org/wiki/Recursion), "
+                    "[BBC News](https://www.bbc.com/news/article123).\n"
+                    "  • Place these links naturally inside your sentences — the UI renders them as "
+                    "beautiful clickable chips so they must be proper Markdown, not bare URLs.\n"
+                    "  • Cite PDF excerpts as (מקור: filename) as usual."
                 )
 
+            code_interpreter_instruction = (
+                "\n\nCODE INTERPRETER: You have a code_interpreter tool that executes Python. "
+                "Use it proactively when the user asks for: complex calculations, physics or "
+                "engineering simulations, numerical analysis, statistics, or any graph/plot. "
+                "Write clean, commented Python. Use print() for every result. "
+                "After the tool returns, synthesise the output naturally in your answer — "
+                "do not dump raw numbers; explain what they mean."
+            )
+
             system_prompt = (
-                "You are a helpful assistant for Levy AI, serving Hebrew-speaking university students. "
-                "For conversational questions (greetings, small talk) respond naturally in Hebrew. "
-                "For factual or document questions, answer based on the provided context. "
-                "Cite which document each claim comes from."
+                "You are a scientist, engineer, and knowledgeable assistant for Levy AI, "
+                "serving Hebrew-speaking university students. "
+                "For conversational questions respond naturally in Hebrew. "
+                "For factual or document questions, answer based on the provided context and "
+                "cite which document each claim comes from. "
+                "CRITICAL URL RULE: NEVER output a bare https:// or http:// URL. "
+                "Any web reference must be a Markdown link [Short Label](URL) — never a raw address."
                 + web_search_instruction
+                + code_interpreter_instruction
             )
 
             # Document context is injected ONLY into the current user turn (fresh RAG).
@@ -452,34 +632,35 @@ def ask():
                 + [{"role": "user", "content": current_user_message}]
             )
 
-            # ── LOG 5: LLM messages summary ──────────────────────────────────
             print(f"▶ LLM MESSAGES: {len(messages_for_llm)} total  "
                   f"(1 system + {len(trimmed_history)} history + 1 current)")
             for m in messages_for_llm:
                 preview = (m.get("content") or "")[:70].replace("\n", " ")
                 print(f"  [{m['role']}] {preview!r}...")
             print()
-            # ─────────────────────────────────────────────────────────────────
+
+            tools_list: list[dict] = [CODE_INTERPRETER_TOOL]
+            if tavily_client:
+                tools_list.append(SEARCH_TOOL)
 
             call_kwargs: dict = {
                 "model": "gpt-4o-mini",
                 "messages": messages_for_llm,
+                "tools": tools_list,
+                "tool_choice": "auto",
                 "temperature": 0,
             }
-            if tavily_client:
-                call_kwargs["tools"] = [SEARCH_TOOL]
-                call_kwargs["tool_choice"] = "auto"
 
             first_resp = client.chat.completions.create(**call_kwargs)
             assistant_msg = first_resp.choices[0].message
 
             web_results: list[dict] = []
             searched_web = False
+            executed_code: str = ""
+            code_output: str = ""
+            all_images: list[str] = []
 
-            if assistant_msg.tool_calls and tavily_client:
-                searched_web = True
-                yield f"data: {json.dumps({'type': 'status', 'phase': 'searching_web'})}\n\n"
-
+            if assistant_msg.tool_calls:
                 tool_calls_dict = [
                     {
                         "id": tc.id,
@@ -496,30 +677,59 @@ def ask():
                 }]
 
                 for tc, tc_dict in zip(assistant_msg.tool_calls, tool_calls_dict):
-                    if tc.function.name != "search_web":
-                        continue
-                    try:
-                        args = json.loads(tc.function.arguments)
-                        query_str = args.get("query", "")
-                        print(f"[Tavily] searching: {query_str!r}")
-                        search_resp = tavily_client.search(query_str, max_results=5)
-                        results = search_resp.get("results", [])
-                        web_results.extend(results)
-                        tool_content = json.dumps(
-                            [
-                                {
-                                    "title": r.get("title", ""),
-                                    "url": r.get("url", ""),
-                                    "content": r.get("content", ""),
-                                }
-                                for r in results
-                            ],
-                            ensure_ascii=False,
-                        )
-                        print(f"[Tavily] {len(results)} result(s) returned")
-                    except Exception as exc:
-                        print(f"[Tavily] search error: {exc}")
-                        tool_content = json.dumps({"error": str(exc)})
+                    tool_content: str
+
+                    # ── code_interpreter ─────────────────────────────────────
+                    if tc.function.name == "code_interpreter":
+                        yield f"data: {json.dumps({'type': 'status', 'phase': 'running_code'})}\n\n"
+                        try:
+                            args = json.loads(tc.function.arguments)
+                            code_str: str = args.get("code", "")
+                            executed_code = code_str
+                            print(f"[CodeInterpreter] executing {len(code_str)} chars of code")
+                            exec_result = execute_python_code(code_str)
+                            code_output = exec_result["output"]
+                            if exec_result.get("error"):
+                                code_output += f"\n[Error]:\n{exec_result['error']}"
+                            all_images.extend(exec_result.get("images", []))
+                            parts = []
+                            if exec_result["output"]:
+                                parts.append(f"STDOUT:\n{exec_result['output']}")
+                            if exec_result.get("error"):
+                                parts.append(f"ERROR:\n{exec_result['error']}")
+                            if exec_result.get("images"):
+                                n = len(exec_result["images"])
+                                parts.append(f"[{n} matplotlib figure(s) rendered and shown to the user]")
+                            tool_content = "\n\n".join(parts) if parts else "(code ran — no output)"
+                            print(f"[CodeInterpreter] stdout={len(exec_result['output'])} chars, "
+                                  f"images={len(exec_result.get('images', []))}")
+                        except Exception as exc:
+                            print(f"[CodeInterpreter] error: {exc}")
+                            tool_content = json.dumps({"error": str(exc)})
+
+                    # ── search_web ────────────────────────────────────────────
+                    elif tc.function.name == "search_web" and tavily_client:
+                        searched_web = True
+                        yield f"data: {json.dumps({'type': 'status', 'phase': 'searching_web'})}\n\n"
+                        try:
+                            args = json.loads(tc.function.arguments)
+                            query_str = args.get("query", "")
+                            print(f"[Tavily] searching: {query_str!r}")
+                            search_resp = tavily_client.search(query_str, max_results=5)
+                            results = search_resp.get("results", [])
+                            web_results.extend(results)
+                            tool_content = json.dumps(
+                                [{"title": r.get("title", ""), "url": r.get("url", ""),
+                                  "content": r.get("content", "")} for r in results],
+                                ensure_ascii=False,
+                            )
+                            print(f"[Tavily] {len(results)} result(s) returned")
+                        except Exception as exc:
+                            print(f"[Tavily] search error: {exc}")
+                            tool_content = json.dumps({"error": str(exc)})
+
+                    else:
+                        tool_content = json.dumps({"error": f"unknown tool: {tc.function.name}"})
 
                     messages_with_tools.append({
                         "role": "tool",
@@ -541,6 +751,9 @@ def ask():
                 for r in web_results
             ]
 
+            # Persist AI response before streaming the result to the client.
+            _save_ai_message(session_id, answer or "")
+
             payload = json.dumps({
                 "type": "result",
                 "answer": answer,
@@ -548,6 +761,10 @@ def ask():
                 "chunks_used": len(chunks),
                 "searched_web": searched_web,
                 "web_sources": web_sources,
+                "session_id": session_id,
+                "executed_code": executed_code,
+                "code_output": code_output,
+                "images": all_images,
             }, ensure_ascii=False)
             yield f"data: {payload}\n\n"
 
@@ -581,6 +798,79 @@ def list_documents():
         "documents":    [{"name": name, "chunks": count} for name, count in sorted(sources.items())],
         "total_chunks": total,
     }), 200
+
+
+@app.route("/sessions", methods=["GET"])
+def list_sessions():
+    """Return all chat sessions ordered by most-recently updated."""
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(ChatSession, sql_func.count(ChatMessage.id).label("message_count"))
+            .outerjoin(ChatMessage, ChatSession.id == ChatMessage.session_id)
+            .group_by(ChatSession.id)
+            .order_by(ChatSession.updated_at.desc())
+            .all()
+        )
+        return jsonify({
+            "sessions": [
+                {
+                    "id": row.ChatSession.id,
+                    "title": row.ChatSession.title,
+                    "created_at": row.ChatSession.created_at.isoformat(),
+                    "updated_at": row.ChatSession.updated_at.isoformat(),
+                    "message_count": row.message_count,
+                }
+                for row in rows
+            ]
+        }), 200
+    finally:
+        db.close()
+
+
+@app.route("/sessions/<int:session_id>", methods=["GET"])
+def get_session(session_id: int):
+    """Return all messages for a given session."""
+    db = SessionLocal()
+    try:
+        chat_session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+        if not chat_session:
+            return jsonify({"error": "session not found"}), 404
+        return jsonify({
+            "session": {
+                "id": chat_session.id,
+                "title": chat_session.title,
+                "created_at": chat_session.created_at.isoformat(),
+                "updated_at": chat_session.updated_at.isoformat(),
+            },
+            "messages": [
+                {
+                    "id": m.id,
+                    "session_id": m.session_id,
+                    "role": m.role,
+                    "content": m.content,
+                    "created_at": m.created_at.isoformat(),
+                }
+                for m in chat_session.messages
+            ],
+        }), 200
+    finally:
+        db.close()
+
+
+@app.route("/sessions/<int:session_id>", methods=["DELETE"])
+def delete_session(session_id: int):
+    """Delete a session and all its messages (cascade)."""
+    db = SessionLocal()
+    try:
+        chat_session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+        if not chat_session:
+            return jsonify({"error": "session not found"}), 404
+        db.delete(chat_session)
+        db.commit()
+        return jsonify({"message": "session deleted"}), 200
+    finally:
+        db.close()
 
 
 @app.route("/generate-paper", methods=["POST"])
