@@ -4,21 +4,63 @@
   --font-sans: var(--font-heebo);
 }
 
-body {
-  background-color: #f8fafc; /* slate-50 */
+/* ── Neon keyframe animations ───────────────────────────────────────────── */
+@keyframes neon-pulse {
+  0%, 100% {
+    box-shadow: 0 0 8px rgba(0,212,255,0.35), 0 0 18px rgba(0,212,255,0.15);
+  }
+  50% {
+    box-shadow: 0 0 18px rgba(0,212,255,0.65), 0 0 36px rgba(0,212,255,0.35), 0 0 60px rgba(0,212,255,0.12);
+  }
 }
 
-/* slim, unobtrusive scrollbar */
-::-webkit-scrollbar {
-  width: 5px;
+@keyframes purple-neon-pulse {
+  0%, 100% {
+    box-shadow: 0 0 8px rgba(139,92,246,0.3), 0 0 16px rgba(139,92,246,0.12);
+  }
+  50% {
+    box-shadow: 0 0 16px rgba(139,92,246,0.6), 0 0 32px rgba(139,92,246,0.25);
+  }
 }
-::-webkit-scrollbar-track {
-  background: transparent;
+
+@keyframes neon-dot {
+  0%, 80%, 100% { transform: scale(0.75); opacity: 0.35; }
+  40%           { transform: scale(1.15); opacity: 1; }
 }
+
+@keyframes neon-spin-border {
+  from { border-color: rgba(0,212,255,0.6) rgba(0,212,255,0.1) rgba(0,212,255,0.1) rgba(0,212,255,0.1); }
+  to   { border-color: rgba(0,212,255,0.1) rgba(0,212,255,0.1) rgba(0,212,255,0.1) rgba(0,212,255,0.6); }
+}
+
+/* ── Custom utilities ───────────────────────────────────────────────────── */
+@layer utilities {
+  .animate-neon-pulse   { animation: neon-pulse 2.2s ease-in-out infinite; }
+  .animate-purple-pulse { animation: purple-neon-pulse 2.2s ease-in-out infinite; }
+  .animate-neon-dot     { animation: neon-dot 1.4s ease-in-out infinite; }
+
+  /* Neon glow box-shadow helpers — applied via class, not animation */
+  .neon-glow-sm  { box-shadow: 0 0 8px rgba(0,212,255,0.4), 0 0 18px rgba(0,212,255,0.15); }
+  .neon-glow-md  { box-shadow: 0 0 15px rgba(0,212,255,0.5), 0 0 30px rgba(0,212,255,0.2); }
+  .neon-glow-lg  { box-shadow: 0 0 25px rgba(0,212,255,0.6), 0 0 50px rgba(0,212,255,0.25), 0 0 80px rgba(0,212,255,0.08); }
+  .purple-glow-sm { box-shadow: 0 0 8px rgba(139,92,246,0.4), 0 0 18px rgba(139,92,246,0.15); }
+
+  /* Neon text glow */
+  .text-neon-glow   { text-shadow: 0 0 12px rgba(0,212,255,0.7), 0 0 28px rgba(0,212,255,0.35); }
+  .text-purple-glow { text-shadow: 0 0 12px rgba(139,92,246,0.7), 0 0 28px rgba(139,92,246,0.35); }
+}
+
+/* ── Base ───────────────────────────────────────────────────────────────── */
+body {
+  background-color: #060b18;
+  color: #e2e8f0;
+}
+
+/* ── Neon scrollbar ─────────────────────────────────────────────────────── */
+::-webkit-scrollbar       { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: #1e2d4a;
   border-radius: 99px;
 }
-::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
-}
+::-webkit-scrollbar-thumb:hover { background: rgba(0,212,255,0.3); }

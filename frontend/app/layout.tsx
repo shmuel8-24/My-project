@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Heebo } from "next/font/google";
 import "./globals.css";
+import "katex/dist/katex.min.css";
 
 const heebo = Heebo({
   subsets: ["hebrew", "latin"],
@@ -9,8 +10,8 @@ const heebo = Heebo({
 });
 
 export const metadata: Metadata = {
-  title: "Levy AI – עוזר הסטודנט החכם",
-  description: "פלטפורמת AI לסטודנטים – ניתוח מסמכים ושאלות-תשובות",
+  title: "U-Note – שותף המחקר החכם שלך",
+  description: "פלטפורמת AI אקדמית – ניתוח מסמכים, שאלות-תשובות וכתיבה מדעית",
 };
 
 export default function RootLayout({

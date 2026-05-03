@@ -2,10 +2,45 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import type { KeyboardEvent, ChangeEvent } from 'react';
+import { useRouter } from 'next/navigation';
 import { useDropzone } from 'react-dropzone';
 import type { FileRejection } from 'react-dropzone';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+
+const API = 'http://127.0.0.1:5003';
+
+/* ─── Auth helpers ───────────────────────────────────────────────────────────── */
+function getToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem('levy_ai_token');
+}
+
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(b64));
+  } catch { return null; }
+}
+
+async function authFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const token = getToken();
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...((init.headers as Record<string, string>) ?? {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  if (res.status === 401) {
+    localStorage.removeItem('levy_ai_token');
+    localStorage.removeItem('levy_ai_email');
+    window.location.href = '/login';
+  }
+  return res;
+}
 
 /* ─── Types ─────────────────────────────────────────────────────────────────── */
 interface Message {
@@ -29,6 +64,8 @@ interface UploadedFile {
   name: string;
   size: number;
   chunks: number;
+  fileType: 'pdf' | 'pptx' | 'image';
+  previewUrl?: string;
 }
 
 interface ChatSession {
@@ -44,7 +81,7 @@ type Lang = 'he' | 'en';
 /* ─── Translations ──────────────────────────────────────────────────────────── */
 const translations = {
   he: {
-    subtitle: 'עוזר הסטודנט החכם',
+    subtitle: 'שותף המחקר החכם שלך',
     docLoaded: 'מסמך טעון',
     waiting: 'ממתין',
     langLabel: 'EN',
@@ -54,14 +91,15 @@ const translations = {
     noPrevChats: 'אין שיחות קודמות',
     deleteChat: 'מחק שיחה',
     uploadDocs: 'העלאת מסמכים',
-    pdfOnly: 'PDF בלבד · עד 50 MB לקובץ',
+    pdfOnly: 'PDF · PPTX · תמונות · עד 50 MB לקובץ',
     dropHere: 'שחרר כאן!',
-    dragDrop: 'גרור ושחרר קבצי PDF',
-    dragHint: 'ניתן לגרור מספר קבצים בו-זמנית · או לחץ לבחירה ידנית',
-    pdfBadge: 'PDF · עד 50 MB לקובץ',
-    addMore: 'הוסף עוד קבצי PDF',
+    dragDrop: 'גרור ושחרר קבצים',
+    dragHint: 'PDF, PPTX, תמונות · ניתן לגרור מספר קבצים · או לחץ לבחירה ידנית',
+    pdfBadge: 'PDF · PPTX · PNG / JPG · עד 50 MB',
+    addMore: 'הוסף עוד קבצים',
     uploading: 'מעלה...',
     chunksLabel: (n: number) => `${n} קטעים · הועלה בהצלחה`,
+    imageUploaded: 'תמונה הועלתה בהצלחה',
     removeFile: 'הסר קובץ',
     howToUse: 'איך להשתמש?',
     tips: [
@@ -70,10 +108,10 @@ const translations = {
       'קבל סיכומים, הסברים ודוגמאות ממוקדות',
       'חזור על הכל בקלות לפני המבחן',
     ],
-    rejectionErr: (n: number) => `${n} קבצ${n === 1 ? '' : 'ים'} נדח${n === 1 ? '' : 'ו'} — יש לבחור קבצי PDF בלבד.`,
+    rejectionErr: (n: number) => `${n} קבצ${n === 1 ? '' : 'ים'} נדח${n === 1 ? '' : 'ו'} — ניתן להעלות PDF, PPTX, PNG, JPG בלבד.`,
     uploadErr: 'שגיאה בהעלאת הקבצים.',
     serverErr: 'לא ניתן להתחבר לשרת. בדוק שה-backend פועל על פורט 5003.',
-    chatTitle: 'שיחה עם המסמך',
+    chatTitle: 'Workspace',
     docReady: 'מסמך מוכן – ניתן לשאול שאלות',
     waitingPdf: 'ממתין לקובץ PDF',
     askQ: 'שאל שאלה על המסמך',
@@ -83,10 +121,13 @@ const translations = {
     suggestions: ['סכם את המסמך בקצרה', 'מה הנקודות העיקריות?', 'הסבר את הנושא הראשון', 'תן לי שאלות לתרגול'],
     webSourcesLabel: 'מקורות',
     webSearched: 'שילב חיפוש ברשת',
+    showSources: (n: number) => `${n} מקורות`,
+    hideSources: 'הסתר',
     searchingWeb: 'מחפש ברשת...',
     runningCode: 'מריץ קוד Python...',
     seeCode: 'הצג קוד',
     hideCode: 'הסתר קוד',
+    codeOutputLabel: 'פלט',
     chatPlaceholder: 'שאל שאלה על המסמך...',
     chatPlaceholderNoDoc: 'יש להעלות קובץ תחילה',
     send: 'שלח',
@@ -95,6 +136,7 @@ const translations = {
     paperTitle: 'כתיבה אקדמית',
     paperSubtitle: 'כתוב מאמר מבוסס המסמכים שהועלו',
     downloadPdf: 'הורד PDF',
+    downloadWord: 'הורד Word',
     exporting: 'מייצא...',
     topicChips: ['סיכום הנושאים המרכזיים', 'השוואת גישות ורעיונות', 'ביקורת ספרות', 'ניתוח מושגי מפתח'],
     enterTopic: 'הזן נושא ולחץ על "חבר מאמר"',
@@ -111,12 +153,18 @@ const translations = {
     composePaper: 'חבר מאמר',
     writingBtn: 'כותב מאמר...',
     exportErr: 'שגיאה בייצוא ה-PDF',
-    tabChat: 'שיחה עם המסמך',
+    wordErr: 'שגיאה בייצוא Word',
+    tabChat: 'Workspace',
     tabPaper: 'כתיבה אקדמית',
-    footer: 'Levy AI · מופעל על ידי OpenAI ו-Flask',
+    footer: 'U-Note · מופעל על ידי OpenAI ו-Flask',
+    logout: 'יציאה',
+    navNotes: 'Notes',
+    navWorkspace: 'Workspace',
+    navInsights: 'Insights',
+    navAdmin: 'Admin',
   },
   en: {
-    subtitle: 'Smart Student Assistant',
+    subtitle: 'Your Academic Sidekick',
     docLoaded: 'Document Loaded',
     waiting: 'Waiting',
     langLabel: 'HE',
@@ -126,14 +174,15 @@ const translations = {
     noPrevChats: 'No previous chats',
     deleteChat: 'Delete chat',
     uploadDocs: 'Upload Documents',
-    pdfOnly: 'PDF only · Up to 50 MB per file',
+    pdfOnly: 'PDF · PPTX · Images · Up to 50 MB per file',
     dropHere: 'Drop here!',
-    dragDrop: 'Drag & drop PDF files',
-    dragHint: 'Drag multiple files at once · or click to select manually',
-    pdfBadge: 'PDF · Up to 50 MB per file',
-    addMore: 'Add more PDF files',
+    dragDrop: 'Drag & drop files',
+    dragHint: 'PDF, PPTX, images · multiple files at once · or click to select',
+    pdfBadge: 'PDF · PPTX · PNG / JPG · Up to 50 MB',
+    addMore: 'Add more files',
     uploading: 'Uploading...',
     chunksLabel: (n: number) => `${n} chunks · Uploaded successfully`,
+    imageUploaded: 'Image uploaded successfully',
     removeFile: 'Remove file',
     howToUse: 'How to use?',
     tips: [
@@ -142,10 +191,10 @@ const translations = {
       'Get focused summaries, explanations, and examples',
       'Review everything easily before the exam',
     ],
-    rejectionErr: (n: number) => `${n} file${n === 1 ? '' : 's'} rejected — only PDF files are allowed.`,
+    rejectionErr: (n: number) => `${n} file${n === 1 ? '' : 's'} rejected — only PDF, PPTX, PNG, and JPG are allowed.`,
     uploadErr: 'Error uploading files.',
     serverErr: 'Cannot connect to server. Check that the backend is running on port 5003.',
-    chatTitle: 'Chat with Document',
+    chatTitle: 'Workspace',
     docReady: 'Document ready – you can ask questions',
     waitingPdf: 'Waiting for PDF file',
     askQ: 'Ask a question about the document',
@@ -155,10 +204,13 @@ const translations = {
     suggestions: ['Summarize the document briefly', 'What are the main points?', 'Explain the first topic', 'Give me practice questions'],
     webSourcesLabel: 'Sources',
     webSearched: 'Included web search',
+    showSources: (n: number) => `${n} sources`,
+    hideSources: 'Hide',
     searchingWeb: 'Searching the web...',
     runningCode: 'Running Python code...',
     seeCode: 'See the code',
     hideCode: 'Hide the code',
+    codeOutputLabel: 'Output',
     chatPlaceholder: 'Ask a question about the document...',
     chatPlaceholderNoDoc: 'Please upload a file first',
     send: 'Send',
@@ -167,6 +219,7 @@ const translations = {
     paperTitle: 'Academic Writing',
     paperSubtitle: 'Write a paper based on uploaded documents',
     downloadPdf: 'Download PDF',
+    downloadWord: 'Download Word',
     exporting: 'Exporting...',
     topicChips: ['Summary of main topics', 'Comparison of approaches', 'Literature review', 'Analysis of key concepts'],
     enterTopic: 'Enter a topic and click "Compose Paper"',
@@ -183,13 +236,35 @@ const translations = {
     composePaper: 'Compose Paper',
     writingBtn: 'Writing paper...',
     exportErr: 'Error exporting PDF',
-    tabChat: 'Chat with Document',
+    wordErr: 'Error exporting Word',
+    tabChat: 'Workspace',
     tabPaper: 'Academic Writing',
-    footer: 'Levy AI · Powered by OpenAI and Flask',
+    footer: 'U-Note · Powered by OpenAI and Flask',
+    logout: 'Logout',
+    navNotes: 'Notes',
+    navWorkspace: 'Workspace',
+    navInsights: 'Insights',
+    navAdmin: 'Admin',
   },
 };
 
 type T = typeof translations.he;
+
+/* ─── U-Note Logo mark ──────────────────────────────────────────────────────── */
+function LogoMark({ size = 36 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 52 52" fill="none" aria-hidden="true">
+      <rect width="52" height="52" rx="14" fill="#060b18"/>
+      <rect width="52" height="52" rx="14" fill="none" stroke="rgba(0,212,255,0.4)" strokeWidth="1.5"/>
+      <rect x="18" y="4" width="16" height="9" rx="3" fill="#00d4ff"/>
+      <rect x="6" y="11" width="40" height="3.5" rx="1.75" fill="#00d4ff"/>
+      <line x1="39" y1="14" x2="44" y2="23" stroke="#8b5cf6" strokeWidth="2" strokeLinecap="round"/>
+      <circle cx="44" cy="25.5" r="3" fill="#8b5cf6"/>
+      <path d="M13 15 L13 33 Q13 43 26 43 Q39 43 39 33 L39 15"
+            stroke="#00d4ff" strokeWidth="4.5" strokeLinecap="round" fill="none"/>
+    </svg>
+  );
+}
 
 /* ─── Inline SVG icons ──────────────────────────────────────────────────────── */
 function IconCloud({ className }: { className?: string }) {
@@ -200,16 +275,14 @@ function IconCloud({ className }: { className?: string }) {
     </svg>
   );
 }
-
 function IconDoc({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
       <path strokeLinecap="round" strokeLinejoin="round"
-        d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+        d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
     </svg>
   );
 }
-
 function IconCheck({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -217,7 +290,6 @@ function IconCheck({ className }: { className?: string }) {
     </svg>
   );
 }
-
 function IconX({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -225,7 +297,6 @@ function IconX({ className }: { className?: string }) {
     </svg>
   );
 }
-
 function IconSend({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -234,7 +305,6 @@ function IconSend({ className }: { className?: string }) {
     </svg>
   );
 }
-
 function IconPen({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -243,7 +313,6 @@ function IconPen({ className }: { className?: string }) {
     </svg>
   );
 }
-
 function IconDownload({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -252,7 +321,6 @@ function IconDownload({ className }: { className?: string }) {
     </svg>
   );
 }
-
 function IconSparkles({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -261,7 +329,6 @@ function IconSparkles({ className }: { className?: string }) {
     </svg>
   );
 }
-
 function IconGlobe({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -270,7 +337,6 @@ function IconGlobe({ className }: { className?: string }) {
     </svg>
   );
 }
-
 function IconPlus({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -278,7 +344,6 @@ function IconPlus({ className }: { className?: string }) {
     </svg>
   );
 }
-
 function IconMenu({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -286,7 +351,6 @@ function IconMenu({ className }: { className?: string }) {
     </svg>
   );
 }
-
 function IconCode({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
@@ -294,46 +358,98 @@ function IconCode({ className }: { className?: string }) {
     </svg>
   );
 }
+function IconPresentation({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round"
+        d="M3.75 3v11.25A2.25 2.25 0 0 0 6 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0 1 18 16.5h-2.25m-7.5 0h7.5m-7.5 0-1 3m8.5-3 1 3m0 0 .5 1.5m-.5-1.5h-9.5m0 0-.5 1.5M9 11.25v1.5M12 9v3.75m3-6.75v6.75" />
+    </svg>
+  );
+}
+function IconPhoto({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round"
+        d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
+    </svg>
+  );
+}
+function IconWord({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round"
+        d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+    </svg>
+  );
+}
+function IconShield({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round"
+        d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
+    </svg>
+  );
+}
 
 /* ─── Helpers ───────────────────────────────────────────────────────────────── */
 function getDomain(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '');
-  } catch {
-    return url;
-  }
+  try { return new URL(url).hostname.replace(/^www\./, ''); }
+  catch { return url; }
 }
 
-/* ─── Code interpreter UI helpers ───────────────────────────────────────────── */
-function CodeToggle({ code, t }: { code: string; t: T }) {
-  const [open, setOpen] = useState(false);
+function preprocessMath(content: string): string {
+  return content
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_m, eq) => `$$${eq}$$`)
+    .replace(/\\\(([\s\S]*?)\\\)/g, (_m, eq) => `$${eq}$`);
+}
+
+/* ─── Code interpreter result block ─────────────────────────────────────────── */
+function CodeExecutionBlock({ code, output, images, t }: {
+  code?: string; output?: string; images?: string[]; t: T;
+}) {
+  const [showCode, setShowCode] = useState(false);
+  const hasCode   = !!(code   && code.trim());
+  const hasOutput = !!(output && output.trim());
+  const hasImages = !!(images && images.length > 0);
+
   return (
-    <div className="mt-1.5">
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-700 text-xs font-medium transition-colors"
-      >
-        <IconCode className="w-3.5 h-3.5 shrink-0" />
-        {open ? t.hideCode : t.seeCode}
-      </button>
-      {open && (
-        <pre className="mt-2 p-4 bg-slate-900 text-emerald-300 text-[11px] font-mono rounded-xl overflow-x-auto leading-relaxed border border-slate-700 whitespace-pre">
+    <div dir="ltr" className="mt-2 rounded-xl overflow-hidden border border-[#1e2d4a] text-left text-sm">
+      <div className="flex items-center gap-2 px-3 py-1.5 bg-[#080e1f]">
+        <IconCode className="w-3.5 h-3.5 text-[#8b5cf6] shrink-0" />
+        <span className="flex-1 text-[11px] font-mono font-medium text-slate-400">Python</span>
+        {hasCode && (
+          <button onClick={() => setShowCode(s => !s)}
+            className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#1e2d4a] hover:bg-[#2a3f60] text-slate-300 text-[11px] font-medium transition-colors">
+            {showCode ? t.hideCode : t.seeCode}
+          </button>
+        )}
+      </div>
+      {showCode && hasCode && (
+        <pre className="m-0 p-4 bg-[#060b18] text-emerald-300 text-[11px] font-mono overflow-x-auto leading-relaxed whitespace-pre border-b border-[#1e2d4a]">
           {code}
         </pre>
+      )}
+      {hasOutput && (
+        <div className="px-4 py-3 bg-[#060b18] border-t border-[#1e2d4a] font-mono text-[12px] leading-relaxed whitespace-pre-wrap">
+          <span className="text-slate-600 text-[9px] uppercase tracking-widest block mb-1.5 select-none">{t.codeOutputLabel}</span>
+          <span className="text-slate-300">{output}</span>
+        </div>
+      )}
+      {hasImages && (
+        <div className="bg-[#0d1424] border-t border-[#1e2d4a] p-3 flex flex-col gap-2">
+          {images!.map((b64, i) => (
+            <img key={i} src={`data:image/png;base64,${b64}`} alt={`Chart ${i + 1}`}
+              className="w-full h-auto rounded-lg block" style={{ maxWidth: 480 }} />
+          ))}
+        </div>
       )}
     </div>
   );
 }
 
 /* ─── PDF Uploader ──────────────────────────────────────────────────────────── */
-function PdfUploader({
-  onUpload,
-  onRemove,
-  t,
-}: {
-  onUpload: () => void;
-  onRemove: () => void;
-  t: T;
+function PdfUploader({ onUpload, onRemove, t }: {
+  onUpload: () => void; onRemove: () => void; t: T;
 }) {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -341,66 +457,61 @@ function PdfUploader({
 
   const onDrop = useCallback(
     async (accepted: File[], rejected: FileRejection[]) => {
-      const rejectionErrors: string[] = rejected.length
-        ? [t.rejectionErr(rejected.length)]
-        : [];
+      const rejectionErrors: string[] = rejected.length ? [t.rejectionErr(rejected.length)] : [];
+      if (!accepted.length) { setErrors(rejectionErrors); return; }
 
-      if (!accepted.length) {
-        setErrors(rejectionErrors);
-        return;
+      const previewMap: Record<string, string> = {};
+      for (const file of accepted) {
+        if (file.type.startsWith('image/')) previewMap[file.name] = URL.createObjectURL(file);
       }
 
-      setUploading(true);
-      setErrors([]);
-
+      setUploading(true); setErrors([]);
       try {
         const fd = new FormData();
         for (const file of accepted) fd.append('files', file);
-
-        const res = await fetch('http://127.0.0.1:5003/upload-pdf', { method: 'POST', body: fd });
+        const res  = await authFetch(`${API}/upload-pdf`, { method: 'POST', body: fd });
         const data = await res.json();
-
         if (!res.ok) {
-          setErrors([...rejectionErrors, data.error ?? t.uploadErr]);
-          return;
+          Object.values(previewMap).forEach(URL.revokeObjectURL);
+          setErrors([...rejectionErrors, data.error ?? t.uploadErr]); return;
         }
-
         if (data.files?.length) {
           const incoming: UploadedFile[] = data.files.map(
-            (f: { source: string; size: number; chunks_stored: number }) => ({
-              name: f.source,
-              size: f.size,
-              chunks: f.chunks_stored,
+            (f: { source: string; size: number; chunks_stored: number; type: string }) => ({
+              name: f.source, size: f.size, chunks: f.chunks_stored,
+              fileType: (f.type ?? 'pdf') as UploadedFile['fileType'],
+              previewUrl: previewMap[f.source],
             }),
           );
           setUploadedFiles(prev => {
             const next = [...prev];
             for (const nf of incoming) {
               const idx = next.findIndex(f => f.name === nf.name);
-              if (idx >= 0) next[idx] = nf;
+              if (idx >= 0) { if (next[idx].previewUrl) URL.revokeObjectURL(next[idx].previewUrl!); next[idx] = nf; }
               else next.push(nf);
             }
             return next;
           });
           onUpload();
         }
-
-        const serverErrors = (data.errors ?? []).map(
-          (e: { source: string; error: string }) => `${e.source}: ${e.error}`,
-        );
+        const serverErrors = (data.errors ?? []).map((e: { source: string; error: string }) => `${e.source}: ${e.error}`);
         setErrors([...rejectionErrors, ...serverErrors]);
       } catch {
+        Object.values(previewMap).forEach(URL.revokeObjectURL);
         setErrors([...rejectionErrors, t.serverErr]);
-      } finally {
-        setUploading(false);
-      }
+      } finally { setUploading(false); }
     },
     [onUpload, t],
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: { 'application/pdf': ['.pdf'] },
+    accept: {
+      'application/pdf': ['.pdf'],
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
+      'image/png':  ['.png'],
+      'image/jpeg': ['.jpg', '.jpeg'],
+    },
     disabled: uploading,
   });
 
@@ -408,139 +519,140 @@ function PdfUploader({
     b < 1_048_576 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1_048_576).toFixed(1)} MB`;
 
   const handleRemoveFile = (name: string) => {
-    setUploadedFiles(prev => {
-      const next = prev.filter(f => f.name !== name);
-      if (next.length === 0) onRemove();
-      return next;
-    });
+    const target = uploadedFiles.find(f => f.name === name);
+    if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+    const next = uploadedFiles.filter(f => f.name !== name);
+    setUploadedFiles(next);
+    if (next.length === 0) onRemove();
   };
 
   const hasFiles = uploadedFiles.length > 0;
 
   return (
     <div className="flex flex-col gap-4 h-full">
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 flex flex-col gap-5">
+      <div className="bg-[#0d1424] rounded-2xl border border-[#1e2d4a] p-6 flex flex-col gap-5">
 
         <div className="flex items-center gap-3">
-          <span className="w-9 h-9 bg-indigo-100 rounded-xl flex items-center justify-center shrink-0">
-            <IconDoc className="w-5 h-5 text-indigo-600" />
+          <span className="w-9 h-9 bg-[#00d4ff]/10 rounded-xl flex items-center justify-center shrink-0 border border-[#00d4ff]/20">
+            <IconDoc className="w-5 h-5 text-[#00d4ff]" />
           </span>
           <div>
-            <p className="font-semibold text-gray-900 text-sm leading-tight">{t.uploadDocs}</p>
-            <p className="text-xs text-gray-500">{t.pdfOnly}</p>
+            <p className="font-semibold text-slate-200 text-sm leading-tight">{t.uploadDocs}</p>
+            <p className="text-xs text-slate-500">{t.pdfOnly}</p>
           </div>
         </div>
 
         {hasFiles && (
           <div className="flex flex-col gap-2 max-h-48 overflow-y-auto">
-            {uploadedFiles.map(file => (
-              <div
-                key={file.name}
-                className="flex items-center gap-3 border border-emerald-200 bg-emerald-50 rounded-xl px-4 py-3"
-              >
-                <span className="w-8 h-8 bg-emerald-100 rounded-lg flex items-center justify-center shrink-0">
-                  <IconCheck className="w-5 h-5 text-emerald-600" />
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-emerald-900 text-xs truncate">{file.name}</p>
-                  <p className="text-xs text-emerald-600">{fmt(file.size)} · {t.chunksLabel(file.chunks)}</p>
+            {uploadedFiles.map(file => {
+              const isPptx  = file.fileType === 'pptx';
+              const isImage = file.fileType === 'image';
+              return (
+                <div key={file.name}
+                  className="flex items-center gap-3 border border-[#1e2d4a] bg-[#080e1f] rounded-xl px-4 py-3">
+                  {isImage && file.previewUrl ? (
+                    <img src={file.previewUrl} alt={file.name} className="w-8 h-8 rounded-lg object-cover shrink-0 border border-[#1e2d4a]" />
+                  ) : (
+                    <span className="w-8 h-8 bg-[#00d4ff]/10 rounded-lg flex items-center justify-center shrink-0 border border-[#00d4ff]/20">
+                      {isPptx  && <IconPresentation className="w-5 h-5 text-[#00d4ff]" />}
+                      {isImage && <IconPhoto        className="w-5 h-5 text-[#00d4ff]" />}
+                      {!isPptx && !isImage && <IconCheck className="w-5 h-5 text-emerald-400" />}
+                    </span>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-slate-300 text-xs truncate">{file.name}</p>
+                    <p className="text-xs text-slate-500">
+                      {fmt(file.size)} · {isImage ? t.imageUploaded : t.chunksLabel(file.chunks)}
+                    </p>
+                  </div>
+                  <button onClick={() => handleRemoveFile(file.name)} aria-label={t.removeFile}
+                    className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-red-500/20 transition-colors shrink-0">
+                    <IconX className="w-4 h-4 text-slate-500 hover:text-red-400" />
+                  </button>
                 </div>
-                <button
-                  onClick={() => handleRemoveFile(file.name)}
-                  aria-label={t.removeFile}
-                  className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-emerald-200 transition-colors shrink-0"
-                >
-                  <IconX className="w-4 h-4 text-emerald-700" />
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
         {!hasFiles ? (
-          <div
-            {...getRootProps()}
+          <div {...getRootProps()}
             className={[
               'rounded-2xl border-2 border-dashed flex flex-col items-center justify-center',
               'gap-4 min-h-52 cursor-pointer transition-all duration-200 px-6 py-10 text-center select-none',
               uploading
-                ? 'opacity-50 cursor-not-allowed border-indigo-300 bg-indigo-50/40'
+                ? 'opacity-50 cursor-not-allowed border-[#00d4ff]/20 bg-[#00d4ff]/5'
                 : isDragActive
-                  ? 'border-indigo-500 bg-indigo-100 scale-[1.015] shadow-lg shadow-indigo-100'
-                  : 'border-indigo-200 bg-gradient-to-b from-indigo-50/70 to-white hover:border-indigo-400 hover:bg-indigo-50/90',
-            ].join(' ')}
-          >
+                  ? 'border-[#00d4ff] bg-[#00d4ff]/10 scale-[1.01] shadow-[0_0_24px_rgba(0,212,255,0.15)]'
+                  : 'border-[#1e2d4a] hover:border-[#00d4ff]/50 hover:bg-[#00d4ff]/5',
+            ].join(' ')}>
             <input {...getInputProps()} />
-
             {uploading && (
               <>
-                <div className="w-12 h-12 rounded-full border-4 border-indigo-200 border-t-indigo-600 animate-spin" />
-                <p className="text-sm font-medium text-indigo-600">{t.uploading}</p>
+                <div className="w-12 h-12 rounded-full border-2 border-[#1e2d4a] border-t-[#00d4ff] animate-spin" />
+                <p className="text-sm font-medium text-[#00d4ff]">{t.uploading}</p>
               </>
             )}
-
             {!uploading && isDragActive && (
               <>
-                <div className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-300 animate-bounce">
-                  <IconCloud className="w-9 h-9 text-white" />
+                <div className="w-16 h-16 bg-[#00d4ff] rounded-2xl flex items-center justify-center animate-bounce neon-glow-md">
+                  <IconCloud className="w-9 h-9 text-[#060b18]" />
                 </div>
-                <p className="text-indigo-700 font-bold text-lg">{t.dropHere}</p>
+                <p className="text-[#00d4ff] font-bold text-lg">{t.dropHere}</p>
               </>
             )}
-
             {!uploading && !isDragActive && (
               <>
-                <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-200">
-                  <IconCloud className="w-9 h-9 text-white" />
+                <div className="w-16 h-16 bg-gradient-to-br from-[#00d4ff] to-[#0085ff] rounded-2xl flex items-center justify-center neon-glow-sm">
+                  <IconCloud className="w-9 h-9 text-[#060b18]" />
                 </div>
                 <div className="space-y-1">
-                  <p className="font-semibold text-gray-800">{t.dragDrop}</p>
-                  <p className="text-sm text-gray-400">{t.dragHint}</p>
+                  <p className="font-semibold text-slate-300">{t.dragDrop}</p>
+                  <p className="text-sm text-slate-600">{t.dragHint}</p>
                 </div>
-                <span className="px-3 py-1 bg-indigo-100 text-indigo-600 text-xs font-medium rounded-full">
+                <span className="px-3 py-1 bg-[#00d4ff]/10 border border-[#00d4ff]/20 text-[#00d4ff] text-xs font-medium rounded-full">
                   {t.pdfBadge}
                 </span>
               </>
             )}
           </div>
         ) : (
-          <div
-            {...getRootProps()}
+          <div {...getRootProps()}
             className={[
               'rounded-xl border-2 border-dashed flex items-center justify-center gap-3',
               'py-3 px-4 cursor-pointer transition-all duration-150 select-none',
               uploading
-                ? 'opacity-50 cursor-not-allowed border-indigo-200 bg-indigo-50/30'
+                ? 'opacity-50 cursor-not-allowed border-[#1e2d4a]'
                 : isDragActive
-                  ? 'border-indigo-500 bg-indigo-50'
-                  : 'border-indigo-200 hover:border-indigo-400 hover:bg-indigo-50/60',
-            ].join(' ')}
-          >
+                  ? 'border-[#00d4ff] bg-[#00d4ff]/10'
+                  : 'border-[#1e2d4a] hover:border-[#00d4ff]/40 hover:bg-[#00d4ff]/5',
+            ].join(' ')}>
             <input {...getInputProps()} />
             {uploading
-              ? <div className="w-4 h-4 rounded-full border-2 border-indigo-200 border-t-indigo-600 animate-spin" />
-              : <IconCloud className="w-4 h-4 text-indigo-400 shrink-0" />
+              ? <div className="w-4 h-4 rounded-full border-2 border-[#1e2d4a] border-t-[#00d4ff] animate-spin" />
+              : <IconCloud className="w-4 h-4 text-[#00d4ff]/60 shrink-0" />
             }
-            <span className="text-xs font-medium text-indigo-500">
+            <span className="text-xs font-medium text-[#00d4ff]/70">
               {uploading ? t.uploading : t.addMore}
             </span>
           </div>
         )}
 
         {errors.map((err, i) => (
-          <div key={i} className="flex items-center gap-2 bg-red-50 border border-red-100 text-red-600 rounded-xl px-4 py-3 text-sm">
+          <div key={i} className="flex items-center gap-2 bg-red-950/50 border border-red-500/30 text-red-400 rounded-xl px-4 py-3 text-sm">
             <IconX className="w-4 h-4 shrink-0" />
             {err}
           </div>
         ))}
       </div>
 
-      <div className="flex-1 bg-gradient-to-br from-violet-50 to-indigo-50 border border-violet-100 rounded-2xl p-5">
-        <p className="text-sm font-semibold text-violet-800 mb-3">{t.howToUse}</p>
+      {/* How to use panel */}
+      <div className="flex-1 bg-[#0d1424] border border-[#1e2d4a] rounded-2xl p-5">
+        <p className="text-sm font-semibold text-[#8b5cf6] mb-3">{t.howToUse}</p>
         <ul className="space-y-2.5">
           {t.tips.map((tip, i) => (
-            <li key={i} className="flex gap-2 items-start text-sm text-violet-700">
-              <span className="mt-2 w-1.5 h-1.5 rounded-full bg-violet-400 shrink-0" />
+            <li key={i} className="flex gap-2 items-start text-sm text-slate-400">
+              <span className="mt-2 w-1.5 h-1.5 rounded-full bg-[#8b5cf6]/60 shrink-0" />
               {tip}
             </li>
           ))}
@@ -567,160 +679,121 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [searchPhase, setSearchPhase] = useState<'thinking' | 'searching_web' | 'running_code'>('thinking');
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const [visibleSources, setVisibleSources] = useState<Set<string>>(new Set());
+  const bottomRef   = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, loading]);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading]);
 
-  const send = useCallback(
-    async (text?: string) => {
-      const q = (text ?? input).trim();
-      if (!q || loading || !hasDoc) return;
+  const send = useCallback(async (text?: string) => {
+    const q = (text ?? input).trim();
+    if (!q || loading || !hasDoc) return;
+    const userMsg: Message = { id: `u${Date.now()}`, role: 'user', content: q };
+    setMessages(prev => [...prev, userMsg]);
+    setInput(''); setLoading(true); setSearchPhase('thinking');
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
-      const userMsg: Message = { id: `u${Date.now()}`, role: 'user', content: q };
-      setMessages(prev => [...prev, userMsg]);
-      setInput('');
-      setLoading(true);
-      setSearchPhase('thinking');
-      if (textareaRef.current) textareaRef.current.style.height = 'auto';
+    try {
+      const payload  = { message: q, session_id: localSessionId };
+      const response = await authFetch(`${API}/ask`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error ?? t.commErr);
+      }
+      if (!response.body) throw new Error('No response body');
 
-      try {
-        const payload = { message: q, session_id: localSessionId };
-        const response = await fetch('http://127.0.0.1:5003/ask', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
+      const reader  = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '', done = false;
 
-        if (!response.ok) {
-          const errData = await response.json();
-          throw new Error(errData.error ?? t.commErr);
-        }
-
-        if (!response.body) throw new Error('No response body');
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let done = false;
-
-        while (!done) {
-          const { done: streamDone, value } = await reader.read();
-          if (streamDone) break;
-          buffer += decoder.decode(value, { stream: true });
-
-          const lines = buffer.split('\n');
-          buffer = lines.pop() ?? '';
-
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            let parsed: SseEvent;
-            try {
-              parsed = JSON.parse(line.slice(6)) as SseEvent;
-            } catch {
-              continue;
+      while (!done) {
+        const { done: streamDone, value } = await reader.read();
+        if (streamDone) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          let parsed: SseEvent;
+          try { parsed = JSON.parse(line.slice(6)) as SseEvent; }
+          catch { continue; }
+          if (parsed.type === 'status') {
+            setSearchPhase(parsed.phase as 'thinking' | 'searching_web' | 'running_code');
+          } else if (parsed.type === 'result') {
+            if (!localSessionId && parsed.session_id) {
+              setLocalSessionId(parsed.session_id);
+              onSessionCreated(parsed.session_id);
             }
-
-            if (parsed.type === 'status') {
-              setSearchPhase(parsed.phase as 'thinking' | 'searching_web' | 'running_code');
-            } else if (parsed.type === 'result') {
-              if (!localSessionId && parsed.session_id) {
-                setLocalSessionId(parsed.session_id);
-                onSessionCreated(parsed.session_id);
-              }
-              onSessionsUpdated();
-              setMessages(prev => [
-                ...prev,
-                {
-                  id: `a${Date.now()}`,
-                  role: 'assistant',
-                  content: parsed.answer,
-                  searchedWeb: parsed.searched_web,
-                  webSources: parsed.web_sources ?? [],
-                  sources: parsed.sources ?? [],
-                  executedCode: parsed.executed_code || undefined,
-                  codeOutput: parsed.code_output || undefined,
-                  images: parsed.images && parsed.images.length > 0 ? parsed.images : undefined,
-                },
-              ]);
-              done = true;
-              break;
-            } else if (parsed.type === 'error') {
-              throw new Error(parsed.message);
-            }
+            onSessionsUpdated();
+            setMessages(prev => [...prev, {
+              id: `a${Date.now()}`, role: 'assistant', content: parsed.answer,
+              searchedWeb: parsed.searched_web, webSources: parsed.web_sources ?? [],
+              sources: parsed.sources ?? [],
+              executedCode: parsed.executed_code || undefined,
+              codeOutput:   parsed.code_output   || undefined,
+              images: parsed.images && parsed.images.length > 0 ? parsed.images : undefined,
+            }]);
+            done = true; break;
+          } else if (parsed.type === 'error') {
+            throw new Error(parsed.message);
           }
         }
-      } catch (err) {
-        setMessages(prev => [...prev, { id: `e${Date.now()}`, role: 'assistant', content: err instanceof Error ? err.message : String(err) }]);
-      } finally {
-        setLoading(false);
-        setSearchPhase('thinking');
       }
-    },
-    [input, loading, hasDoc, localSessionId, onSessionCreated, onSessionsUpdated, t],
-  );
+    } catch (err) {
+      setMessages(prev => [...prev, { id: `e${Date.now()}`, role: 'assistant', content: err instanceof Error ? err.message : String(err) }]);
+    } finally { setLoading(false); setSearchPhase('thinking'); }
+  }, [input, loading, hasDoc, localSessionId, onSessionCreated, onSessionsUpdated, t]);
 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      send();
-    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   };
-
   const onInput = (e: ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
-    const el = e.target;
-    el.style.height = 'auto';
+    const el = e.target; el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, 130)}px`;
   };
 
-  // In RTL (Hebrew): user on the right (justify-start = RTL-start = right), AI on the left (justify-end = RTL-end = left).
-  // In LTR (English): user on the right (justify-end = LTR-end = right), AI on the left (justify-start = LTR-start = left).
   const userAlign = lang === 'he' ? 'justify-start' : 'justify-end';
   const aiAlign   = lang === 'he' ? 'justify-end'   : 'justify-start';
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col flex-1 min-h-[520px]">
+    <div className="bg-[#0d1424] rounded-2xl border border-[#1e2d4a] flex flex-col flex-1 min-h-[520px]"
+         style={{ boxShadow: '0 0 0 1px rgba(0,212,255,0.04)' }}>
 
-      <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-3 shrink-0">
-        <span className="w-9 h-9 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-xl flex items-center justify-center shrink-0">
-          <IconSparkles className="w-5 h-5 text-white" />
+      {/* Header */}
+      <div className="px-5 py-4 border-b border-[#1e2d4a] flex items-center gap-3 shrink-0">
+        <span className="w-9 h-9 bg-gradient-to-br from-[#00d4ff] to-[#0085ff] rounded-xl flex items-center justify-center shrink-0 neon-glow-sm">
+          <IconSparkles className="w-5 h-5 text-[#060b18]" />
         </span>
         <div className="flex-1 min-w-0">
-          <p className="font-semibold text-gray-900 text-sm">{t.chatTitle}</p>
+          <p className="font-semibold text-slate-200 text-sm">{t.chatTitle}</p>
           <div className="flex items-center gap-1.5 mt-0.5">
-            <span className={`w-1.5 h-1.5 rounded-full ${hasDoc ? 'bg-emerald-500 animate-pulse' : 'bg-gray-300'}`} />
-            <span className="text-xs text-gray-500">
-              {hasDoc ? t.docReady : t.waitingPdf}
-            </span>
+            <span className={`w-1.5 h-1.5 rounded-full transition-colors duration-500 ${hasDoc ? 'bg-[#00d4ff] animate-pulse' : 'bg-slate-600'}`} />
+            <span className="text-xs text-slate-500">{hasDoc ? t.docReady : t.waitingPdf}</span>
           </div>
         </div>
       </div>
 
+      {/* Messages */}
       <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-3 min-h-0">
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-5 py-12 flex-1 text-center">
-            <div className="w-20 h-20 bg-gradient-to-br from-indigo-100 to-violet-100 rounded-3xl flex items-center justify-center">
-              <IconSparkles className="w-10 h-10 text-indigo-400" />
+            <div className="w-20 h-20 bg-[#00d4ff]/5 border border-[#00d4ff]/10 rounded-3xl flex items-center justify-center">
+              <IconSparkles className="w-10 h-10 text-[#00d4ff]/40" />
             </div>
             <div>
-              <p className="font-medium text-gray-700">
-                {hasDoc ? t.askQ : t.uploadToStart}
-              </p>
-              <p className="text-sm text-gray-400 mt-1">
-                {hasDoc ? t.askHint : t.uploadSideHint}
-              </p>
+              <p className="font-medium text-slate-400">{hasDoc ? t.askQ : t.uploadToStart}</p>
+              <p className="text-sm text-slate-600 mt-1">{hasDoc ? t.askHint : t.uploadSideHint}</p>
             </div>
             {hasDoc && (
               <div className="flex flex-wrap gap-2 justify-center">
                 {t.suggestions.map(s => (
-                  <button
-                    key={s}
-                    onClick={() => send(s)}
-                    className="px-4 py-2 text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-full transition-colors"
-                  >
+                  <button key={s} onClick={() => send(s)}
+                    className="px-4 py-2 text-xs bg-[#00d4ff]/5 hover:bg-[#00d4ff]/10 text-[#00d4ff]/70 hover:text-[#00d4ff] border border-[#00d4ff]/20 hover:border-[#00d4ff]/40 rounded-full transition-all">
                     {s}
                   </button>
                 ))}
@@ -730,199 +803,151 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
         ) : (
           <>
             {messages.map(msg => (
-              <div
-                key={msg.id}
-                className={`flex ${msg.role === 'user' ? userAlign : aiAlign}`}
-              >
+              <div key={msg.id} className={`flex ${msg.role === 'user' ? userAlign : aiAlign}`}>
                 <div className="flex flex-col gap-1.5 max-w-[78%]">
-                  <div
-                    dir="auto"
+                  <div dir="auto"
                     className={[
                       'px-4 py-3 rounded-2xl text-sm',
                       msg.role === 'user'
-                        ? 'bg-indigo-600 text-white rounded-tr-sm leading-relaxed whitespace-pre-wrap'
-                        : 'bg-gray-100 text-gray-800 rounded-tl-sm',
-                    ].join(' ')}
-                  >
-                    {msg.role === 'user' ? (
-                      msg.content
-                    ) : (
+                        ? 'bg-[#00d4ff] text-[#060b18] rounded-tr-sm leading-relaxed whitespace-pre-wrap font-medium neon-glow-sm'
+                        : 'bg-[#111c35] text-slate-200 rounded-tl-sm border border-[#1e2d4a]',
+                    ].join(' ')}>
+                    {msg.role === 'user' ? msg.content : (
                       <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
+                        remarkPlugins={[remarkGfm, remarkMath]}
+                        rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: '#cc0000' }]]}
                         components={{
-                          p: ({ children }) => (
-                            <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>
+                          p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
+                          strong: ({ children }) => <strong className="font-semibold text-white">{children}</strong>,
+                          em: ({ children }) => <em className="italic">{children}</em>,
+                          pre: ({ children }) => (
+                            <pre dir="ltr" style={{ direction: 'ltr', textAlign: 'left', unicodeBidi: 'embed' }}
+                              className="m-0 p-4 bg-[#060b18] rounded-lg my-2 border border-[#1e2d4a] overflow-x-auto text-left">
+                              {children}
+                            </pre>
                           ),
-                          strong: ({ children }) => (
-                            <strong className="font-semibold">{children}</strong>
-                          ),
-                          em: ({ children }) => (
-                            <em className="italic">{children}</em>
-                          ),
-                          code: ({ children }) => (
-                            <code className="px-1.5 py-0.5 bg-black/10 rounded text-[11px] font-mono">{children}</code>
-                          ),
-                          ul: ({ children }) => (
-                            <ul className="list-disc ps-4 my-1.5 space-y-0.5">{children}</ul>
-                          ),
-                          ol: ({ children }) => (
-                            <ol className="list-decimal ps-4 my-1.5 space-y-0.5">{children}</ol>
-                          ),
-                          li: ({ children }) => (
-                            <li className="leading-relaxed">{children}</li>
-                          ),
+                          code: ({ className, children }) => {
+                            if (className) return (
+                              <code dir="ltr" style={{ direction: 'ltr', textAlign: 'left', unicodeBidi: 'embed' }}
+                                className={`${className} text-emerald-300 text-[11px] font-mono leading-relaxed`}>
+                                {children}
+                              </code>
+                            );
+                            return <code className="px-1.5 py-0.5 bg-[#060b18] rounded text-[11px] font-mono text-[#00d4ff]/80">{children}</code>;
+                          },
+                          ul: ({ children }) => <ul className="list-disc ps-4 my-1.5 space-y-0.5">{children}</ul>,
+                          ol: ({ children }) => <ol className="list-decimal ps-4 my-1.5 space-y-0.5">{children}</ol>,
+                          li: ({ children }) => <li className="leading-relaxed">{children}</li>,
                           a: ({ href, children }) => (
-                            <a
-                              href={href ?? '#'}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                            <a href={href ?? '#'} target="_blank" rel="noopener noreferrer"
                               style={{ textDecoration: 'none' }}
-                              className="inline-flex items-center gap-1 max-w-[220px] px-2.5 py-0.5 mx-0.5 rounded-full bg-white border border-indigo-200 text-indigo-700 text-xs font-semibold hover:bg-indigo-50 hover:border-indigo-400 hover:text-indigo-900 transition-all align-middle shadow-sm"
-                            >
+                              className="inline-flex items-center gap-1 max-w-[220px] px-2.5 py-0.5 mx-0.5 rounded-full bg-[#00d4ff]/5 border border-[#00d4ff]/30 text-[#00d4ff] text-xs font-semibold hover:bg-[#00d4ff]/10 hover:border-[#00d4ff]/60 transition-all align-middle">
                               <span className="shrink-0 text-[11px]">🔗</span>
-                              <span
-                                className="min-w-0"
-                                style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                              >
+                              <span className="min-w-0" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                 {children}
                               </span>
                             </a>
                           ),
-                        }}
-                      >
-                        {msg.content}
+                        }}>
+                        {preprocessMath(msg.content)}
                       </ReactMarkdown>
                     )}
                   </div>
-                  {/* ── Code interpreter results ──────────────────────────── */}
-                  {msg.role === 'assistant' && msg.images && msg.images.length > 0 && (
-                    <div className="flex flex-col gap-2 mt-1">
-                      {msg.images.map((b64, i) => (
-                        <div key={i} className="rounded-xl overflow-hidden border border-gray-200 shadow-sm bg-white">
-                          <img
-                            src={`data:image/png;base64,${b64}`}
-                            alt={`Chart ${i + 1}`}
-                            className="w-full h-auto block"
-                            style={{ maxWidth: 480 }}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {msg.role === 'assistant' && msg.executedCode && (
-                    <CodeToggle code={msg.executedCode} t={t} />
+
+                  {/* Code results */}
+                  {msg.role === 'assistant' &&
+                    (msg.executedCode || msg.codeOutput || (msg.images && msg.images.length > 0)) && (
+                    <CodeExecutionBlock code={msg.executedCode} output={msg.codeOutput} images={msg.images} t={t} />
                   )}
 
-                  {/* Web sources panel — shown below AI messages when sources exist */}
+                  {/* Web source chips — neon outline style, on-demand */}
                   {msg.role === 'assistant' && msg.webSources && msg.webSources.length > 0 && (
-                    <div className="flex flex-col gap-1.5 mt-0.5">
-                      <span className="text-[11px] font-medium text-gray-400 px-0.5 select-none">
-                        {t.webSourcesLabel}
-                      </span>
-                      <div className="flex flex-wrap gap-1.5">
-                        {msg.webSources.map((src, i) => (
-                          <a
-                            key={i}
-                            href={src.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            title={src.title || src.url}
-                            className="group flex items-center gap-1.5 max-w-[180px] px-2.5 py-1.5 rounded-lg bg-white border border-gray-200 hover:border-indigo-300 hover:bg-indigo-50/70 transition-all no-underline"
-                          >
-                            <span className="w-4 h-4 flex items-center justify-center rounded-full bg-indigo-100 text-indigo-600 text-[10px] font-bold shrink-0 leading-none">
-                              {i + 1}
-                            </span>
-                            <IconGlobe className="w-3 h-3 text-gray-400 group-hover:text-indigo-500 shrink-0 transition-colors" />
-                            <span
-                              className="text-xs text-gray-600 group-hover:text-indigo-700 transition-colors min-w-0"
-                              style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                            >
-                              {src.title ? src.title : getDomain(src.url)}
-                            </span>
-                          </a>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Fallback: web-search used but no sources returned (edge case) */}
-                  {msg.searchedWeb && msg.role === 'assistant' && (!msg.webSources || msg.webSources.length === 0) && (
-                    <div className="flex items-center gap-1.5 px-1">
-                      <IconGlobe className="w-3 h-3 text-indigo-400 shrink-0" />
-                      <span className="text-xs text-indigo-400">{t.webSearched}</span>
+                    <div className="mt-0.5">
+                      <button
+                        onClick={() => setVisibleSources(prev => {
+                          const next = new Set(prev);
+                          if (next.has(msg.id)) next.delete(msg.id); else next.add(msg.id);
+                          return next;
+                        })}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-[#00d4ff]/20 bg-[#00d4ff]/5 hover:bg-[#00d4ff]/10 text-[#00d4ff]/60 hover:text-[#00d4ff] text-[11px] font-medium transition-all">
+                        <IconGlobe className="w-3 h-3 shrink-0" />
+                        {visibleSources.has(msg.id) ? t.hideSources : t.showSources(msg.webSources.length)}
+                      </button>
+                      {visibleSources.has(msg.id) && (
+                        <div className="flex flex-wrap gap-1.5 mt-1.5">
+                          {msg.webSources.map((src, i) => (
+                            <a key={i} href={src.url} target="_blank" rel="noopener noreferrer"
+                              title={src.title || src.url}
+                              className="group flex items-center gap-1.5 max-w-[180px] px-2.5 py-1.5 rounded-lg bg-[#0d1424] border border-[#00d4ff]/20 hover:border-[#00d4ff]/50 hover:bg-[#00d4ff]/5 transition-all no-underline">
+                              <span className="w-4 h-4 flex items-center justify-center rounded-full bg-[#00d4ff]/10 text-[#00d4ff] text-[10px] font-bold shrink-0 leading-none">
+                                {i + 1}
+                              </span>
+                              <IconGlobe className="w-3 h-3 text-slate-600 group-hover:text-[#00d4ff]/60 shrink-0 transition-colors" />
+                              <span className="text-xs text-slate-500 group-hover:text-slate-300 transition-colors min-w-0"
+                                style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {src.title ? src.title : getDomain(src.url)}
+                              </span>
+                            </a>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
               </div>
             ))}
 
+            {/* Loading indicator */}
             {loading && (
               <div className={`flex ${aiAlign}`}>
-                <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-5 py-3.5">
+                <div className="bg-[#111c35] border border-[#1e2d4a] rounded-2xl rounded-tl-sm px-5 py-3.5">
                   {searchPhase === 'searching_web' ? (
                     <div className="flex items-center gap-2">
-                      <div className="w-3.5 h-3.5 rounded-full border-2 border-indigo-300 border-t-indigo-600 animate-spin shrink-0" />
-                      <span className="text-xs text-indigo-600 font-medium">{t.searchingWeb}</span>
+                      <div className="w-3.5 h-3.5 rounded-full border-2 border-[#00d4ff]/20 border-t-[#00d4ff] animate-spin shrink-0" />
+                      <span className="text-xs text-[#00d4ff] font-medium">{t.searchingWeb}</span>
                     </div>
                   ) : searchPhase === 'running_code' ? (
                     <div className="flex items-center gap-2">
-                      <div className="w-3.5 h-3.5 rounded-full border-2 border-violet-300 border-t-violet-600 animate-spin shrink-0" />
-                      <IconCode className="w-3 h-3 text-violet-500 shrink-0" />
-                      <span className="text-xs text-violet-600 font-medium">{t.runningCode}</span>
+                      <div className="w-3.5 h-3.5 rounded-full border-2 border-[#8b5cf6]/20 border-t-[#8b5cf6] animate-spin shrink-0" />
+                      <IconCode className="w-3 h-3 text-[#8b5cf6] shrink-0" />
+                      <span className="text-xs text-[#8b5cf6] font-medium">{t.runningCode}</span>
                     </div>
                   ) : (
                     <div className="flex gap-1.5 items-center">
                       {[0, 150, 300].map(d => (
-                        <span
-                          key={d}
-                          className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce"
-                          style={{ animationDelay: `${d}ms` }}
-                        />
+                        <span key={d} className="w-2 h-2 rounded-full bg-[#00d4ff] animate-neon-dot"
+                          style={{ animationDelay: `${d}ms` }} />
                       ))}
                     </div>
                   )}
                 </div>
               </div>
             )}
-
             <div ref={bottomRef} />
           </>
         )}
       </div>
 
-      <div className={`px-4 pb-4 pt-3 border-t border-gray-100 shrink-0 transition-opacity ${!hasDoc ? 'opacity-60' : ''}`}>
-        <div
-          className={[
-            'flex items-end gap-2 rounded-2xl border px-4 py-2.5 transition-all duration-150',
-            hasDoc
-              ? 'bg-gray-50 border-gray-200 focus-within:border-indigo-400 focus-within:bg-white focus-within:shadow-sm'
-              : 'bg-gray-50 border-gray-200 pointer-events-none',
-          ].join(' ')}
-        >
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={onInput}
-            onKeyDown={onKey}
-            dir="auto"
-            rows={1}
-            disabled={!hasDoc || loading}
+      {/* Input area */}
+      <div className={`px-4 pb-4 pt-3 border-t border-[#1e2d4a] shrink-0 transition-opacity ${!hasDoc ? 'opacity-40' : ''}`}>
+        <div className={[
+          'flex items-end gap-2 rounded-2xl border px-4 py-2.5 transition-all duration-150',
+          hasDoc
+            ? 'bg-[#080e1f] border-[#1e2d4a] focus-within:border-[#00d4ff]/50 focus-within:shadow-[0_0_0_3px_rgba(0,212,255,0.08)]'
+            : 'bg-[#080e1f] border-[#1e2d4a] pointer-events-none',
+        ].join(' ')}>
+          <textarea ref={textareaRef} value={input} onChange={onInput} onKeyDown={onKey}
+            dir="auto" rows={1} disabled={!hasDoc || loading}
             placeholder={hasDoc ? t.chatPlaceholder : t.chatPlaceholderNoDoc}
-            className="flex-1 bg-transparent resize-none outline-none text-sm text-gray-800 placeholder-gray-400 disabled:cursor-not-allowed leading-relaxed"
-            style={{ maxHeight: 130 }}
-          />
-          <button
-            onClick={() => send()}
-            disabled={!hasDoc || !input.trim() || loading}
+            className="flex-1 bg-transparent resize-none outline-none text-sm text-slate-200 placeholder-slate-600 disabled:cursor-not-allowed leading-relaxed"
+            style={{ maxHeight: 130 }} />
+          <button onClick={() => send()} disabled={!hasDoc || !input.trim() || loading}
             aria-label={t.send}
-            className="w-9 h-9 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 flex items-center justify-center shrink-0 transition-all active:scale-95 disabled:cursor-not-allowed"
-          >
-            <IconSend className="w-4 h-4 text-white" />
+            className="w-9 h-9 rounded-xl bg-[#00d4ff] hover:bg-[#00bbdd] disabled:bg-[#1e2d4a] flex items-center justify-center shrink-0 transition-all active:scale-95 disabled:cursor-not-allowed neon-glow-sm">
+            <IconSend className="w-4 h-4 text-[#060b18]" />
           </button>
         </div>
-        <p className="text-center text-xs text-gray-400 mt-2 select-none">
-          {t.enterHint}
-        </p>
+        <p className="text-center text-xs text-slate-600 mt-2 select-none">{t.enterHint}</p>
       </div>
     </div>
   );
@@ -936,127 +961,111 @@ function PaperWriter({ hasDoc, t }: { hasDoc: boolean; t: T }) {
   const [paper, setPaper]               = useState<string | null>(null);
   const [sources, setSources]           = useState<string[]>([]);
   const [error, setError]               = useState<string | null>(null);
-  const [downloading, setDownloading]   = useState(false);
+  const [downloading, setDownloading]         = useState(false);
+  const [downloadingWord, setDownloadingWord] = useState(false);
 
-  const generate = useCallback(
-    async (topicOverride?: string) => {
-      const top = (topicOverride ?? topic).trim();
-      if (!top || loading || !hasDoc) return;
-      setLoading(true);
-      setError(null);
-      setPaper(null);
-      setSources([]);
-      try {
-        const res = await fetch('http://127.0.0.1:5003/generate-paper', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ topic: top, instructions: instructions.trim() }),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          setError(data.error ?? t.paperErr);
-          return;
-        }
-        setPaper(data.paper);
-        setSources(data.sources ?? []);
-      } catch {
-        setError(t.serverErr);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [topic, instructions, loading, hasDoc, t],
-  );
+  const generate = useCallback(async (topicOverride?: string) => {
+    const top = (topicOverride ?? topic).trim();
+    if (!top || loading || !hasDoc) return;
+    setLoading(true); setError(null); setPaper(null); setSources([]);
+    try {
+      const res  = await authFetch(`${API}/generate-paper`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topic: top, instructions: instructions.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error ?? t.paperErr); return; }
+      setPaper(data.paper); setSources(data.sources ?? []);
+    } catch { setError(t.serverErr); }
+    finally  { setLoading(false); }
+  }, [topic, instructions, loading, hasDoc, t]);
 
   const downloadPdf = async () => {
     if (!paper || downloading) return;
     setDownloading(true);
     try {
       const safeTitle = topic.trim().slice(0, 40).replace(/[^\w֐-׿\s-]/g, '') || 'paper';
-      const filename = `levy-ai-${safeTitle}.pdf`;
-
-      const res = await fetch('http://127.0.0.1:5003/export-pdf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: paper, filename }),
+      const res = await authFetch(`${API}/export-pdf`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: paper, filename: `u-note-${safeTitle}.pdf` }),
       });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error((err as { error?: string }).error ?? t.exportErr);
-      }
-
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? t.exportErr);
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      a.click();
+      const url  = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `u-note-${safeTitle}.pdf`; a.click();
       URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error('PDF export failed:', err);
-    } finally {
-      setDownloading(false);
-    }
+    } catch (err) { console.error('PDF export failed:', err); }
+    finally { setDownloading(false); }
+  };
+
+  const downloadWord = async () => {
+    if (!paper || downloadingWord) return;
+    setDownloadingWord(true);
+    try {
+      const safeTitle = topic.trim().slice(0, 40).replace(/[^\w֐-׿\s-]/g, '') || 'paper';
+      const res = await authFetch(`${API}/export-docx`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: paper, filename: `u-note-${safeTitle}.docx` }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? t.wordErr);
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `u-note-${safeTitle}.docx`; a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) { console.error('Word export failed:', err); }
+    finally { setDownloadingWord(false); }
   };
 
   const onInstructionsInput = (e: ChangeEvent<HTMLTextAreaElement>) => {
     setInstructions(e.target.value);
-    const el = e.target;
-    el.style.height = 'auto';
+    const el = e.target; el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, 100)}px`;
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col flex-1 min-h-[520px]">
+    <div className="bg-[#0d1424] rounded-2xl border border-[#1e2d4a] flex flex-col flex-1 min-h-[520px]">
 
-      <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-3 shrink-0">
-        <span className="w-9 h-9 bg-gradient-to-br from-violet-500 to-indigo-600 rounded-xl flex items-center justify-center shrink-0">
+      <div className="px-5 py-4 border-b border-[#1e2d4a] flex items-center gap-3 shrink-0">
+        <span className="w-9 h-9 bg-gradient-to-br from-[#8b5cf6] to-[#6d28d9] rounded-xl flex items-center justify-center shrink-0 purple-glow-sm">
           <IconPen className="w-5 h-5 text-white" />
         </span>
         <div className="flex-1 min-w-0">
-          <p className="font-semibold text-gray-900 text-sm">{t.paperTitle}</p>
-          <p className="text-xs text-gray-500">
-            {hasDoc ? t.paperSubtitle : t.waitingPdf}
-          </p>
+          <p className="font-semibold text-slate-200 text-sm">{t.paperTitle}</p>
+          <p className="text-xs text-slate-500">{hasDoc ? t.paperSubtitle : t.waitingPdf}</p>
         </div>
         {paper && (
-          <button
-            onClick={downloadPdf}
-            disabled={downloading}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 text-white text-xs font-medium rounded-lg transition-all active:scale-95 shrink-0"
-          >
-            <IconDownload className="w-3.5 h-3.5" />
-            {downloading ? t.exporting : t.downloadPdf}
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button onClick={downloadWord} disabled={downloadingWord}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0085ff] hover:bg-[#0070dd] disabled:bg-[#1e2d4a] text-white text-xs font-medium rounded-lg transition-all active:scale-95">
+              <IconWord className="w-3.5 h-3.5" />
+              {downloadingWord ? t.exporting : t.downloadWord}
+            </button>
+            <button onClick={downloadPdf} disabled={downloading}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#00d4ff] hover:bg-[#00bbdd] disabled:bg-[#1e2d4a] text-[#060b18] text-xs font-bold rounded-lg transition-all active:scale-95">
+              <IconDownload className="w-3.5 h-3.5" />
+              {downloading ? t.exporting : t.downloadPdf}
+            </button>
+          </div>
         )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-5 py-4 min-h-0">
-
         {!paper && !loading && !error && (
           <div className="flex flex-col items-center justify-center gap-5 py-10 text-center h-full">
-            <div className="w-20 h-20 bg-gradient-to-br from-violet-100 to-indigo-100 rounded-3xl flex items-center justify-center">
-              <IconPen className="w-10 h-10 text-violet-400" />
+            <div className="w-20 h-20 bg-[#8b5cf6]/5 border border-[#8b5cf6]/10 rounded-3xl flex items-center justify-center">
+              <IconPen className="w-10 h-10 text-[#8b5cf6]/40" />
             </div>
             <div>
-              <p className="font-medium text-gray-700">
-                {hasDoc ? t.enterTopic : t.uploadFirst}
-              </p>
-              <p className="text-sm text-gray-400 mt-1">
-                {hasDoc ? t.aiWrites : t.uploadSideHint}
-              </p>
+              <p className="font-medium text-slate-400">{hasDoc ? t.enterTopic : t.uploadFirst}</p>
+              <p className="text-sm text-slate-600 mt-1">{hasDoc ? t.aiWrites : t.uploadSideHint}</p>
             </div>
             {hasDoc && (
               <>
-                <p className="text-xs text-gray-400">{t.suggestedTopics}</p>
+                <p className="text-xs text-slate-600">{t.suggestedTopics}</p>
                 <div className="flex flex-wrap gap-2 justify-center max-w-xs">
                   {t.topicChips.map(chip => (
-                    <button
-                      key={chip}
-                      onClick={() => { setTopic(chip); generate(chip); }}
-                      className="px-4 py-2 text-xs bg-violet-50 hover:bg-violet-100 text-violet-700 border border-violet-200 rounded-full transition-colors"
-                    >
+                    <button key={chip} onClick={() => { setTopic(chip); generate(chip); }}
+                      className="px-4 py-2 text-xs bg-[#8b5cf6]/5 hover:bg-[#8b5cf6]/10 text-[#8b5cf6]/70 hover:text-[#8b5cf6] border border-[#8b5cf6]/20 hover:border-[#8b5cf6]/40 rounded-full transition-all">
                       {chip}
                     </button>
                   ))}
@@ -1068,18 +1077,17 @@ function PaperWriter({ hasDoc, t }: { hasDoc: boolean; t: T }) {
 
         {loading && (
           <div className="flex flex-col items-center justify-center gap-4 py-20 h-full">
-            <div className="w-12 h-12 rounded-full border-4 border-violet-200 border-t-violet-600 animate-spin" />
+            <div className="w-12 h-12 rounded-full border-2 border-[#8b5cf6]/20 border-t-[#8b5cf6] animate-spin" />
             <div className="text-center">
-              <p className="font-medium text-gray-700 text-sm">{t.writingPaper}</p>
-              <p className="text-xs text-gray-400 mt-1">{t.takeSecs}</p>
+              <p className="font-medium text-slate-400 text-sm">{t.writingPaper}</p>
+              <p className="text-xs text-slate-600 mt-1">{t.takeSecs}</p>
             </div>
           </div>
         )}
 
         {error && (
-          <div className="flex items-center gap-2 bg-red-50 border border-red-100 text-red-600 rounded-xl px-4 py-3 text-sm mt-4">
-            <IconX className="w-4 h-4 shrink-0" />
-            {error}
+          <div className="flex items-center gap-2 bg-red-950/50 border border-red-500/30 text-red-400 rounded-xl px-4 py-3 text-sm mt-4">
+            <IconX className="w-4 h-4 shrink-0" />{error}
           </div>
         )}
 
@@ -1087,98 +1095,61 @@ function PaperWriter({ hasDoc, t }: { hasDoc: boolean; t: T }) {
           <div className="flex flex-col gap-3">
             {sources.length > 0 && (
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs text-gray-400">{t.sources}</span>
+                <span className="text-xs text-slate-600">{t.sources}</span>
                 {sources.map(s => (
-                  <span key={s} className="px-2 py-0.5 bg-indigo-50 text-indigo-600 text-xs rounded-full border border-indigo-100">
+                  <span key={s} className="px-2 py-0.5 bg-[#8b5cf6]/10 text-[#8b5cf6] text-xs rounded-full border border-[#8b5cf6]/20">
                     {s}
                   </span>
                 ))}
               </div>
             )}
-            <div dir="rtl" className="bg-white rounded-xl border border-gray-200 p-8 text-gray-800">
+            <div dir="rtl" className="bg-[#080e1f] rounded-xl border border-[#1e2d4a] p-8 text-slate-200">
               <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
+                remarkPlugins={[remarkGfm, remarkMath]}
+                rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: '#cc0000', strict: false }]]}
                 components={{
-                  h1: ({ children }) => (
-                    <h1 className="text-2xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-200 text-center">{children}</h1>
-                  ),
-                  h2: ({ children }) => (
-                    <h2 className="text-lg font-bold text-gray-800 mt-7 mb-3">{children}</h2>
-                  ),
-                  h3: ({ children }) => (
-                    <h3 className="text-base font-semibold text-gray-700 mt-5 mb-2">{children}</h3>
-                  ),
-                  p: ({ children }) => (
-                    <p className="text-sm leading-8 mb-4" style={{ textAlign: 'justify' }}>{children}</p>
-                  ),
-                  strong: ({ children }) => (
-                    <strong className="font-semibold text-gray-900">{children}</strong>
-                  ),
-                  em: ({ children }) => <em className="italic text-gray-700">{children}</em>,
-                  ul: ({ children }) => (
-                    <ul className="list-disc mb-4 space-y-1 text-sm pe-5">{children}</ul>
-                  ),
-                  ol: ({ children }) => (
-                    <ol className="list-decimal mb-4 space-y-1 text-sm pe-5">{children}</ol>
-                  ),
-                  li: ({ children }) => <li className="text-sm leading-7">{children}</li>,
+                  h1: ({ children }) => <h1 className="text-2xl font-bold text-white mb-4 pb-2 border-b border-[#1e2d4a] text-center">{children}</h1>,
+                  h2: ({ children }) => <h2 className="text-lg font-bold text-slate-200 mt-7 mb-3">{children}</h2>,
+                  h3: ({ children }) => <h3 className="text-base font-semibold text-slate-300 mt-5 mb-2">{children}</h3>,
+                  p: ({ children }) => <p className="text-sm leading-8 mb-4 text-slate-300" style={{ textAlign: 'justify' }}>{children}</p>,
+                  strong: ({ children }) => <strong className="font-semibold text-white">{children}</strong>,
+                  em: ({ children }) => <em className="italic text-slate-400">{children}</em>,
+                  ul: ({ children }) => <ul className="list-disc mb-4 space-y-1 text-sm pe-5">{children}</ul>,
+                  ol: ({ children }) => <ol className="list-decimal mb-4 space-y-1 text-sm pe-5">{children}</ol>,
+                  li: ({ children }) => <li className="text-sm leading-7 text-slate-300">{children}</li>,
                   blockquote: ({ children }) => (
-                    <blockquote className="border-r-4 border-violet-300 pr-4 my-4 italic text-sm bg-violet-50/50 py-2 rounded-sm text-gray-600">
+                    <blockquote className="border-r-4 border-[#8b5cf6]/50 pr-4 my-4 italic text-sm bg-[#8b5cf6]/5 py-2 rounded-sm text-slate-400">
                       {children}
                     </blockquote>
                   ),
-                  hr: () => <hr className="my-6 border-gray-200" />,
-                  table: ({ children }) => (
-                    <div className="overflow-x-auto my-4">
-                      <table className="w-full text-sm border-collapse">{children}</table>
-                    </div>
-                  ),
-                  th: ({ children }) => (
-                    <th className="border border-gray-300 px-3 py-2 bg-gray-50 font-semibold text-right">{children}</th>
-                  ),
-                  td: ({ children }) => (
-                    <td className="border border-gray-300 px-3 py-2 text-right">{children}</td>
-                  ),
-                }}
-              >
-                {paper}
+                  hr: () => <hr className="my-6 border-[#1e2d4a]" />,
+                  table: ({ children }) => <div className="overflow-x-auto my-4"><table className="w-full text-sm border-collapse">{children}</table></div>,
+                  th: ({ children }) => <th className="border border-[#1e2d4a] px-3 py-2 bg-[#0d1424] font-semibold text-right text-slate-300">{children}</th>,
+                  td: ({ children }) => <td className="border border-[#1e2d4a] px-3 py-2 text-right text-slate-400">{children}</td>,
+                }}>
+                {preprocessMath(paper)}
               </ReactMarkdown>
             </div>
           </div>
         )}
       </div>
 
-      <div className={`px-4 pb-4 pt-3 border-t border-gray-100 shrink-0 ${!hasDoc ? 'opacity-60 pointer-events-none' : ''}`}>
+      <div className={`px-4 pb-4 pt-3 border-t border-[#1e2d4a] shrink-0 ${!hasDoc ? 'opacity-40 pointer-events-none' : ''}`}>
         <div className="flex flex-col gap-2">
-          <input
-            type="text"
-            value={topic}
-            onChange={e => setTopic(e.target.value)}
-            dir="auto"
+          <input type="text" value={topic} onChange={e => setTopic(e.target.value)} dir="auto"
             disabled={!hasDoc || loading}
             placeholder={hasDoc ? t.topicPh : t.topicPhNoDoc}
-            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-gray-800 placeholder-gray-400 outline-none focus:border-violet-400 focus:bg-white focus:shadow-sm transition-all disabled:cursor-not-allowed"
-            onKeyDown={e => { if (e.key === 'Enter') generate(); }}
-          />
-          <textarea
-            value={instructions}
-            onChange={onInstructionsInput}
-            dir="auto"
-            rows={2}
-            disabled={!hasDoc || loading}
-            placeholder={t.instructionsPh}
-            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-gray-800 placeholder-gray-400 outline-none focus:border-violet-400 focus:bg-white focus:shadow-sm transition-all resize-none disabled:cursor-not-allowed"
-            style={{ maxHeight: 100 }}
-          />
-          <button
-            onClick={() => generate()}
-            disabled={!hasDoc || !topic.trim() || loading}
-            className="w-full py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 disabled:bg-gray-300 text-white text-sm font-medium transition-all active:scale-[0.99] disabled:cursor-not-allowed flex items-center justify-center gap-2"
-          >
+            className="w-full rounded-xl border border-[#1e2d4a] bg-[#080e1f] px-4 py-2.5 text-sm text-slate-200 placeholder-slate-600 outline-none focus:border-[#8b5cf6]/50 focus:shadow-[0_0_0_3px_rgba(139,92,246,0.08)] transition-all disabled:cursor-not-allowed"
+            onKeyDown={e => { if (e.key === 'Enter') generate(); }} />
+          <textarea value={instructions} onChange={onInstructionsInput} dir="auto" rows={2}
+            disabled={!hasDoc || loading} placeholder={t.instructionsPh}
+            className="w-full rounded-xl border border-[#1e2d4a] bg-[#080e1f] px-4 py-2.5 text-sm text-slate-200 placeholder-slate-600 outline-none focus:border-[#8b5cf6]/50 focus:shadow-[0_0_0_3px_rgba(139,92,246,0.08)] transition-all resize-none disabled:cursor-not-allowed"
+            style={{ maxHeight: 100 }} />
+          <button onClick={() => generate()} disabled={!hasDoc || !topic.trim() || loading}
+            className="w-full py-2.5 rounded-xl bg-[#8b5cf6] hover:bg-[#7c3aed] disabled:bg-[#1e2d4a] text-white text-sm font-bold transition-all active:scale-[0.99] disabled:cursor-not-allowed flex items-center justify-center gap-2 animate-purple-pulse">
             {loading
-              ? <><div className="w-4 h-4 rounded-full border-2 border-white/40 border-t-white animate-spin" /><span>{t.writingBtn}</span></>
-              : <><IconPen className="w-4 h-4" /><span>{t.composePaper}</span></>
-            }
+              ? <><div className="w-4 h-4 rounded-full border-2 border-white/20 border-t-white animate-spin" /><span>{t.writingBtn}</span></>
+              : <><IconPen className="w-4 h-4" /><span>{t.composePaper}</span></>}
           </button>
         </div>
       </div>
@@ -1193,19 +1164,21 @@ interface SidebarProps {
   onNewChat: () => void;
   onSelectSession: (id: number) => void;
   onDeleteSession: (id: number) => void;
+  onSwitchMode: (mode: 'chat' | 'paper') => void;
   isOpen: boolean;
   onClose: () => void;
+  isAdmin: boolean;
   lang: Lang;
   t: T;
 }
 
-function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDeleteSession, isOpen, onClose, lang, t }: SidebarProps) {
+function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDeleteSession, onSwitchMode, isOpen, onClose, isAdmin, lang, t }: SidebarProps) {
+  const router = useRouter();
   const fmtDate = (iso: string) =>
     new Date(iso).toLocaleString(lang === 'he' ? 'he-IL' : 'en-US', {
       month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
     });
 
-  // Slide off toward the inline-start edge when closed (right in RTL, left in LTR).
   const translateClass = isOpen
     ? 'translate-x-0'
     : lang === 'he' ? 'translate-x-full' : '-translate-x-full';
@@ -1214,66 +1187,107 @@ function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDel
     <>
       {/* Backdrop */}
       <div
-        className={[
-          'fixed inset-0 z-40 bg-black/50 transition-opacity duration-300',
-          isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none',
-        ].join(' ')}
-        onClick={onClose}
-        aria-hidden="true"
-      />
+        className={['fixed inset-0 z-40 bg-black/70 backdrop-blur-sm transition-opacity duration-300',
+          isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'].join(' ')}
+        onClick={onClose} aria-hidden="true" />
 
-      {/* Sidebar panel */}
-      <aside
-        className={[
-          'fixed inset-y-0 start-0 z-50 w-64 bg-slate-900 border-e border-slate-700',
-          'flex flex-col transition-transform duration-300 ease-in-out',
-          translateClass,
-        ].join(' ')}
-      >
-        {/* Header row: New Chat + Close */}
-        <div className="flex items-center gap-2 p-3 border-b border-slate-700 shrink-0">
-          <button
-            onClick={() => { onNewChat(); onClose(); }}
-            className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition-colors"
-          >
-            <IconPlus className="w-4 h-4 shrink-0" />
-            {t.newChat}
-          </button>
-          <button
-            onClick={onClose}
-            aria-label={t.closeMenu}
-            className="p-2 rounded-lg hover:bg-slate-700 transition-colors shrink-0"
-          >
-            <IconX className="w-4 h-4 text-slate-400" />
+      {/* Panel */}
+      <aside className={[
+        'fixed inset-y-0 start-0 z-50 w-72 bg-[#060b18] border-e border-[#1e2d4a]',
+        'flex flex-col transition-transform duration-300 ease-in-out',
+        translateClass,
+      ].join(' ')}
+      style={{ boxShadow: '4px 0 32px rgba(0,0,0,0.6)' }}>
+
+        {/* Logo header */}
+        <div className="flex items-center justify-between px-4 py-4 border-b border-[#1e2d4a] shrink-0">
+          <div className="flex items-center gap-2.5">
+            <LogoMark size={32} />
+            <div>
+              <p className="text-white font-bold text-sm leading-none text-neon-glow">U-Note</p>
+              <p className="text-slate-600 text-xs mt-0.5">{t.subtitle}</p>
+            </div>
+          </div>
+          <button onClick={onClose} aria-label={t.closeMenu}
+            className="p-1.5 rounded-lg hover:bg-[#1e2d4a] transition-colors shrink-0">
+            <IconX className="w-4 h-4 text-slate-500" />
           </button>
         </div>
 
-        {/* Session list */}
-        <div className="flex-1 overflow-y-auto py-2">
-          {sessions.length === 0 ? (
-            <p className="text-slate-500 text-xs text-center py-6 px-4">{t.noPrevChats}</p>
-          ) : (
-            sessions.map(s => (
-              <div
-                key={s.id}
-                onClick={() => { onSelectSession(s.id); onClose(); }}
-                className={`group flex items-start gap-2 px-3 py-2.5 cursor-pointer hover:bg-slate-800 transition-colors ${
-                  currentSessionId === s.id ? 'bg-slate-800' : ''
-                }`}
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="text-slate-200 text-xs font-medium truncate leading-snug">{s.title}</p>
-                  <p className="text-slate-500 text-xs mt-0.5">{fmtDate(s.updated_at)}</p>
+        {/* New chat button */}
+        <div className="px-3 py-3 border-b border-[#1e2d4a] shrink-0">
+          <button onClick={() => { onNewChat(); onClose(); }}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-[#00d4ff]/10 border border-[#00d4ff]/20 hover:bg-[#00d4ff]/15 hover:border-[#00d4ff]/40 text-[#00d4ff] text-sm font-semibold transition-all">
+            <IconPlus className="w-4 h-4 shrink-0" />
+            {t.newChat}
+          </button>
+        </div>
+
+        {/* Nav sections */}
+        <div className="flex-1 overflow-y-auto flex flex-col">
+
+          {/* Quick nav */}
+          <div className="px-3 py-3 border-b border-[#1e2d4a] space-y-1">
+            <p className="text-[10px] font-semibold text-slate-600 uppercase tracking-widest px-2 mb-2">Navigation</p>
+            <button onClick={() => { onSwitchMode('chat'); onClose(); }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#0d1424] text-slate-400 hover:text-slate-200 text-sm transition-colors">
+              <IconSparkles className="w-4 h-4 text-[#00d4ff]/60 shrink-0" />
+              {t.navWorkspace}
+            </button>
+            <button onClick={() => { onSwitchMode('paper'); onClose(); }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#0d1424] text-slate-400 hover:text-slate-200 text-sm transition-colors">
+              <IconPen className="w-4 h-4 text-[#8b5cf6]/60 shrink-0" />
+              {t.navInsights}
+            </button>
+            <button disabled
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-slate-600 text-sm cursor-not-allowed opacity-50">
+              <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 0 1 6 18.719m12 0a5.971 5.971 0 0 0-.941-3.197m0 0A5.995 5.995 0 0 0 12 12.75a5.995 5.995 0 0 0-5.058 2.772m0 0a3 3 0 0 0-4.681 2.72 8.986 8.986 0 0 0 3.74.477m.94-3.197a5.971 5.971 0 0 0-.94 3.197M15 6.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm6 3a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm-13.5 0a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Z" />
+              </svg>
+              Collaboration
+              <span className="ms-auto text-[10px] bg-[#1e2d4a] text-slate-600 px-1.5 py-0.5 rounded-full font-medium">Soon</span>
+            </button>
+          </div>
+
+          {/* Notes (sessions) */}
+          <div className="flex-1 overflow-y-auto py-2">
+            <p className="text-[10px] font-semibold text-slate-600 uppercase tracking-widest px-5 mb-2 mt-2">
+              {t.navNotes}
+            </p>
+            {sessions.length === 0 ? (
+              <p className="text-slate-600 text-xs text-center py-6 px-4">{t.noPrevChats}</p>
+            ) : (
+              sessions.map(s => (
+                <div key={s.id}
+                  onClick={() => { onSelectSession(s.id); onClose(); }}
+                  className={`group flex items-start gap-2 px-3 py-2.5 mx-1 rounded-lg cursor-pointer hover:bg-[#0d1424] transition-colors ${
+                    currentSessionId === s.id ? 'bg-[#0d1424] border border-[#00d4ff]/10' : ''
+                  }`}>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-xs font-medium truncate leading-snug ${currentSessionId === s.id ? 'text-[#00d4ff]/80' : 'text-slate-300'}`}>
+                      {s.title}
+                    </p>
+                    <p className="text-slate-600 text-xs mt-0.5">{fmtDate(s.updated_at)}</p>
+                  </div>
+                  <button onClick={e => { e.stopPropagation(); onDeleteSession(s.id); }}
+                    aria-label={t.deleteChat}
+                    className="opacity-0 group-hover:opacity-100 mt-0.5 p-1 rounded hover:bg-red-500/20 transition-all shrink-0">
+                    <IconX className="w-3 h-3 text-slate-500 hover:text-red-400" />
+                  </button>
                 </div>
-                <button
-                  onClick={e => { e.stopPropagation(); onDeleteSession(s.id); }}
-                  aria-label={t.deleteChat}
-                  className="opacity-0 group-hover:opacity-100 mt-0.5 p-1 rounded hover:bg-red-500/20 transition-all shrink-0"
-                >
-                  <IconX className="w-3 h-3 text-slate-400 hover:text-red-400" />
-                </button>
-              </div>
-            ))
+              ))
+            )}
+          </div>
+
+          {/* Admin link (hidden — only for admins) */}
+          {isAdmin && (
+            <div className="px-3 py-3 border-t border-[#1e2d4a] shrink-0">
+              <button onClick={() => { router.push('/admin'); onClose(); }}
+                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#1e2d4a]/50 text-slate-600 hover:text-slate-400 text-xs transition-colors">
+                <IconShield className="w-4 h-4 shrink-0" />
+                {t.navAdmin}
+              </button>
+            </div>
           )}
         </div>
       </aside>
@@ -1283,6 +1297,15 @@ function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDel
 
 /* ─── Root page ──────────────────────────────────────────────────────────────── */
 export default function Home() {
+  const router = useRouter();
+
+  const [authChecked,     setAuthChecked]     = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAdmin,         setIsAdmin]         = useState(false);
+  const [userEmail,       setUserEmail]       = useState('');
+  const [userFirstName,   setUserFirstName]   = useState('');
+  const [userLastName,    setUserLastName]    = useState('');
+
   const [hasDoc, setHasDoc]                     = useState(false);
   const [mode, setMode]                         = useState<'chat' | 'paper'>('chat');
   const [sessions, setSessions]                 = useState<ChatSession[]>([]);
@@ -1295,80 +1318,84 @@ export default function Home() {
 
   const t = translations[lang];
 
-  // Sync document direction and language with the UI language state.
   useEffect(() => {
     document.documentElement.dir  = lang === 'he' ? 'rtl' : 'ltr';
     document.documentElement.lang = lang;
+    localStorage.setItem('levy_ai_lang', lang);
   }, [lang]);
 
-  // Close sidebar on Escape key.
   useEffect(() => {
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key === 'Escape') setSidebarOpen(false);
-    };
+    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') setSidebarOpen(false); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   const fetchSessions = useCallback(async () => {
     try {
-      const res  = await fetch('http://127.0.0.1:5003/sessions');
+      const res = await authFetch(`${API}/sessions`);
+      if (!res.ok) return;
       const data = await res.json();
       setSessions(data.sessions ?? []);
     } catch { /* backend not running yet */ }
   }, []);
 
   useEffect(() => {
-    fetch('http://127.0.0.1:5003/sessions')
-      .then(r => r.json())
+    const savedLang = localStorage.getItem('levy_ai_lang') as Lang | null;
+    if (savedLang === 'en' || savedLang === 'he') setLang(savedLang);
+
+    const token = localStorage.getItem('levy_ai_token');
+    if (!token) { router.replace('/login'); setAuthChecked(true); return; }
+
+    // Detect admin status from JWT payload (is_admin field added server-side)
+    const payload = decodeJwtPayload(token);
+    if (payload?.is_admin === true) setIsAdmin(true);
+
+    setIsAuthenticated(true);
+    setUserEmail(localStorage.getItem('levy_ai_email')      ?? '');
+    setUserFirstName(localStorage.getItem('levy_ai_first_name') ?? '');
+    setUserLastName(localStorage.getItem('levy_ai_last_name')   ?? '');
+    setAuthChecked(true);
+    authFetch(`${API}/sessions`)
+      .then(r => r.ok ? r.json() : { sessions: [] })
       .then((data: { sessions?: ChatSession[] }) => setSessions(data.sessions ?? []))
       .catch(() => {});
-  }, []);
+  }, [router]);
 
   const startNewChat = useCallback(() => {
-    setCurrentSessionId(null);
-    setInitialMessages([]);
+    setCurrentSessionId(null); setInitialMessages([]);
     setChatKey(`new-${Date.now()}`);
   }, []);
 
-  // Full reset: clears chat state AND forces PdfUploader back to its empty initial state.
-  // Used exclusively by the explicit "New Chat" button in the sidebar.
   const handleNewChat = useCallback(() => {
-    setHasDoc(false);
-    setPdfKey(`pdf-${Date.now()}`);
-    setCurrentSessionId(null);
-    setInitialMessages([]);
+    setHasDoc(false); setPdfKey(`pdf-${Date.now()}`);
+    setCurrentSessionId(null); setInitialMessages([]);
     setChatKey(`new-${Date.now()}`);
   }, []);
 
   const loadSession = useCallback(async (id: number) => {
     try {
-      const res  = await fetch(`http://127.0.0.1:5003/sessions/${id}`);
+      const res  = await authFetch(`${API}/sessions/${id}`);
       const data = await res.json();
       const msgs: Message[] = (data.messages ?? []).map(
         (m: { id: number; role: 'user' | 'assistant'; content: string }) => ({
-          id: String(m.id),
-          role: m.role,
-          content: m.content,
+          id: String(m.id), role: m.role, content: m.content,
         }),
       );
-      setCurrentSessionId(id);
-      setInitialMessages(msgs);
+      setCurrentSessionId(id); setInitialMessages(msgs);
       setChatKey(`session-${id}`);
     } catch { /* silently ignore */ }
   }, []);
 
   const deleteSession = useCallback(async (id: number) => {
     try {
-      await fetch(`http://127.0.0.1:5003/sessions/${id}`, { method: 'DELETE' });
+      await authFetch(`${API}/sessions/${id}`, { method: 'DELETE' });
       if (currentSessionId === id) startNewChat();
       fetchSessions();
     } catch { /* silently ignore */ }
   }, [currentSessionId, startNewChat, fetchSessions]);
 
   const handleSessionCreated = useCallback((id: number) => {
-    setCurrentSessionId(id);
-    fetchSessions();
+    setCurrentSessionId(id); fetchSessions();
   }, [fetchSessions]);
 
   const handleUpload = useCallback(() => {
@@ -1377,95 +1404,118 @@ export default function Home() {
   }, [hasDoc, startNewChat]);
 
   const handleRemove = useCallback(() => {
-    setHasDoc(false);
-    startNewChat();
+    setHasDoc(false); startNewChat();
   }, [startNewChat]);
 
   const toggleLang = () => setLang(l => l === 'he' ? 'en' : 'he');
 
+  const handleLogout = () => {
+    ['levy_ai_token', 'levy_ai_email', 'levy_ai_first_name', 'levy_ai_last_name'].forEach(k =>
+      localStorage.removeItem(k),
+    );
+    router.push('/login');
+  };
+
+  const userInitials = [userFirstName[0], userLastName[0]]
+    .filter(Boolean).join('').toUpperCase()
+    || userEmail.slice(0, 2).toUpperCase();
+
+  if (!authChecked || !isAuthenticated) return null;
+
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50">
+    <div className="min-h-screen flex flex-col bg-[#060b18]">
 
       {/* ── Header ──────────────────────────────────────────────────────────── */}
-      <header className="bg-slate-900 shadow-xl shrink-0 relative z-30">
-        <div className="max-w-full px-4 py-3.5 flex items-center justify-between gap-3">
+      <header className="bg-[#080d1a] border-b border-[#1e2d4a] shrink-0 relative z-30"
+              style={{ boxShadow: '0 1px 0 rgba(0,212,255,0.06)' }}>
+        <div className="max-w-full px-4 py-3 flex items-center justify-between gap-3">
 
           {/* Start: Hamburger + Logo */}
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => setSidebarOpen(true)}
-              aria-label={t.openMenu}
-              className="p-2 rounded-lg hover:bg-slate-700 transition-colors"
-            >
-              <IconMenu className="w-5 h-5 text-slate-300" />
+            <button onClick={() => setSidebarOpen(true)} aria-label={t.openMenu}
+              className="p-2 rounded-lg hover:bg-[#1e2d4a] transition-colors">
+              <IconMenu className="w-5 h-5 text-slate-400" />
             </button>
-            <div className="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-900/40 shrink-0">
-              <IconSparkles className="w-5 h-5 text-white" />
-            </div>
+            <LogoMark size={34} />
             <div>
-              <h1 className="text-xl font-bold text-white tracking-tight leading-none">Levy AI</h1>
-              <p className="text-xs text-slate-400 mt-0.5">{t.subtitle}</p>
+              <h1 className="text-lg font-bold text-white tracking-tight leading-none text-neon-glow">U-Note</h1>
+              <p className="text-xs text-slate-600 mt-0.5">{t.subtitle}</p>
             </div>
           </div>
 
-          {/* End: Status pill + Language toggle */}
+          {/* End: Status + Lang + Avatar + Logout */}
           <div className="flex items-center gap-2">
-            <div className="hidden sm:flex items-center gap-2 bg-slate-800 border border-slate-700 rounded-full px-4 py-1.5">
-              <span className={`w-2 h-2 rounded-full transition-colors duration-500 ${hasDoc ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
-              <span className="text-sm text-slate-300 font-medium">{hasDoc ? t.docLoaded : t.waiting}</span>
+            <div className="hidden sm:flex items-center gap-2 bg-[#0d1424] border border-[#1e2d4a] rounded-full px-4 py-1.5">
+              <span className={`w-2 h-2 rounded-full transition-colors duration-500 ${hasDoc ? 'bg-[#00d4ff] animate-pulse' : 'bg-slate-700'}`} />
+              <span className="text-sm text-slate-400 font-medium">{hasDoc ? t.docLoaded : t.waiting}</span>
             </div>
-            <button
-              onClick={toggleLang}
-              aria-label={`Switch to ${t.langLabel}`}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded-full text-sm text-slate-200 font-semibold transition-colors"
-            >
-              <IconGlobe className="w-4 h-4" />
+            <button onClick={toggleLang} aria-label={`Switch to ${t.langLabel}`}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0d1424] hover:bg-[#111c35] border border-[#1e2d4a] rounded-full text-sm text-slate-300 font-semibold transition-colors">
+              <IconGlobe className="w-4 h-4 text-slate-500" />
               {t.langLabel}
+            </button>
+            {/* Profile avatar */}
+            <button onClick={() => router.push('/profile')} title={userEmail} aria-label="Profile"
+              className="w-8 h-8 rounded-full bg-gradient-to-br from-[#00d4ff] to-[#0085ff] flex items-center justify-center text-[#060b18] text-xs font-black shrink-0 hover:scale-110 transition-transform select-none neon-glow-sm">
+              {userInitials || '?'}
+            </button>
+            {/* Logout */}
+            <button onClick={handleLogout} aria-label={t.logout}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0d1424] hover:bg-red-950/50 border border-[#1e2d4a] hover:border-red-500/30 rounded-full text-xs text-slate-500 hover:text-red-400 font-medium transition-all">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round"
+                  d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15M12 9l-3 3m0 0 3 3m-3-3h12.75" />
+              </svg>
+              <span className="hidden sm:inline">{t.logout}</span>
             </button>
           </div>
         </div>
       </header>
 
-      {/* ── Sidebar (overlay) ──────────────────────────────────────────────── */}
+      {/* ── Sidebar ──────────────────────────────────────────────────────────── */}
       <Sidebar
         sessions={sessions}
         currentSessionId={currentSessionId}
         onNewChat={handleNewChat}
         onSelectSession={loadSession}
         onDeleteSession={deleteSession}
+        onSwitchMode={setMode}
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
+        isAdmin={isAdmin}
         lang={lang}
         t={t}
       />
 
-      {/* ── Main content ────────────────────────────────────────────────────── */}
+      {/* ── Main content ─────────────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col overflow-y-auto">
         <main className="flex-1 max-w-7xl mx-auto w-full px-4 md:px-6 py-6 md:py-8 flex flex-col md:flex-row gap-6">
           <div className="w-full md:w-[38%] flex flex-col">
             <PdfUploader key={pdfKey} onUpload={handleUpload} onRemove={handleRemove} t={t} />
           </div>
           <div className="flex-1 flex flex-col gap-3 min-h-0">
+
             {/* Mode tab switcher */}
-            <div className="flex gap-1 p-1 bg-slate-200/60 rounded-xl shrink-0">
-              <button
-                onClick={() => setMode('chat')}
-                className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${
-                  mode === 'chat' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
+            <div className="flex gap-1 p-1 bg-[#080e1f] border border-[#1e2d4a] rounded-xl shrink-0">
+              <button onClick={() => setMode('chat')}
+                className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${
+                  mode === 'chat'
+                    ? 'bg-[#00d4ff]/10 border border-[#00d4ff]/20 text-[#00d4ff]'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}>
                 {t.tabChat}
               </button>
-              <button
-                onClick={() => setMode('paper')}
-                className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${
-                  mode === 'paper' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
+              <button onClick={() => setMode('paper')}
+                className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${
+                  mode === 'paper'
+                    ? 'bg-[#8b5cf6]/10 border border-[#8b5cf6]/20 text-[#8b5cf6]'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}>
                 {t.tabPaper}
               </button>
             </div>
-            {mode === 'chat' ? (
+
+            <div className={mode === 'chat' ? 'flex-1 flex flex-col' : 'hidden'}>
               <ChatInterface
                 key={chatKey}
                 hasDoc={hasDoc}
@@ -1476,13 +1526,14 @@ export default function Home() {
                 lang={lang}
                 t={t}
               />
-            ) : (
+            </div>
+            <div className={mode === 'paper' ? 'flex-1 flex flex-col' : 'hidden'}>
               <PaperWriter hasDoc={hasDoc} t={t} />
-            )}
+            </div>
           </div>
         </main>
 
-        <footer className="py-3 text-center text-xs text-gray-400 shrink-0">
+        <footer className="py-3 text-center text-xs text-slate-700 shrink-0 border-t border-[#1e2d4a]/50">
           {t.footer}
         </footer>
       </div>
