@@ -4,63 +4,144 @@
   --font-sans: var(--font-heebo);
 }
 
-/* ── Neon keyframe animations ───────────────────────────────────────────── */
-@keyframes neon-pulse {
-  0%, 100% {
-    box-shadow: 0 0 8px rgba(0,212,255,0.35), 0 0 18px rgba(0,212,255,0.15);
-  }
-  50% {
-    box-shadow: 0 0 18px rgba(0,212,255,0.65), 0 0 36px rgba(0,212,255,0.35), 0 0 60px rgba(0,212,255,0.12);
-  }
+/* ══════════════════════════════════════════════════════════════════════════
+   KEYFRAME ANIMATIONS
+══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Matcha green gentle pulse (CTA button) ──────────────────────────── */
+@keyframes matcha-pulse {
+  0%, 100% { box-shadow: 0 2px 12px rgba(107,144,74,0.25), 0 4px 20px rgba(107,144,74,0.1); }
+  50%       { box-shadow: 0 4px 20px rgba(107,144,74,0.45), 0 8px 32px rgba(107,144,74,0.2); }
 }
 
-@keyframes purple-neon-pulse {
-  0%, 100% {
-    box-shadow: 0 0 8px rgba(139,92,246,0.3), 0 0 16px rgba(139,92,246,0.12);
-  }
-  50% {
-    box-shadow: 0 0 16px rgba(139,92,246,0.6), 0 0 32px rgba(139,92,246,0.25);
-  }
-}
-
+/* ── Chat thinking dots ───────────────────────────────────────────────── */
 @keyframes neon-dot {
   0%, 80%, 100% { transform: scale(0.75); opacity: 0.35; }
-  40%           { transform: scale(1.15); opacity: 1; }
+  40%            { transform: scale(1.15); opacity: 1; }
 }
 
-@keyframes neon-spin-border {
-  from { border-color: rgba(0,212,255,0.6) rgba(0,212,255,0.1) rgba(0,212,255,0.1) rgba(0,212,255,0.1); }
-  to   { border-color: rgba(0,212,255,0.1) rgba(0,212,255,0.1) rgba(0,212,255,0.1) rgba(0,212,255,0.6); }
+/* ── Orbit: outer ring (radius 220px, badges counter-rotate) ─────────── */
+@keyframes orbit-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@keyframes orbit-spin-rev {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(-360deg); }
+}
+@keyframes orbit-counter-outer {
+  from { transform: translateX(220px) translateY(-50%) rotate(0deg); }
+  to   { transform: translateX(220px) translateY(-50%) rotate(-360deg); }
+}
+@keyframes orbit-counter-middle {
+  from { transform: translateX(145px) translateY(-50%) rotate(0deg); }
+  to   { transform: translateX(145px) translateY(-50%) rotate(-360deg); }
+}
+@keyframes orbit-counter-inner {
+  from { transform: translateX(82px) translateY(-50%) rotate(0deg); }
+  to   { transform: translateX(82px) translateY(-50%) rotate(-360deg); }
 }
 
-/* ── Custom utilities ───────────────────────────────────────────────────── */
+/* ── Gentle float (center card) ──────────────────────────────────────── */
+@keyframes float-gentle {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-10px); }
+}
+
+/* ── Slow rotating gradient ring (decorative) ────────────────────────── */
+@keyframes rotate-slow {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ── Slide up & fade (modal entrance) ────────────────────────────────── */
+@keyframes slide-up-fade {
+  from { opacity: 0; transform: translateY(28px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+
+/* ── Shimmer sweep ────────────────────────────────────────────────────── */
+@keyframes shimmer {
+  0%   { transform: translateX(-200%) skewX(-20deg); }
+  100% { transform: translateX(400%)  skewX(-20deg); }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   TAILWIND CUSTOM UTILITIES
+══════════════════════════════════════════════════════════════════════════ */
 @layer utilities {
-  .animate-neon-pulse   { animation: neon-pulse 2.2s ease-in-out infinite; }
-  .animate-purple-pulse { animation: purple-neon-pulse 2.2s ease-in-out infinite; }
+  /* Matcha pulse on CTA buttons */
+  .animate-matcha-pulse { animation: matcha-pulse 2.4s ease-in-out infinite; }
+
+  /* Keep neon-pulse name used in tsx → remap to matcha */
+  .animate-neon-pulse   { animation: matcha-pulse 2.4s ease-in-out infinite; }
+
+  /* Thinking dots */
   .animate-neon-dot     { animation: neon-dot 1.4s ease-in-out infinite; }
 
-  /* Neon glow box-shadow helpers — applied via class, not animation */
-  .neon-glow-sm  { box-shadow: 0 0 8px rgba(0,212,255,0.4), 0 0 18px rgba(0,212,255,0.15); }
-  .neon-glow-md  { box-shadow: 0 0 15px rgba(0,212,255,0.5), 0 0 30px rgba(0,212,255,0.2); }
-  .neon-glow-lg  { box-shadow: 0 0 25px rgba(0,212,255,0.6), 0 0 50px rgba(0,212,255,0.25), 0 0 80px rgba(0,212,255,0.08); }
-  .purple-glow-sm { box-shadow: 0 0 8px rgba(139,92,246,0.4), 0 0 18px rgba(139,92,246,0.15); }
+  /* Float & rotate */
+  .animate-float        { animation: float-gentle 4s ease-in-out infinite; }
+  .animate-rotate-slow  { animation: rotate-slow 20s linear infinite; }
 
-  /* Neon text glow */
-  .text-neon-glow   { text-shadow: 0 0 12px rgba(0,212,255,0.7), 0 0 28px rgba(0,212,255,0.35); }
-  .text-purple-glow { text-shadow: 0 0 12px rgba(139,92,246,0.7), 0 0 28px rgba(139,92,246,0.35); }
+  /* Modal entrance */
+  .animate-slide-up-fade { animation: slide-up-fade 0.3s cubic-bezier(0.16,1,0.3,1) both; }
+
+  /* Orbit animation classes */
+  .animate-orbit-spin        { animation: orbit-spin var(--orbit-duration, 30s) linear infinite; }
+  .animate-orbit-spin-rev    { animation: orbit-spin-rev var(--orbit-duration, 30s) linear infinite; }
+  .animate-orbit-outer       { animation: orbit-counter-outer var(--orbit-duration, 35s) linear infinite; }
+  .animate-orbit-middle      { animation: orbit-counter-middle var(--orbit-duration, 24s) linear infinite; }
+  .animate-orbit-inner       { animation: orbit-counter-inner var(--orbit-duration, 15s) linear infinite; }
+
+  /* Natural shadow utilities */
+  .shadow-soft-sm { box-shadow: 0 1px 6px rgba(0,0,0,0.07), 0 2px 12px rgba(0,0,0,0.04); }
+  .shadow-soft-md { box-shadow: 0 4px 16px rgba(0,0,0,0.09), 0 8px 28px rgba(0,0,0,0.05); }
+  .shadow-soft-lg { box-shadow: 0 8px 32px rgba(0,0,0,0.1),  0 20px 60px rgba(0,0,0,0.07); }
+
+  /* No-op stubs — referenced in tsx, kept to prevent missing-class warnings */
+  .text-neon-glow   { }
+  .text-purple-glow { }
+  .neon-glow-sm     { }
+  .neon-glow-md     { }
+  .neon-glow-lg     { }
+  .purple-glow-sm   { }
+  .green-glow-sm    { }
+
+  /* Warm dot-grid background */
+  .bg-dot-grid {
+    background-image: radial-gradient(circle, rgba(107,144,74,0.08) 1px, transparent 1px);
+    background-size: 30px 30px;
+  }
+
+  /* Hero card surface — cream/white solid */
+  .glass-surface {
+    background: #FDFCF8;
+  }
 }
 
-/* ── Base ───────────────────────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════════════
+   BASE STYLES
+══════════════════════════════════════════════════════════════════════════ */
 body {
-  background-color: #060b18;
-  color: #e2e8f0;
+  background-color: #F5F3ED;
+  color: #1E293B;
 }
 
-/* ── Neon scrollbar ─────────────────────────────────────────────────────── */
+/* ── Subtle paper/grain texture overlay ────────────────────────────────── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.028;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 180px 180px;
+}
+
+/* ── Warm scrollbar ─────────────────────────────────────────────────── */
 ::-webkit-scrollbar       { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb {
-  background: #1e2d4a;
-  border-radius: 99px;
-}
-::-webkit-scrollbar-thumb:hover { background: rgba(0,212,255,0.3); }
+::-webkit-scrollbar-thumb { background: #C8BFB0; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #6B904A; }

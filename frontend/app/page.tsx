@@ -1,1542 +1,369 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
-import type { KeyboardEvent, ChangeEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { useDropzone } from 'react-dropzone';
-import type { FileRejection } from 'react-dropzone';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
 
-const API = 'http://127.0.0.1:5003';
-
-/* ─── Auth helpers ───────────────────────────────────────────────────────────── */
-function getToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem('levy_ai_token');
-}
-
-function decodeJwtPayload(token: string): Record<string, unknown> | null {
-  try {
-    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    return JSON.parse(atob(b64));
-  } catch { return null; }
-}
-
-async function authFetch(url: string, init: RequestInit = {}): Promise<Response> {
-  const token = getToken();
-  const res = await fetch(url, {
-    ...init,
-    headers: {
-      ...((init.headers as Record<string, string>) ?? {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-  if (res.status === 401) {
-    localStorage.removeItem('levy_ai_token');
-    localStorage.removeItem('levy_ai_email');
-    window.location.href = '/login';
-  }
-  return res;
-}
-
-/* ─── Types ─────────────────────────────────────────────────────────────────── */
-interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  searchedWeb?: boolean;
-  webSources?: { title: string; url: string }[];
-  sources?: string[];
-  executedCode?: string;
-  codeOutput?: string;
-  images?: string[];
-}
-
-type SseEvent =
-  | { type: 'status'; phase: string }
-  | { type: 'result'; answer: string; sources: string[]; chunks_used: number; searched_web: boolean; web_sources: { title: string; url: string }[]; session_id: number; executed_code?: string; code_output?: string; images?: string[] }
-  | { type: 'error'; message: string };
-
-interface UploadedFile {
-  name: string;
-  size: number;
-  chunks: number;
-  fileType: 'pdf' | 'pptx' | 'image';
-  previewUrl?: string;
-}
-
-interface ChatSession {
-  id: number;
-  title: string;
-  created_at: string;
-  updated_at: string;
-  message_count: number;
-}
-
-type Lang = 'he' | 'en';
-
-/* ─── Translations ──────────────────────────────────────────────────────────── */
-const translations = {
-  he: {
-    subtitle: 'שותף המחקר החכם שלך',
-    docLoaded: 'מסמך טעון',
-    waiting: 'ממתין',
-    langLabel: 'EN',
-    openMenu: 'פתח תפריט',
-    closeMenu: 'סגור תפריט',
-    newChat: 'שיחה חדשה',
-    noPrevChats: 'אין שיחות קודמות',
-    deleteChat: 'מחק שיחה',
-    uploadDocs: 'העלאת מסמכים',
-    pdfOnly: 'PDF · PPTX · תמונות · עד 50 MB לקובץ',
-    dropHere: 'שחרר כאן!',
-    dragDrop: 'גרור ושחרר קבצים',
-    dragHint: 'PDF, PPTX, תמונות · ניתן לגרור מספר קבצים · או לחץ לבחירה ידנית',
-    pdfBadge: 'PDF · PPTX · PNG / JPG · עד 50 MB',
-    addMore: 'הוסף עוד קבצים',
-    uploading: 'מעלה...',
-    chunksLabel: (n: number) => `${n} קטעים · הועלה בהצלחה`,
-    imageUploaded: 'תמונה הועלתה בהצלחה',
-    removeFile: 'הסר קובץ',
-    howToUse: 'איך להשתמש?',
-    tips: [
-      'העלה קובץ PDF אחד או יותר – חומרי לימוד, מאמרים, ספרים',
-      'שאל שאלות בעברית או אנגלית על תוכן הקבצים',
-      'קבל סיכומים, הסברים ודוגמאות ממוקדות',
-      'חזור על הכל בקלות לפני המבחן',
-    ],
-    rejectionErr: (n: number) => `${n} קבצ${n === 1 ? '' : 'ים'} נדח${n === 1 ? '' : 'ו'} — ניתן להעלות PDF, PPTX, PNG, JPG בלבד.`,
-    uploadErr: 'שגיאה בהעלאת הקבצים.',
-    serverErr: 'לא ניתן להתחבר לשרת. בדוק שה-backend פועל על פורט 5003.',
-    chatTitle: 'Workspace',
-    docReady: 'מסמך מוכן – ניתן לשאול שאלות',
-    waitingPdf: 'ממתין לקובץ PDF',
-    askQ: 'שאל שאלה על המסמך',
-    uploadToStart: 'העלה מסמך PDF כדי להתחיל',
-    askHint: 'ניתן לשאול בעברית, אנגלית, או שילוב של שתיהן',
-    uploadSideHint: 'לחץ על אזור ההעלאה מצד ימין',
-    suggestions: ['סכם את המסמך בקצרה', 'מה הנקודות העיקריות?', 'הסבר את הנושא הראשון', 'תן לי שאלות לתרגול'],
-    webSourcesLabel: 'מקורות',
-    webSearched: 'שילב חיפוש ברשת',
-    showSources: (n: number) => `${n} מקורות`,
-    hideSources: 'הסתר',
-    searchingWeb: 'מחפש ברשת...',
-    runningCode: 'מריץ קוד Python...',
-    seeCode: 'הצג קוד',
-    hideCode: 'הסתר קוד',
-    codeOutputLabel: 'פלט',
-    chatPlaceholder: 'שאל שאלה על המסמך...',
-    chatPlaceholderNoDoc: 'יש להעלות קובץ תחילה',
-    send: 'שלח',
-    enterHint: 'Enter לשליחה · Shift+Enter לשורה חדשה',
-    commErr: 'שגיאה בתקשורת עם השרת',
-    paperTitle: 'כתיבה אקדמית',
-    paperSubtitle: 'כתוב מאמר מבוסס המסמכים שהועלו',
-    downloadPdf: 'הורד PDF',
-    downloadWord: 'הורד Word',
-    exporting: 'מייצא...',
-    topicChips: ['סיכום הנושאים המרכזיים', 'השוואת גישות ורעיונות', 'ביקורת ספרות', 'ניתוח מושגי מפתח'],
-    enterTopic: 'הזן נושא ולחץ על "חבר מאמר"',
-    aiWrites: 'ה-AI יכתוב מאמר אקדמי מלא ומובנה בעברית',
-    uploadFirst: 'יש להעלות מסמך PDF תחילה',
-    suggestedTopics: 'נושאים מוצעים:',
-    writingPaper: 'כותב מאמר אקדמי...',
-    takeSecs: 'זה עשוי לקחת מספר שניות',
-    paperErr: 'שגיאה ביצירת המאמר.',
-    sources: 'מקורות:',
-    topicPh: 'נושא המאמר (לדוגמה: השפעת הגלובליזציה על החינוך)',
-    topicPhNoDoc: 'יש להעלות קובץ תחילה',
-    instructionsPh: 'הוראות נוספות (אופציונלי): אורך, פרקים ספציפיים, סגנון...',
-    composePaper: 'חבר מאמר',
-    writingBtn: 'כותב מאמר...',
-    exportErr: 'שגיאה בייצוא ה-PDF',
-    wordErr: 'שגיאה בייצוא Word',
-    tabChat: 'Workspace',
-    tabPaper: 'כתיבה אקדמית',
-    footer: 'U-Note · מופעל על ידי OpenAI ו-Flask',
-    logout: 'יציאה',
-    navNotes: 'Notes',
-    navWorkspace: 'Workspace',
-    navInsights: 'Insights',
-    navAdmin: 'Admin',
-  },
-  en: {
-    subtitle: 'Your Academic Sidekick',
-    docLoaded: 'Document Loaded',
-    waiting: 'Waiting',
-    langLabel: 'HE',
-    openMenu: 'Open menu',
-    closeMenu: 'Close menu',
-    newChat: 'New Chat',
-    noPrevChats: 'No previous chats',
-    deleteChat: 'Delete chat',
-    uploadDocs: 'Upload Documents',
-    pdfOnly: 'PDF · PPTX · Images · Up to 50 MB per file',
-    dropHere: 'Drop here!',
-    dragDrop: 'Drag & drop files',
-    dragHint: 'PDF, PPTX, images · multiple files at once · or click to select',
-    pdfBadge: 'PDF · PPTX · PNG / JPG · Up to 50 MB',
-    addMore: 'Add more files',
-    uploading: 'Uploading...',
-    chunksLabel: (n: number) => `${n} chunks · Uploaded successfully`,
-    imageUploaded: 'Image uploaded successfully',
-    removeFile: 'Remove file',
-    howToUse: 'How to use?',
-    tips: [
-      'Upload one or more PDFs – study materials, articles, books',
-      'Ask questions in Hebrew or English about the file content',
-      'Get focused summaries, explanations, and examples',
-      'Review everything easily before the exam',
-    ],
-    rejectionErr: (n: number) => `${n} file${n === 1 ? '' : 's'} rejected — only PDF, PPTX, PNG, and JPG are allowed.`,
-    uploadErr: 'Error uploading files.',
-    serverErr: 'Cannot connect to server. Check that the backend is running on port 5003.',
-    chatTitle: 'Workspace',
-    docReady: 'Document ready – you can ask questions',
-    waitingPdf: 'Waiting for PDF file',
-    askQ: 'Ask a question about the document',
-    uploadToStart: 'Upload a PDF document to start',
-    askHint: 'You can ask in Hebrew, English, or both',
-    uploadSideHint: 'Click on the upload area on the left',
-    suggestions: ['Summarize the document briefly', 'What are the main points?', 'Explain the first topic', 'Give me practice questions'],
-    webSourcesLabel: 'Sources',
-    webSearched: 'Included web search',
-    showSources: (n: number) => `${n} sources`,
-    hideSources: 'Hide',
-    searchingWeb: 'Searching the web...',
-    runningCode: 'Running Python code...',
-    seeCode: 'See the code',
-    hideCode: 'Hide the code',
-    codeOutputLabel: 'Output',
-    chatPlaceholder: 'Ask a question about the document...',
-    chatPlaceholderNoDoc: 'Please upload a file first',
-    send: 'Send',
-    enterHint: 'Enter to send · Shift+Enter for new line',
-    commErr: 'Server communication error',
-    paperTitle: 'Academic Writing',
-    paperSubtitle: 'Write a paper based on uploaded documents',
-    downloadPdf: 'Download PDF',
-    downloadWord: 'Download Word',
-    exporting: 'Exporting...',
-    topicChips: ['Summary of main topics', 'Comparison of approaches', 'Literature review', 'Analysis of key concepts'],
-    enterTopic: 'Enter a topic and click "Compose Paper"',
-    aiWrites: 'The AI will write a full structured academic paper',
-    uploadFirst: 'Please upload a PDF document first',
-    suggestedTopics: 'Suggested topics:',
-    writingPaper: 'Writing academic paper...',
-    takeSecs: 'This may take a few seconds',
-    paperErr: 'Error generating paper.',
-    sources: 'Sources:',
-    topicPh: 'Paper topic (e.g., The impact of globalization on education)',
-    topicPhNoDoc: 'Please upload a file first',
-    instructionsPh: 'Additional instructions (optional): length, specific chapters, style...',
-    composePaper: 'Compose Paper',
-    writingBtn: 'Writing paper...',
-    exportErr: 'Error exporting PDF',
-    wordErr: 'Error exporting Word',
-    tabChat: 'Workspace',
-    tabPaper: 'Academic Writing',
-    footer: 'U-Note · Powered by OpenAI and Flask',
-    logout: 'Logout',
-    navNotes: 'Notes',
-    navWorkspace: 'Workspace',
-    navInsights: 'Insights',
-    navAdmin: 'Admin',
-  },
-};
-
-type T = typeof translations.he;
-
-/* ─── U-Note Logo mark ──────────────────────────────────────────────────────── */
-function LogoMark({ size = 36 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 52 52" fill="none" aria-hidden="true">
-      <rect width="52" height="52" rx="14" fill="#060b18"/>
-      <rect width="52" height="52" rx="14" fill="none" stroke="rgba(0,212,255,0.4)" strokeWidth="1.5"/>
-      <rect x="18" y="4" width="16" height="9" rx="3" fill="#00d4ff"/>
-      <rect x="6" y="11" width="40" height="3.5" rx="1.75" fill="#00d4ff"/>
-      <line x1="39" y1="14" x2="44" y2="23" stroke="#8b5cf6" strokeWidth="2" strokeLinecap="round"/>
-      <circle cx="44" cy="25.5" r="3" fill="#8b5cf6"/>
-      <path d="M13 15 L13 33 Q13 43 26 43 Q39 43 39 33 L39 15"
-            stroke="#00d4ff" strokeWidth="4.5" strokeLinecap="round" fill="none"/>
-    </svg>
-  );
-}
-
-/* ─── Inline SVG icons ──────────────────────────────────────────────────────── */
-function IconCloud({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round"
-        d="M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z" />
-    </svg>
-  );
-}
-function IconDoc({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round"
-        d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
-    </svg>
-  );
-}
-function IconCheck({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
-    </svg>
-  );
-}
-function IconX({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="m9.75 9.75 4.5 4.5m0-4.5-4.5 4.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
-    </svg>
-  );
-}
-function IconSend({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round"
-        d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
-    </svg>
-  );
-}
-function IconPen({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round"
-        d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
-    </svg>
-  );
-}
-function IconDownload({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round"
-        d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
-    </svg>
-  );
-}
-function IconSparkles({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round"
-        d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z" />
-    </svg>
-  );
-}
-function IconGlobe({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round"
-        d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0 1 12 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 0 1 3 12c0-1.605.42-3.113 1.157-4.418" />
-    </svg>
-  );
-}
-function IconPlus({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-    </svg>
-  );
-}
-function IconMenu({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
-    </svg>
-  );
-}
-function IconCode({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75 22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3-4.5 16.5" />
-    </svg>
-  );
-}
-function IconPresentation({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round"
-        d="M3.75 3v11.25A2.25 2.25 0 0 0 6 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0 1 18 16.5h-2.25m-7.5 0h7.5m-7.5 0-1 3m8.5-3 1 3m0 0 .5 1.5m-.5-1.5h-9.5m0 0-.5 1.5M9 11.25v1.5M12 9v3.75m3-6.75v6.75" />
-    </svg>
-  );
-}
-function IconPhoto({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round"
-        d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
-    </svg>
-  );
-}
-function IconWord({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round"
-        d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
-    </svg>
-  );
-}
-function IconShield({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round"
-        d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
-    </svg>
-  );
-}
-
-/* ─── Helpers ───────────────────────────────────────────────────────────────── */
-function getDomain(url: string): string {
-  try { return new URL(url).hostname.replace(/^www\./, ''); }
-  catch { return url; }
-}
-
-function preprocessMath(content: string): string {
-  return content
-    .replace(/\\\[([\s\S]*?)\\\]/g, (_m, eq) => `$$${eq}$$`)
-    .replace(/\\\(([\s\S]*?)\\\)/g, (_m, eq) => `$${eq}$`);
-}
-
-/* ─── Code interpreter result block ─────────────────────────────────────────── */
-function CodeExecutionBlock({ code, output, images, t }: {
-  code?: string; output?: string; images?: string[]; t: T;
-}) {
-  const [showCode, setShowCode] = useState(false);
-  const hasCode   = !!(code   && code.trim());
-  const hasOutput = !!(output && output.trim());
-  const hasImages = !!(images && images.length > 0);
+export default function HomePage() {
+  const router = useRouter();
 
   return (
-    <div dir="ltr" className="mt-2 rounded-xl overflow-hidden border border-[#1e2d4a] text-left text-sm">
-      <div className="flex items-center gap-2 px-3 py-1.5 bg-[#080e1f]">
-        <IconCode className="w-3.5 h-3.5 text-[#8b5cf6] shrink-0" />
-        <span className="flex-1 text-[11px] font-mono font-medium text-slate-400">Python</span>
-        {hasCode && (
-          <button onClick={() => setShowCode(s => !s)}
-            className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#1e2d4a] hover:bg-[#2a3f60] text-slate-300 text-[11px] font-medium transition-colors">
-            {showCode ? t.hideCode : t.seeCode}
-          </button>
-        )}
-      </div>
-      {showCode && hasCode && (
-        <pre className="m-0 p-4 bg-[#060b18] text-emerald-300 text-[11px] font-mono overflow-x-auto leading-relaxed whitespace-pre border-b border-[#1e2d4a]">
-          {code}
-        </pre>
-      )}
-      {hasOutput && (
-        <div className="px-4 py-3 bg-[#060b18] border-t border-[#1e2d4a] font-mono text-[12px] leading-relaxed whitespace-pre-wrap">
-          <span className="text-slate-600 text-[9px] uppercase tracking-widest block mb-1.5 select-none">{t.codeOutputLabel}</span>
-          <span className="text-slate-300">{output}</span>
-        </div>
-      )}
-      {hasImages && (
-        <div className="bg-[#0d1424] border-t border-[#1e2d4a] p-3 flex flex-col gap-2">
-          {images!.map((b64, i) => (
-            <img key={i} src={`data:image/png;base64,${b64}`} alt={`Chart ${i + 1}`}
-              className="w-full h-auto rounded-lg block" style={{ maxWidth: 480 }} />
+    <div dir="rtl" className="relative min-h-screen overflow-hidden" style={{ backgroundColor: '#e8e4d9', fontFamily: 'system-ui, sans-serif' }}>
+      
+      {/* Organic Background */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {/* Base gradient */}
+        <div className="absolute inset-0" style={{ background: 'linear-gradient(160deg, #e2ddd0 0%, #d8d3c5 40%, #e5e0d5 100%)' }} />
+        
+        {/* Large navy blob top right */}
+        <div className="absolute" style={{
+          top: '-15%', right: '-8%',
+          width: '55%', height: '65%',
+          background: 'radial-gradient(ellipse at 60% 40%, #1e2a45 0%, #263354 50%, transparent 80%)',
+          borderRadius: '40% 60% 60% 40% / 40% 40% 60% 60%',
+          opacity: 0.9,
+        }} />
+        
+        {/* Sage green blob left */}
+        <div className="absolute" style={{
+          top: '25%', left: '-12%',
+          width: '40%', height: '55%',
+          background: 'radial-gradient(ellipse at 40% 60%, #6a8f5e 0%, #5a7e4e 60%, transparent 85%)',
+          borderRadius: '60% 40% 40% 60% / 60% 60% 40% 40%',
+          opacity: 0.75,
+        }} />
+        
+        {/* Sage green blob bottom left */}
+        <div className="absolute" style={{
+          bottom: '-15%', left: '0%',
+          width: '38%', height: '45%',
+          background: 'radial-gradient(ellipse at 30% 30%, #7a9e6e 0%, #5a7e4e 70%, transparent 90%)',
+          borderRadius: '50% 70% 70% 30% / 30% 30% 70% 70%',
+          opacity: 0.65,
+        }} />
+        
+        {/* Large tan/cream center blob */}
+        <div className="absolute" style={{
+          top: '15%', left: '15%',
+          width: '60%', height: '70%',
+          background: 'radial-gradient(ellipse at 50% 50%, #ccc7b3 0%, #c0baa6 60%, transparent 85%)',
+          borderRadius: '55% 45% 45% 55% / 45% 55% 45% 55%',
+          opacity: 0.45,
+        }} />
+
+        {/* Navy accent bottom right */}
+        <div className="absolute" style={{
+          bottom: '0%', right: '5%',
+          width: '30%', height: '40%',
+          background: 'radial-gradient(ellipse at 60% 70%, #1e2a45 0%, #263354 60%, transparent 85%)',
+          borderRadius: '70% 30% 30% 70% / 30% 70% 30% 70%',
+          opacity: 0.8,
+        }} />
+
+        {/* Concentric rings top right (wood/pebble aesthetic) */}
+        <svg className="absolute" style={{ top: '3%', right: '12%', width: '280px', height: '280px', opacity: 0.12 }} viewBox="0 0 280 280" fill="none">
+          {[25,48,71,94,117,135].map((r, i) => (
+            <circle key={i} cx="140" cy="140" r={r} stroke="#c8b890" strokeWidth="1.2"/>
           ))}
-        </div>
-      )}
-    </div>
-  );
-}
+        </svg>
+        
+        {/* Concentric rings bottom left */}
+        <svg className="absolute" style={{ bottom: '5%', left: '12%', width: '220px', height: '220px', opacity: 0.18 }} viewBox="0 0 220 220" fill="none">
+          {[20,40,60,80,100].map((r, i) => (
+            <circle key={i} cx="110" cy="110" r={r} stroke="#9a8868" strokeWidth="1.5"/>
+          ))}
+        </svg>
 
-/* ─── PDF Uploader ──────────────────────────────────────────────────────────── */
-function PdfUploader({ onUpload, onRemove, t }: {
-  onUpload: () => void; onRemove: () => void; t: T;
-}) {
-  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
-  const [uploading, setUploading] = useState(false);
-  const [errors, setErrors] = useState<string[]>([]);
+        {/* Leaf/plant shape left edge */}
+        <svg className="absolute" style={{ top: '38%', left: '3%', width: '100px', height: '160px', opacity: 0.55 }} viewBox="0 0 100 160" fill="none">
+          <ellipse cx="50" cy="80" rx="32" ry="72" fill="#6a9058" transform="rotate(-15 50 80)"/>
+          <ellipse cx="50" cy="80" rx="14" ry="60" fill="#5a7e48" transform="rotate(-15 50 80)"/>
+          <line x1="50" y1="15" x2="50" y2="145" stroke="#4a6e38" strokeWidth="1.5" transform="rotate(-15 50 80)"/>
+          <line x1="50" y1="50" x2="30" y2="35" stroke="#4a6e38" strokeWidth="1" transform="rotate(-15 50 80)"/>
+          <line x1="50" y1="70" x2="70" y2="58" stroke="#4a6e38" strokeWidth="1" transform="rotate(-15 50 80)"/>
+          <line x1="50" y1="90" x2="28" y2="80" stroke="#4a6e38" strokeWidth="1" transform="rotate(-15 50 80)"/>
+        </svg>
 
-  const onDrop = useCallback(
-    async (accepted: File[], rejected: FileRejection[]) => {
-      const rejectionErrors: string[] = rejected.length ? [t.rejectionErr(rejected.length)] : [];
-      if (!accepted.length) { setErrors(rejectionErrors); return; }
-
-      const previewMap: Record<string, string> = {};
-      for (const file of accepted) {
-        if (file.type.startsWith('image/')) previewMap[file.name] = URL.createObjectURL(file);
-      }
-
-      setUploading(true); setErrors([]);
-      try {
-        const fd = new FormData();
-        for (const file of accepted) fd.append('files', file);
-        const res  = await authFetch(`${API}/upload-pdf`, { method: 'POST', body: fd });
-        const data = await res.json();
-        if (!res.ok) {
-          Object.values(previewMap).forEach(URL.revokeObjectURL);
-          setErrors([...rejectionErrors, data.error ?? t.uploadErr]); return;
-        }
-        if (data.files?.length) {
-          const incoming: UploadedFile[] = data.files.map(
-            (f: { source: string; size: number; chunks_stored: number; type: string }) => ({
-              name: f.source, size: f.size, chunks: f.chunks_stored,
-              fileType: (f.type ?? 'pdf') as UploadedFile['fileType'],
-              previewUrl: previewMap[f.source],
-            }),
-          );
-          setUploadedFiles(prev => {
-            const next = [...prev];
-            for (const nf of incoming) {
-              const idx = next.findIndex(f => f.name === nf.name);
-              if (idx >= 0) { if (next[idx].previewUrl) URL.revokeObjectURL(next[idx].previewUrl!); next[idx] = nf; }
-              else next.push(nf);
-            }
-            return next;
-          });
-          onUpload();
-        }
-        const serverErrors = (data.errors ?? []).map((e: { source: string; error: string }) => `${e.source}: ${e.error}`);
-        setErrors([...rejectionErrors, ...serverErrors]);
-      } catch {
-        Object.values(previewMap).forEach(URL.revokeObjectURL);
-        setErrors([...rejectionErrors, t.serverErr]);
-      } finally { setUploading(false); }
-    },
-    [onUpload, t],
-  );
-
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop,
-    accept: {
-      'application/pdf': ['.pdf'],
-      'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
-      'image/png':  ['.png'],
-      'image/jpeg': ['.jpg', '.jpeg'],
-    },
-    disabled: uploading,
-  });
-
-  const fmt = (b: number) =>
-    b < 1_048_576 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1_048_576).toFixed(1)} MB`;
-
-  const handleRemoveFile = (name: string) => {
-    const target = uploadedFiles.find(f => f.name === name);
-    if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
-    const next = uploadedFiles.filter(f => f.name !== name);
-    setUploadedFiles(next);
-    if (next.length === 0) onRemove();
-  };
-
-  const hasFiles = uploadedFiles.length > 0;
-
-  return (
-    <div className="flex flex-col gap-4 h-full">
-      <div className="bg-[#0d1424] rounded-2xl border border-[#1e2d4a] p-6 flex flex-col gap-5">
-
-        <div className="flex items-center gap-3">
-          <span className="w-9 h-9 bg-[#00d4ff]/10 rounded-xl flex items-center justify-center shrink-0 border border-[#00d4ff]/20">
-            <IconDoc className="w-5 h-5 text-[#00d4ff]" />
-          </span>
-          <div>
-            <p className="font-semibold text-slate-200 text-sm leading-tight">{t.uploadDocs}</p>
-            <p className="text-xs text-slate-500">{t.pdfOnly}</p>
-          </div>
-        </div>
-
-        {hasFiles && (
-          <div className="flex flex-col gap-2 max-h-48 overflow-y-auto">
-            {uploadedFiles.map(file => {
-              const isPptx  = file.fileType === 'pptx';
-              const isImage = file.fileType === 'image';
-              return (
-                <div key={file.name}
-                  className="flex items-center gap-3 border border-[#1e2d4a] bg-[#080e1f] rounded-xl px-4 py-3">
-                  {isImage && file.previewUrl ? (
-                    <img src={file.previewUrl} alt={file.name} className="w-8 h-8 rounded-lg object-cover shrink-0 border border-[#1e2d4a]" />
-                  ) : (
-                    <span className="w-8 h-8 bg-[#00d4ff]/10 rounded-lg flex items-center justify-center shrink-0 border border-[#00d4ff]/20">
-                      {isPptx  && <IconPresentation className="w-5 h-5 text-[#00d4ff]" />}
-                      {isImage && <IconPhoto        className="w-5 h-5 text-[#00d4ff]" />}
-                      {!isPptx && !isImage && <IconCheck className="w-5 h-5 text-emerald-400" />}
-                    </span>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-slate-300 text-xs truncate">{file.name}</p>
-                    <p className="text-xs text-slate-500">
-                      {fmt(file.size)} · {isImage ? t.imageUploaded : t.chunksLabel(file.chunks)}
-                    </p>
-                  </div>
-                  <button onClick={() => handleRemoveFile(file.name)} aria-label={t.removeFile}
-                    className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-red-500/20 transition-colors shrink-0">
-                    <IconX className="w-4 h-4 text-slate-500 hover:text-red-400" />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {!hasFiles ? (
-          <div {...getRootProps()}
-            className={[
-              'rounded-2xl border-2 border-dashed flex flex-col items-center justify-center',
-              'gap-4 min-h-52 cursor-pointer transition-all duration-200 px-6 py-10 text-center select-none',
-              uploading
-                ? 'opacity-50 cursor-not-allowed border-[#00d4ff]/20 bg-[#00d4ff]/5'
-                : isDragActive
-                  ? 'border-[#00d4ff] bg-[#00d4ff]/10 scale-[1.01] shadow-[0_0_24px_rgba(0,212,255,0.15)]'
-                  : 'border-[#1e2d4a] hover:border-[#00d4ff]/50 hover:bg-[#00d4ff]/5',
-            ].join(' ')}>
-            <input {...getInputProps()} />
-            {uploading && (
-              <>
-                <div className="w-12 h-12 rounded-full border-2 border-[#1e2d4a] border-t-[#00d4ff] animate-spin" />
-                <p className="text-sm font-medium text-[#00d4ff]">{t.uploading}</p>
-              </>
-            )}
-            {!uploading && isDragActive && (
-              <>
-                <div className="w-16 h-16 bg-[#00d4ff] rounded-2xl flex items-center justify-center animate-bounce neon-glow-md">
-                  <IconCloud className="w-9 h-9 text-[#060b18]" />
-                </div>
-                <p className="text-[#00d4ff] font-bold text-lg">{t.dropHere}</p>
-              </>
-            )}
-            {!uploading && !isDragActive && (
-              <>
-                <div className="w-16 h-16 bg-gradient-to-br from-[#00d4ff] to-[#0085ff] rounded-2xl flex items-center justify-center neon-glow-sm">
-                  <IconCloud className="w-9 h-9 text-[#060b18]" />
-                </div>
-                <div className="space-y-1">
-                  <p className="font-semibold text-slate-300">{t.dragDrop}</p>
-                  <p className="text-sm text-slate-600">{t.dragHint}</p>
-                </div>
-                <span className="px-3 py-1 bg-[#00d4ff]/10 border border-[#00d4ff]/20 text-[#00d4ff] text-xs font-medium rounded-full">
-                  {t.pdfBadge}
-                </span>
-              </>
-            )}
-          </div>
-        ) : (
-          <div {...getRootProps()}
-            className={[
-              'rounded-xl border-2 border-dashed flex items-center justify-center gap-3',
-              'py-3 px-4 cursor-pointer transition-all duration-150 select-none',
-              uploading
-                ? 'opacity-50 cursor-not-allowed border-[#1e2d4a]'
-                : isDragActive
-                  ? 'border-[#00d4ff] bg-[#00d4ff]/10'
-                  : 'border-[#1e2d4a] hover:border-[#00d4ff]/40 hover:bg-[#00d4ff]/5',
-            ].join(' ')}>
-            <input {...getInputProps()} />
-            {uploading
-              ? <div className="w-4 h-4 rounded-full border-2 border-[#1e2d4a] border-t-[#00d4ff] animate-spin" />
-              : <IconCloud className="w-4 h-4 text-[#00d4ff]/60 shrink-0" />
-            }
-            <span className="text-xs font-medium text-[#00d4ff]/70">
-              {uploading ? t.uploading : t.addMore}
-            </span>
-          </div>
-        )}
-
-        {errors.map((err, i) => (
-          <div key={i} className="flex items-center gap-2 bg-red-950/50 border border-red-500/30 text-red-400 rounded-xl px-4 py-3 text-sm">
-            <IconX className="w-4 h-4 shrink-0" />
-            {err}
-          </div>
+        {/* Small pebble dots */}
+        {[[10, 22, '#b8a880'], [14, 20, '#a89870'], [8, 18, '#c8b890']].map(([w, h, c], i) => (
+          <div key={i} className="absolute" style={{ 
+            top: `${16 + i*1.5}%`, right: `${44 - i*2}%`,
+            width: `${w}px`, height: `${h}px`,
+            background: c, borderRadius: '50%', opacity: 0.55 
+          }} />
         ))}
+
+        {/* Cloud-like shapes */}
+        <div className="absolute" style={{
+          top: '52%', left: '-3%',
+          width: '22%', height: '14%',
+          background: 'rgba(255,255,255,0.55)',
+          borderRadius: '50% 70% 70% 30% / 30% 50% 70% 50%',
+          filter: 'blur(10px)',
+        }} />
+        <div className="absolute" style={{
+          bottom: '22%', right: '22%',
+          width: '18%', height: '11%',
+          background: 'rgba(255,255,255,0.45)',
+          borderRadius: '70% 30% 50% 50% / 50% 70% 30% 50%',
+          filter: 'blur(8px)',
+        }} />
+        <div className="absolute" style={{
+          top: '8%', left: '35%',
+          width: '12%', height: '8%',
+          background: 'rgba(255,255,255,0.4)',
+          borderRadius: '50%',
+          filter: 'blur(6px)',
+        }} />
       </div>
 
-      {/* How to use panel */}
-      <div className="flex-1 bg-[#0d1424] border border-[#1e2d4a] rounded-2xl p-5">
-        <p className="text-sm font-semibold text-[#8b5cf6] mb-3">{t.howToUse}</p>
-        <ul className="space-y-2.5">
-          {t.tips.map((tip, i) => (
-            <li key={i} className="flex gap-2 items-start text-sm text-slate-400">
-              <span className="mt-2 w-1.5 h-1.5 rounded-full bg-[#8b5cf6]/60 shrink-0" />
-              {tip}
-            </li>
-          ))}
-        </ul>
-      </div>
-    </div>
-  );
-}
-
-/* ─── Chat Interface ─────────────────────────────────────────────────────────── */
-interface ChatInterfaceProps {
-  hasDoc: boolean;
-  sessionId: number | null;
-  initialMessages: Message[];
-  onSessionCreated: (id: number) => void;
-  onSessionsUpdated: () => void;
-  lang: Lang;
-  t: T;
-}
-
-function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, onSessionsUpdated, lang, t }: ChatInterfaceProps) {
-  const [messages, setMessages] = useState<Message[]>(initialMessages);
-  const [localSessionId, setLocalSessionId] = useState<number | null>(sessionId);
-  const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [searchPhase, setSearchPhase] = useState<'thinking' | 'searching_web' | 'running_code'>('thinking');
-  const [visibleSources, setVisibleSources] = useState<Set<string>>(new Set());
-  const bottomRef   = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading]);
-
-  const send = useCallback(async (text?: string) => {
-    const q = (text ?? input).trim();
-    if (!q || loading || !hasDoc) return;
-    const userMsg: Message = { id: `u${Date.now()}`, role: 'user', content: q };
-    setMessages(prev => [...prev, userMsg]);
-    setInput(''); setLoading(true); setSearchPhase('thinking');
-    if (textareaRef.current) textareaRef.current.style.height = 'auto';
-
-    try {
-      const payload  = { message: q, session_id: localSessionId };
-      const response = await authFetch(`${API}/ask`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error ?? t.commErr);
-      }
-      if (!response.body) throw new Error('No response body');
-
-      const reader  = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '', done = false;
-
-      while (!done) {
-        const { done: streamDone, value } = await reader.read();
-        if (streamDone) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          let parsed: SseEvent;
-          try { parsed = JSON.parse(line.slice(6)) as SseEvent; }
-          catch { continue; }
-          if (parsed.type === 'status') {
-            setSearchPhase(parsed.phase as 'thinking' | 'searching_web' | 'running_code');
-          } else if (parsed.type === 'result') {
-            if (!localSessionId && parsed.session_id) {
-              setLocalSessionId(parsed.session_id);
-              onSessionCreated(parsed.session_id);
-            }
-            onSessionsUpdated();
-            setMessages(prev => [...prev, {
-              id: `a${Date.now()}`, role: 'assistant', content: parsed.answer,
-              searchedWeb: parsed.searched_web, webSources: parsed.web_sources ?? [],
-              sources: parsed.sources ?? [],
-              executedCode: parsed.executed_code || undefined,
-              codeOutput:   parsed.code_output   || undefined,
-              images: parsed.images && parsed.images.length > 0 ? parsed.images : undefined,
-            }]);
-            done = true; break;
-          } else if (parsed.type === 'error') {
-            throw new Error(parsed.message);
-          }
-        }
-      }
-    } catch (err) {
-      setMessages(prev => [...prev, { id: `e${Date.now()}`, role: 'assistant', content: err instanceof Error ? err.message : String(err) }]);
-    } finally { setLoading(false); setSearchPhase('thinking'); }
-  }, [input, loading, hasDoc, localSessionId, onSessionCreated, onSessionsUpdated, t]);
-
-  const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
-  };
-  const onInput = (e: ChangeEvent<HTMLTextAreaElement>) => {
-    setInput(e.target.value);
-    const el = e.target; el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 130)}px`;
-  };
-
-  const userAlign = lang === 'he' ? 'justify-start' : 'justify-end';
-  const aiAlign   = lang === 'he' ? 'justify-end'   : 'justify-start';
-
-  return (
-    <div className="bg-[#0d1424] rounded-2xl border border-[#1e2d4a] flex flex-col flex-1 min-h-[520px]"
-         style={{ boxShadow: '0 0 0 1px rgba(0,212,255,0.04)' }}>
-
-      {/* Header */}
-      <div className="px-5 py-4 border-b border-[#1e2d4a] flex items-center gap-3 shrink-0">
-        <span className="w-9 h-9 bg-gradient-to-br from-[#00d4ff] to-[#0085ff] rounded-xl flex items-center justify-center shrink-0 neon-glow-sm">
-          <IconSparkles className="w-5 h-5 text-[#060b18]" />
-        </span>
-        <div className="flex-1 min-w-0">
-          <p className="font-semibold text-slate-200 text-sm">{t.chatTitle}</p>
-          <div className="flex items-center gap-1.5 mt-0.5">
-            <span className={`w-1.5 h-1.5 rounded-full transition-colors duration-500 ${hasDoc ? 'bg-[#00d4ff] animate-pulse' : 'bg-slate-600'}`} />
-            <span className="text-xs text-slate-500">{hasDoc ? t.docReady : t.waitingPdf}</span>
-          </div>
+      {/* ─── HEADER ─── */}
+      <header
+        className="relative z-20 flex items-center justify-between px-8 py-3"
+        style={{
+          backgroundColor: 'rgba(235, 231, 220, 0.88)',
+          backdropFilter: 'blur(12px)',
+          borderBottom: '1px solid rgba(170,160,140,0.25)',
+        }}
+      >
+        {/* Logo (right side in RTL) */}
+        <div className="flex items-center gap-2 order-last">
+          <svg width="34" height="34" viewBox="0 0 40 40" fill="none">
+            <rect width="40" height="40" rx="8" fill="#1e2a45"/>
+            <path d="M10 30 L20 12 L30 30" stroke="white" strokeWidth="2.5" fill="none" strokeLinejoin="round"/>
+            <path d="M14 22 L26 22" stroke="white" strokeWidth="2" strokeLinecap="round"/>
+            <circle cx="30" cy="10" r="5" fill="#f5c842"/>
+            <path d="M27.5 10 L29.5 12 L33 8" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          <span style={{ fontSize: '1.2rem', fontWeight: 700, color: '#1e2a45', letterSpacing: '-0.02em' }}>U-Note</span>
         </div>
-      </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-3 min-h-0">
-        {messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-5 py-12 flex-1 text-center">
-            <div className="w-20 h-20 bg-[#00d4ff]/5 border border-[#00d4ff]/10 rounded-3xl flex items-center justify-center">
-              <IconSparkles className="w-10 h-10 text-[#00d4ff]/40" />
-            </div>
-            <div>
-              <p className="font-medium text-slate-400">{hasDoc ? t.askQ : t.uploadToStart}</p>
-              <p className="text-sm text-slate-600 mt-1">{hasDoc ? t.askHint : t.uploadSideHint}</p>
-            </div>
-            {hasDoc && (
-              <div className="flex flex-wrap gap-2 justify-center">
-                {t.suggestions.map(s => (
-                  <button key={s} onClick={() => send(s)}
-                    className="px-4 py-2 text-xs bg-[#00d4ff]/5 hover:bg-[#00d4ff]/10 text-[#00d4ff]/70 hover:text-[#00d4ff] border border-[#00d4ff]/20 hover:border-[#00d4ff]/40 rounded-full transition-all">
-                    {s}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : (
-          <>
-            {messages.map(msg => (
-              <div key={msg.id} className={`flex ${msg.role === 'user' ? userAlign : aiAlign}`}>
-                <div className="flex flex-col gap-1.5 max-w-[78%]">
-                  <div dir="auto"
-                    className={[
-                      'px-4 py-3 rounded-2xl text-sm',
-                      msg.role === 'user'
-                        ? 'bg-[#00d4ff] text-[#060b18] rounded-tr-sm leading-relaxed whitespace-pre-wrap font-medium neon-glow-sm'
-                        : 'bg-[#111c35] text-slate-200 rounded-tl-sm border border-[#1e2d4a]',
-                    ].join(' ')}>
-                    {msg.role === 'user' ? msg.content : (
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm, remarkMath]}
-                        rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: '#cc0000' }]]}
-                        components={{
-                          p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
-                          strong: ({ children }) => <strong className="font-semibold text-white">{children}</strong>,
-                          em: ({ children }) => <em className="italic">{children}</em>,
-                          pre: ({ children }) => (
-                            <pre dir="ltr" style={{ direction: 'ltr', textAlign: 'left', unicodeBidi: 'embed' }}
-                              className="m-0 p-4 bg-[#060b18] rounded-lg my-2 border border-[#1e2d4a] overflow-x-auto text-left">
-                              {children}
-                            </pre>
-                          ),
-                          code: ({ className, children }) => {
-                            if (className) return (
-                              <code dir="ltr" style={{ direction: 'ltr', textAlign: 'left', unicodeBidi: 'embed' }}
-                                className={`${className} text-emerald-300 text-[11px] font-mono leading-relaxed`}>
-                                {children}
-                              </code>
-                            );
-                            return <code className="px-1.5 py-0.5 bg-[#060b18] rounded text-[11px] font-mono text-[#00d4ff]/80">{children}</code>;
-                          },
-                          ul: ({ children }) => <ul className="list-disc ps-4 my-1.5 space-y-0.5">{children}</ul>,
-                          ol: ({ children }) => <ol className="list-decimal ps-4 my-1.5 space-y-0.5">{children}</ol>,
-                          li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-                          a: ({ href, children }) => (
-                            <a href={href ?? '#'} target="_blank" rel="noopener noreferrer"
-                              style={{ textDecoration: 'none' }}
-                              className="inline-flex items-center gap-1 max-w-[220px] px-2.5 py-0.5 mx-0.5 rounded-full bg-[#00d4ff]/5 border border-[#00d4ff]/30 text-[#00d4ff] text-xs font-semibold hover:bg-[#00d4ff]/10 hover:border-[#00d4ff]/60 transition-all align-middle">
-                              <span className="shrink-0 text-[11px]">🔗</span>
-                              <span className="min-w-0" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {children}
-                              </span>
-                            </a>
-                          ),
-                        }}>
-                        {preprocessMath(msg.content)}
-                      </ReactMarkdown>
-                    )}
-                  </div>
+        {/* Nav links (center in RTL) */}
+        <nav className="flex items-center gap-7 order-2">
+          <a href="#" style={{ fontSize: '0.875rem', fontWeight: 600, color: '#5a8a4a' }}>בית</a>
+          <a href="#" style={{ fontSize: '0.875rem', fontWeight: 400, color: '#555' }}>פתרונות</a>
+          <a href="#" style={{ fontSize: '0.875rem', fontWeight: 400, color: '#555' }}>בלוג</a>
+          <a href="#" style={{ fontSize: '0.875rem', fontWeight: 400, color: '#555' }}>תמחור</a>
+          <a href="#" style={{ fontSize: '0.875rem', fontWeight: 400, color: '#555' }}>התחבר</a>
+        </nav>
 
-                  {/* Code results */}
-                  {msg.role === 'assistant' &&
-                    (msg.executedCode || msg.codeOutput || (msg.images && msg.images.length > 0)) && (
-                    <CodeExecutionBlock code={msg.executedCode} output={msg.codeOutput} images={msg.images} t={t} />
-                  )}
-
-                  {/* Web source chips — neon outline style, on-demand */}
-                  {msg.role === 'assistant' && msg.webSources && msg.webSources.length > 0 && (
-                    <div className="mt-0.5">
-                      <button
-                        onClick={() => setVisibleSources(prev => {
-                          const next = new Set(prev);
-                          if (next.has(msg.id)) next.delete(msg.id); else next.add(msg.id);
-                          return next;
-                        })}
-                        className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-[#00d4ff]/20 bg-[#00d4ff]/5 hover:bg-[#00d4ff]/10 text-[#00d4ff]/60 hover:text-[#00d4ff] text-[11px] font-medium transition-all">
-                        <IconGlobe className="w-3 h-3 shrink-0" />
-                        {visibleSources.has(msg.id) ? t.hideSources : t.showSources(msg.webSources.length)}
-                      </button>
-                      {visibleSources.has(msg.id) && (
-                        <div className="flex flex-wrap gap-1.5 mt-1.5">
-                          {msg.webSources.map((src, i) => (
-                            <a key={i} href={src.url} target="_blank" rel="noopener noreferrer"
-                              title={src.title || src.url}
-                              className="group flex items-center gap-1.5 max-w-[180px] px-2.5 py-1.5 rounded-lg bg-[#0d1424] border border-[#00d4ff]/20 hover:border-[#00d4ff]/50 hover:bg-[#00d4ff]/5 transition-all no-underline">
-                              <span className="w-4 h-4 flex items-center justify-center rounded-full bg-[#00d4ff]/10 text-[#00d4ff] text-[10px] font-bold shrink-0 leading-none">
-                                {i + 1}
-                              </span>
-                              <IconGlobe className="w-3 h-3 text-slate-600 group-hover:text-[#00d4ff]/60 shrink-0 transition-colors" />
-                              <span className="text-xs text-slate-500 group-hover:text-slate-300 transition-colors min-w-0"
-                                style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {src.title ? src.title : getDomain(src.url)}
-                              </span>
-                            </a>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-
-            {/* Loading indicator */}
-            {loading && (
-              <div className={`flex ${aiAlign}`}>
-                <div className="bg-[#111c35] border border-[#1e2d4a] rounded-2xl rounded-tl-sm px-5 py-3.5">
-                  {searchPhase === 'searching_web' ? (
-                    <div className="flex items-center gap-2">
-                      <div className="w-3.5 h-3.5 rounded-full border-2 border-[#00d4ff]/20 border-t-[#00d4ff] animate-spin shrink-0" />
-                      <span className="text-xs text-[#00d4ff] font-medium">{t.searchingWeb}</span>
-                    </div>
-                  ) : searchPhase === 'running_code' ? (
-                    <div className="flex items-center gap-2">
-                      <div className="w-3.5 h-3.5 rounded-full border-2 border-[#8b5cf6]/20 border-t-[#8b5cf6] animate-spin shrink-0" />
-                      <IconCode className="w-3 h-3 text-[#8b5cf6] shrink-0" />
-                      <span className="text-xs text-[#8b5cf6] font-medium">{t.runningCode}</span>
-                    </div>
-                  ) : (
-                    <div className="flex gap-1.5 items-center">
-                      {[0, 150, 300].map(d => (
-                        <span key={d} className="w-2 h-2 rounded-full bg-[#00d4ff] animate-neon-dot"
-                          style={{ animationDelay: `${d}ms` }} />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-            <div ref={bottomRef} />
-          </>
-        )}
-      </div>
-
-      {/* Input area */}
-      <div className={`px-4 pb-4 pt-3 border-t border-[#1e2d4a] shrink-0 transition-opacity ${!hasDoc ? 'opacity-40' : ''}`}>
-        <div className={[
-          'flex items-end gap-2 rounded-2xl border px-4 py-2.5 transition-all duration-150',
-          hasDoc
-            ? 'bg-[#080e1f] border-[#1e2d4a] focus-within:border-[#00d4ff]/50 focus-within:shadow-[0_0_0_3px_rgba(0,212,255,0.08)]'
-            : 'bg-[#080e1f] border-[#1e2d4a] pointer-events-none',
-        ].join(' ')}>
-          <textarea ref={textareaRef} value={input} onChange={onInput} onKeyDown={onKey}
-            dir="auto" rows={1} disabled={!hasDoc || loading}
-            placeholder={hasDoc ? t.chatPlaceholder : t.chatPlaceholderNoDoc}
-            className="flex-1 bg-transparent resize-none outline-none text-sm text-slate-200 placeholder-slate-600 disabled:cursor-not-allowed leading-relaxed"
-            style={{ maxHeight: 130 }} />
-          <button onClick={() => send()} disabled={!hasDoc || !input.trim() || loading}
-            aria-label={t.send}
-            className="w-9 h-9 rounded-xl bg-[#00d4ff] hover:bg-[#00bbdd] disabled:bg-[#1e2d4a] flex items-center justify-center shrink-0 transition-all active:scale-95 disabled:cursor-not-allowed neon-glow-sm">
-            <IconSend className="w-4 h-4 text-[#060b18]" />
+        {/* Left side (in RTL) - CTA + icons */}
+        <div className="flex items-center gap-3 order-first">
+          <button style={{ padding: '6px', color: '#666', background: 'none', border: 'none', cursor: 'pointer' }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="2" y1="12" x2="22" y2="12"/>
+              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+            </svg>
           </button>
-        </div>
-        <p className="text-center text-xs text-slate-600 mt-2 select-none">{t.enterHint}</p>
-      </div>
-    </div>
-  );
-}
-
-/* ─── Paper Writer ───────────────────────────────────────────────────────────── */
-function PaperWriter({ hasDoc, t }: { hasDoc: boolean; t: T }) {
-  const [topic, setTopic]               = useState('');
-  const [instructions, setInstructions] = useState('');
-  const [loading, setLoading]           = useState(false);
-  const [paper, setPaper]               = useState<string | null>(null);
-  const [sources, setSources]           = useState<string[]>([]);
-  const [error, setError]               = useState<string | null>(null);
-  const [downloading, setDownloading]         = useState(false);
-  const [downloadingWord, setDownloadingWord] = useState(false);
-
-  const generate = useCallback(async (topicOverride?: string) => {
-    const top = (topicOverride ?? topic).trim();
-    if (!top || loading || !hasDoc) return;
-    setLoading(true); setError(null); setPaper(null); setSources([]);
-    try {
-      const res  = await authFetch(`${API}/generate-paper`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic: top, instructions: instructions.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) { setError(data.error ?? t.paperErr); return; }
-      setPaper(data.paper); setSources(data.sources ?? []);
-    } catch { setError(t.serverErr); }
-    finally  { setLoading(false); }
-  }, [topic, instructions, loading, hasDoc, t]);
-
-  const downloadPdf = async () => {
-    if (!paper || downloading) return;
-    setDownloading(true);
-    try {
-      const safeTitle = topic.trim().slice(0, 40).replace(/[^\w֐-׿\s-]/g, '') || 'paper';
-      const res = await authFetch(`${API}/export-pdf`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: paper, filename: `u-note-${safeTitle}.pdf` }),
-      });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? t.exportErr);
-      const blob = await res.blob();
-      const url  = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = `u-note-${safeTitle}.pdf`; a.click();
-      URL.revokeObjectURL(url);
-    } catch (err) { console.error('PDF export failed:', err); }
-    finally { setDownloading(false); }
-  };
-
-  const downloadWord = async () => {
-    if (!paper || downloadingWord) return;
-    setDownloadingWord(true);
-    try {
-      const safeTitle = topic.trim().slice(0, 40).replace(/[^\w֐-׿\s-]/g, '') || 'paper';
-      const res = await authFetch(`${API}/export-docx`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: paper, filename: `u-note-${safeTitle}.docx` }),
-      });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? t.wordErr);
-      const blob = await res.blob();
-      const url  = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = `u-note-${safeTitle}.docx`; a.click();
-      URL.revokeObjectURL(url);
-    } catch (err) { console.error('Word export failed:', err); }
-    finally { setDownloadingWord(false); }
-  };
-
-  const onInstructionsInput = (e: ChangeEvent<HTMLTextAreaElement>) => {
-    setInstructions(e.target.value);
-    const el = e.target; el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 100)}px`;
-  };
-
-  return (
-    <div className="bg-[#0d1424] rounded-2xl border border-[#1e2d4a] flex flex-col flex-1 min-h-[520px]">
-
-      <div className="px-5 py-4 border-b border-[#1e2d4a] flex items-center gap-3 shrink-0">
-        <span className="w-9 h-9 bg-gradient-to-br from-[#8b5cf6] to-[#6d28d9] rounded-xl flex items-center justify-center shrink-0 purple-glow-sm">
-          <IconPen className="w-5 h-5 text-white" />
-        </span>
-        <div className="flex-1 min-w-0">
-          <p className="font-semibold text-slate-200 text-sm">{t.paperTitle}</p>
-          <p className="text-xs text-slate-500">{hasDoc ? t.paperSubtitle : t.waitingPdf}</p>
-        </div>
-        {paper && (
-          <div className="flex items-center gap-2 shrink-0">
-            <button onClick={downloadWord} disabled={downloadingWord}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0085ff] hover:bg-[#0070dd] disabled:bg-[#1e2d4a] text-white text-xs font-medium rounded-lg transition-all active:scale-95">
-              <IconWord className="w-3.5 h-3.5" />
-              {downloadingWord ? t.exporting : t.downloadWord}
-            </button>
-            <button onClick={downloadPdf} disabled={downloading}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#00d4ff] hover:bg-[#00bbdd] disabled:bg-[#1e2d4a] text-[#060b18] text-xs font-bold rounded-lg transition-all active:scale-95">
-              <IconDownload className="w-3.5 h-3.5" />
-              {downloading ? t.exporting : t.downloadPdf}
-            </button>
-          </div>
-        )}
-      </div>
-
-      <div className="flex-1 overflow-y-auto px-5 py-4 min-h-0">
-        {!paper && !loading && !error && (
-          <div className="flex flex-col items-center justify-center gap-5 py-10 text-center h-full">
-            <div className="w-20 h-20 bg-[#8b5cf6]/5 border border-[#8b5cf6]/10 rounded-3xl flex items-center justify-center">
-              <IconPen className="w-10 h-10 text-[#8b5cf6]/40" />
-            </div>
-            <div>
-              <p className="font-medium text-slate-400">{hasDoc ? t.enterTopic : t.uploadFirst}</p>
-              <p className="text-sm text-slate-600 mt-1">{hasDoc ? t.aiWrites : t.uploadSideHint}</p>
-            </div>
-            {hasDoc && (
-              <>
-                <p className="text-xs text-slate-600">{t.suggestedTopics}</p>
-                <div className="flex flex-wrap gap-2 justify-center max-w-xs">
-                  {t.topicChips.map(chip => (
-                    <button key={chip} onClick={() => { setTopic(chip); generate(chip); }}
-                      className="px-4 py-2 text-xs bg-[#8b5cf6]/5 hover:bg-[#8b5cf6]/10 text-[#8b5cf6]/70 hover:text-[#8b5cf6] border border-[#8b5cf6]/20 hover:border-[#8b5cf6]/40 rounded-full transition-all">
-                      {chip}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        {loading && (
-          <div className="flex flex-col items-center justify-center gap-4 py-20 h-full">
-            <div className="w-12 h-12 rounded-full border-2 border-[#8b5cf6]/20 border-t-[#8b5cf6] animate-spin" />
-            <div className="text-center">
-              <p className="font-medium text-slate-400 text-sm">{t.writingPaper}</p>
-              <p className="text-xs text-slate-600 mt-1">{t.takeSecs}</p>
-            </div>
-          </div>
-        )}
-
-        {error && (
-          <div className="flex items-center gap-2 bg-red-950/50 border border-red-500/30 text-red-400 rounded-xl px-4 py-3 text-sm mt-4">
-            <IconX className="w-4 h-4 shrink-0" />{error}
-          </div>
-        )}
-
-        {paper && !loading && (
-          <div className="flex flex-col gap-3">
-            {sources.length > 0 && (
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs text-slate-600">{t.sources}</span>
-                {sources.map(s => (
-                  <span key={s} className="px-2 py-0.5 bg-[#8b5cf6]/10 text-[#8b5cf6] text-xs rounded-full border border-[#8b5cf6]/20">
-                    {s}
-                  </span>
-                ))}
-              </div>
-            )}
-            <div dir="rtl" className="bg-[#080e1f] rounded-xl border border-[#1e2d4a] p-8 text-slate-200">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm, remarkMath]}
-                rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: '#cc0000', strict: false }]]}
-                components={{
-                  h1: ({ children }) => <h1 className="text-2xl font-bold text-white mb-4 pb-2 border-b border-[#1e2d4a] text-center">{children}</h1>,
-                  h2: ({ children }) => <h2 className="text-lg font-bold text-slate-200 mt-7 mb-3">{children}</h2>,
-                  h3: ({ children }) => <h3 className="text-base font-semibold text-slate-300 mt-5 mb-2">{children}</h3>,
-                  p: ({ children }) => <p className="text-sm leading-8 mb-4 text-slate-300" style={{ textAlign: 'justify' }}>{children}</p>,
-                  strong: ({ children }) => <strong className="font-semibold text-white">{children}</strong>,
-                  em: ({ children }) => <em className="italic text-slate-400">{children}</em>,
-                  ul: ({ children }) => <ul className="list-disc mb-4 space-y-1 text-sm pe-5">{children}</ul>,
-                  ol: ({ children }) => <ol className="list-decimal mb-4 space-y-1 text-sm pe-5">{children}</ol>,
-                  li: ({ children }) => <li className="text-sm leading-7 text-slate-300">{children}</li>,
-                  blockquote: ({ children }) => (
-                    <blockquote className="border-r-4 border-[#8b5cf6]/50 pr-4 my-4 italic text-sm bg-[#8b5cf6]/5 py-2 rounded-sm text-slate-400">
-                      {children}
-                    </blockquote>
-                  ),
-                  hr: () => <hr className="my-6 border-[#1e2d4a]" />,
-                  table: ({ children }) => <div className="overflow-x-auto my-4"><table className="w-full text-sm border-collapse">{children}</table></div>,
-                  th: ({ children }) => <th className="border border-[#1e2d4a] px-3 py-2 bg-[#0d1424] font-semibold text-right text-slate-300">{children}</th>,
-                  td: ({ children }) => <td className="border border-[#1e2d4a] px-3 py-2 text-right text-slate-400">{children}</td>,
-                }}>
-                {preprocessMath(paper)}
-              </ReactMarkdown>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className={`px-4 pb-4 pt-3 border-t border-[#1e2d4a] shrink-0 ${!hasDoc ? 'opacity-40 pointer-events-none' : ''}`}>
-        <div className="flex flex-col gap-2">
-          <input type="text" value={topic} onChange={e => setTopic(e.target.value)} dir="auto"
-            disabled={!hasDoc || loading}
-            placeholder={hasDoc ? t.topicPh : t.topicPhNoDoc}
-            className="w-full rounded-xl border border-[#1e2d4a] bg-[#080e1f] px-4 py-2.5 text-sm text-slate-200 placeholder-slate-600 outline-none focus:border-[#8b5cf6]/50 focus:shadow-[0_0_0_3px_rgba(139,92,246,0.08)] transition-all disabled:cursor-not-allowed"
-            onKeyDown={e => { if (e.key === 'Enter') generate(); }} />
-          <textarea value={instructions} onChange={onInstructionsInput} dir="auto" rows={2}
-            disabled={!hasDoc || loading} placeholder={t.instructionsPh}
-            className="w-full rounded-xl border border-[#1e2d4a] bg-[#080e1f] px-4 py-2.5 text-sm text-slate-200 placeholder-slate-600 outline-none focus:border-[#8b5cf6]/50 focus:shadow-[0_0_0_3px_rgba(139,92,246,0.08)] transition-all resize-none disabled:cursor-not-allowed"
-            style={{ maxHeight: 100 }} />
-          <button onClick={() => generate()} disabled={!hasDoc || !topic.trim() || loading}
-            className="w-full py-2.5 rounded-xl bg-[#8b5cf6] hover:bg-[#7c3aed] disabled:bg-[#1e2d4a] text-white text-sm font-bold transition-all active:scale-[0.99] disabled:cursor-not-allowed flex items-center justify-center gap-2 animate-purple-pulse">
-            {loading
-              ? <><div className="w-4 h-4 rounded-full border-2 border-white/20 border-t-white animate-spin" /><span>{t.writingBtn}</span></>
-              : <><IconPen className="w-4 h-4" /><span>{t.composePaper}</span></>}
+          <button style={{ padding: '4px 6px', color: '#666', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 500 }}>א/A</button>
+          <button
+            onClick={() => router.push('/login')}
+            style={{
+              padding: '8px 18px',
+              borderRadius: '8px',
+              fontSize: '0.875rem',
+              fontWeight: 600,
+              color: 'white',
+              backgroundColor: '#1e2a45',
+              border: 'none',
+              cursor: 'pointer',
+              transition: 'opacity 0.2s',
+            }}
+          >
+            התחל עכשיו
           </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ─── Sidebar ────────────────────────────────────────────────────────────────── */
-interface SidebarProps {
-  sessions: ChatSession[];
-  currentSessionId: number | null;
-  onNewChat: () => void;
-  onSelectSession: (id: number) => void;
-  onDeleteSession: (id: number) => void;
-  onSwitchMode: (mode: 'chat' | 'paper') => void;
-  isOpen: boolean;
-  onClose: () => void;
-  isAdmin: boolean;
-  lang: Lang;
-  t: T;
-}
-
-function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDeleteSession, onSwitchMode, isOpen, onClose, isAdmin, lang, t }: SidebarProps) {
-  const router = useRouter();
-  const fmtDate = (iso: string) =>
-    new Date(iso).toLocaleString(lang === 'he' ? 'he-IL' : 'en-US', {
-      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-    });
-
-  const translateClass = isOpen
-    ? 'translate-x-0'
-    : lang === 'he' ? 'translate-x-full' : '-translate-x-full';
-
-  return (
-    <>
-      {/* Backdrop */}
-      <div
-        className={['fixed inset-0 z-40 bg-black/70 backdrop-blur-sm transition-opacity duration-300',
-          isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'].join(' ')}
-        onClick={onClose} aria-hidden="true" />
-
-      {/* Panel */}
-      <aside className={[
-        'fixed inset-y-0 start-0 z-50 w-72 bg-[#060b18] border-e border-[#1e2d4a]',
-        'flex flex-col transition-transform duration-300 ease-in-out',
-        translateClass,
-      ].join(' ')}
-      style={{ boxShadow: '4px 0 32px rgba(0,0,0,0.6)' }}>
-
-        {/* Logo header */}
-        <div className="flex items-center justify-between px-4 py-4 border-b border-[#1e2d4a] shrink-0">
-          <div className="flex items-center gap-2.5">
-            <LogoMark size={32} />
-            <div>
-              <p className="text-white font-bold text-sm leading-none text-neon-glow">U-Note</p>
-              <p className="text-slate-600 text-xs mt-0.5">{t.subtitle}</p>
-            </div>
-          </div>
-          <button onClick={onClose} aria-label={t.closeMenu}
-            className="p-1.5 rounded-lg hover:bg-[#1e2d4a] transition-colors shrink-0">
-            <IconX className="w-4 h-4 text-slate-500" />
-          </button>
-        </div>
-
-        {/* New chat button */}
-        <div className="px-3 py-3 border-b border-[#1e2d4a] shrink-0">
-          <button onClick={() => { onNewChat(); onClose(); }}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-[#00d4ff]/10 border border-[#00d4ff]/20 hover:bg-[#00d4ff]/15 hover:border-[#00d4ff]/40 text-[#00d4ff] text-sm font-semibold transition-all">
-            <IconPlus className="w-4 h-4 shrink-0" />
-            {t.newChat}
-          </button>
-        </div>
-
-        {/* Nav sections */}
-        <div className="flex-1 overflow-y-auto flex flex-col">
-
-          {/* Quick nav */}
-          <div className="px-3 py-3 border-b border-[#1e2d4a] space-y-1">
-            <p className="text-[10px] font-semibold text-slate-600 uppercase tracking-widest px-2 mb-2">Navigation</p>
-            <button onClick={() => { onSwitchMode('chat'); onClose(); }}
-              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#0d1424] text-slate-400 hover:text-slate-200 text-sm transition-colors">
-              <IconSparkles className="w-4 h-4 text-[#00d4ff]/60 shrink-0" />
-              {t.navWorkspace}
-            </button>
-            <button onClick={() => { onSwitchMode('paper'); onClose(); }}
-              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#0d1424] text-slate-400 hover:text-slate-200 text-sm transition-colors">
-              <IconPen className="w-4 h-4 text-[#8b5cf6]/60 shrink-0" />
-              {t.navInsights}
-            </button>
-            <button disabled
-              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-slate-600 text-sm cursor-not-allowed opacity-50">
-              <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 0 1 6 18.719m12 0a5.971 5.971 0 0 0-.941-3.197m0 0A5.995 5.995 0 0 0 12 12.75a5.995 5.995 0 0 0-5.058 2.772m0 0a3 3 0 0 0-4.681 2.72 8.986 8.986 0 0 0 3.74.477m.94-3.197a5.971 5.971 0 0 0-.94 3.197M15 6.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm6 3a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm-13.5 0a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Z" />
-              </svg>
-              Collaboration
-              <span className="ms-auto text-[10px] bg-[#1e2d4a] text-slate-600 px-1.5 py-0.5 rounded-full font-medium">Soon</span>
-            </button>
-          </div>
-
-          {/* Notes (sessions) */}
-          <div className="flex-1 overflow-y-auto py-2">
-            <p className="text-[10px] font-semibold text-slate-600 uppercase tracking-widest px-5 mb-2 mt-2">
-              {t.navNotes}
-            </p>
-            {sessions.length === 0 ? (
-              <p className="text-slate-600 text-xs text-center py-6 px-4">{t.noPrevChats}</p>
-            ) : (
-              sessions.map(s => (
-                <div key={s.id}
-                  onClick={() => { onSelectSession(s.id); onClose(); }}
-                  className={`group flex items-start gap-2 px-3 py-2.5 mx-1 rounded-lg cursor-pointer hover:bg-[#0d1424] transition-colors ${
-                    currentSessionId === s.id ? 'bg-[#0d1424] border border-[#00d4ff]/10' : ''
-                  }`}>
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-xs font-medium truncate leading-snug ${currentSessionId === s.id ? 'text-[#00d4ff]/80' : 'text-slate-300'}`}>
-                      {s.title}
-                    </p>
-                    <p className="text-slate-600 text-xs mt-0.5">{fmtDate(s.updated_at)}</p>
-                  </div>
-                  <button onClick={e => { e.stopPropagation(); onDeleteSession(s.id); }}
-                    aria-label={t.deleteChat}
-                    className="opacity-0 group-hover:opacity-100 mt-0.5 p-1 rounded hover:bg-red-500/20 transition-all shrink-0">
-                    <IconX className="w-3 h-3 text-slate-500 hover:text-red-400" />
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
-
-          {/* Admin link (hidden — only for admins) */}
-          {isAdmin && (
-            <div className="px-3 py-3 border-t border-[#1e2d4a] shrink-0">
-              <button onClick={() => { router.push('/admin'); onClose(); }}
-                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#1e2d4a]/50 text-slate-600 hover:text-slate-400 text-xs transition-colors">
-                <IconShield className="w-4 h-4 shrink-0" />
-                {t.navAdmin}
-              </button>
-            </div>
-          )}
-        </div>
-      </aside>
-    </>
-  );
-}
-
-/* ─── Root page ──────────────────────────────────────────────────────────────── */
-export default function Home() {
-  const router = useRouter();
-
-  const [authChecked,     setAuthChecked]     = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isAdmin,         setIsAdmin]         = useState(false);
-  const [userEmail,       setUserEmail]       = useState('');
-  const [userFirstName,   setUserFirstName]   = useState('');
-  const [userLastName,    setUserLastName]    = useState('');
-
-  const [hasDoc, setHasDoc]                     = useState(false);
-  const [mode, setMode]                         = useState<'chat' | 'paper'>('chat');
-  const [sessions, setSessions]                 = useState<ChatSession[]>([]);
-  const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
-  const [initialMessages, setInitialMessages]   = useState<Message[]>([]);
-  const [chatKey, setChatKey]                   = useState<string>('new');
-  const [pdfKey, setPdfKey]                     = useState<string>('initial');
-  const [lang, setLang]                         = useState<Lang>('he');
-  const [sidebarOpen, setSidebarOpen]           = useState(false);
-
-  const t = translations[lang];
-
-  useEffect(() => {
-    document.documentElement.dir  = lang === 'he' ? 'rtl' : 'ltr';
-    document.documentElement.lang = lang;
-    localStorage.setItem('levy_ai_lang', lang);
-  }, [lang]);
-
-  useEffect(() => {
-    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') setSidebarOpen(false); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
-  const fetchSessions = useCallback(async () => {
-    try {
-      const res = await authFetch(`${API}/sessions`);
-      if (!res.ok) return;
-      const data = await res.json();
-      setSessions(data.sessions ?? []);
-    } catch { /* backend not running yet */ }
-  }, []);
-
-  useEffect(() => {
-    const savedLang = localStorage.getItem('levy_ai_lang') as Lang | null;
-    if (savedLang === 'en' || savedLang === 'he') setLang(savedLang);
-
-    const token = localStorage.getItem('levy_ai_token');
-    if (!token) { router.replace('/login'); setAuthChecked(true); return; }
-
-    // Detect admin status from JWT payload (is_admin field added server-side)
-    const payload = decodeJwtPayload(token);
-    if (payload?.is_admin === true) setIsAdmin(true);
-
-    setIsAuthenticated(true);
-    setUserEmail(localStorage.getItem('levy_ai_email')      ?? '');
-    setUserFirstName(localStorage.getItem('levy_ai_first_name') ?? '');
-    setUserLastName(localStorage.getItem('levy_ai_last_name')   ?? '');
-    setAuthChecked(true);
-    authFetch(`${API}/sessions`)
-      .then(r => r.ok ? r.json() : { sessions: [] })
-      .then((data: { sessions?: ChatSession[] }) => setSessions(data.sessions ?? []))
-      .catch(() => {});
-  }, [router]);
-
-  const startNewChat = useCallback(() => {
-    setCurrentSessionId(null); setInitialMessages([]);
-    setChatKey(`new-${Date.now()}`);
-  }, []);
-
-  const handleNewChat = useCallback(() => {
-    setHasDoc(false); setPdfKey(`pdf-${Date.now()}`);
-    setCurrentSessionId(null); setInitialMessages([]);
-    setChatKey(`new-${Date.now()}`);
-  }, []);
-
-  const loadSession = useCallback(async (id: number) => {
-    try {
-      const res  = await authFetch(`${API}/sessions/${id}`);
-      const data = await res.json();
-      const msgs: Message[] = (data.messages ?? []).map(
-        (m: { id: number; role: 'user' | 'assistant'; content: string }) => ({
-          id: String(m.id), role: m.role, content: m.content,
-        }),
-      );
-      setCurrentSessionId(id); setInitialMessages(msgs);
-      setChatKey(`session-${id}`);
-    } catch { /* silently ignore */ }
-  }, []);
-
-  const deleteSession = useCallback(async (id: number) => {
-    try {
-      await authFetch(`${API}/sessions/${id}`, { method: 'DELETE' });
-      if (currentSessionId === id) startNewChat();
-      fetchSessions();
-    } catch { /* silently ignore */ }
-  }, [currentSessionId, startNewChat, fetchSessions]);
-
-  const handleSessionCreated = useCallback((id: number) => {
-    setCurrentSessionId(id); fetchSessions();
-  }, [fetchSessions]);
-
-  const handleUpload = useCallback(() => {
-    if (!hasDoc) startNewChat();
-    setHasDoc(true);
-  }, [hasDoc, startNewChat]);
-
-  const handleRemove = useCallback(() => {
-    setHasDoc(false); startNewChat();
-  }, [startNewChat]);
-
-  const toggleLang = () => setLang(l => l === 'he' ? 'en' : 'he');
-
-  const handleLogout = () => {
-    ['levy_ai_token', 'levy_ai_email', 'levy_ai_first_name', 'levy_ai_last_name'].forEach(k =>
-      localStorage.removeItem(k),
-    );
-    router.push('/login');
-  };
-
-  const userInitials = [userFirstName[0], userLastName[0]]
-    .filter(Boolean).join('').toUpperCase()
-    || userEmail.slice(0, 2).toUpperCase();
-
-  if (!authChecked || !isAuthenticated) return null;
-
-  return (
-    <div className="min-h-screen flex flex-col bg-[#060b18]">
-
-      {/* ── Header ──────────────────────────────────────────────────────────── */}
-      <header className="bg-[#080d1a] border-b border-[#1e2d4a] shrink-0 relative z-30"
-              style={{ boxShadow: '0 1px 0 rgba(0,212,255,0.06)' }}>
-        <div className="max-w-full px-4 py-3 flex items-center justify-between gap-3">
-
-          {/* Start: Hamburger + Logo */}
-          <div className="flex items-center gap-3">
-            <button onClick={() => setSidebarOpen(true)} aria-label={t.openMenu}
-              className="p-2 rounded-lg hover:bg-[#1e2d4a] transition-colors">
-              <IconMenu className="w-5 h-5 text-slate-400" />
-            </button>
-            <LogoMark size={34} />
-            <div>
-              <h1 className="text-lg font-bold text-white tracking-tight leading-none text-neon-glow">U-Note</h1>
-              <p className="text-xs text-slate-600 mt-0.5">{t.subtitle}</p>
-            </div>
-          </div>
-
-          {/* End: Status + Lang + Avatar + Logout */}
-          <div className="flex items-center gap-2">
-            <div className="hidden sm:flex items-center gap-2 bg-[#0d1424] border border-[#1e2d4a] rounded-full px-4 py-1.5">
-              <span className={`w-2 h-2 rounded-full transition-colors duration-500 ${hasDoc ? 'bg-[#00d4ff] animate-pulse' : 'bg-slate-700'}`} />
-              <span className="text-sm text-slate-400 font-medium">{hasDoc ? t.docLoaded : t.waiting}</span>
-            </div>
-            <button onClick={toggleLang} aria-label={`Switch to ${t.langLabel}`}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0d1424] hover:bg-[#111c35] border border-[#1e2d4a] rounded-full text-sm text-slate-300 font-semibold transition-colors">
-              <IconGlobe className="w-4 h-4 text-slate-500" />
-              {t.langLabel}
-            </button>
-            {/* Profile avatar */}
-            <button onClick={() => router.push('/profile')} title={userEmail} aria-label="Profile"
-              className="w-8 h-8 rounded-full bg-gradient-to-br from-[#00d4ff] to-[#0085ff] flex items-center justify-center text-[#060b18] text-xs font-black shrink-0 hover:scale-110 transition-transform select-none neon-glow-sm">
-              {userInitials || '?'}
-            </button>
-            {/* Logout */}
-            <button onClick={handleLogout} aria-label={t.logout}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0d1424] hover:bg-red-950/50 border border-[#1e2d4a] hover:border-red-500/30 rounded-full text-xs text-slate-500 hover:text-red-400 font-medium transition-all">
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round"
-                  d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15M12 9l-3 3m0 0 3 3m-3-3h12.75" />
-              </svg>
-              <span className="hidden sm:inline">{t.logout}</span>
-            </button>
-          </div>
         </div>
       </header>
 
-      {/* ── Sidebar ──────────────────────────────────────────────────────────── */}
-      <Sidebar
-        sessions={sessions}
-        currentSessionId={currentSessionId}
-        onNewChat={handleNewChat}
-        onSelectSession={loadSession}
-        onDeleteSession={deleteSession}
-        onSwitchMode={setMode}
-        isOpen={sidebarOpen}
-        onClose={() => setSidebarOpen(false)}
-        isAdmin={isAdmin}
-        lang={lang}
-        t={t}
-      />
+      {/* ─── HERO SECTION ─── */}
+      <main
+        className="relative z-10 flex items-center justify-center"
+        style={{ minHeight: 'calc(100vh - 116px)', padding: '40px 24px' }}
+      >
+        {/* Central Card */}
+        <div
+          style={{
+            position: 'relative',
+            width: '100%',
+            maxWidth: '520px',
+            background: 'rgba(255, 255, 255, 0.68)',
+            backdropFilter: 'blur(18px)',
+            WebkitBackdropFilter: 'blur(18px)',
+            borderRadius: '24px',
+            padding: '52px 44px 44px',
+            boxShadow: '0 8px 48px rgba(30, 42, 69, 0.10), 0 1px 8px rgba(30,42,69,0.06)',
+            border: '1px solid rgba(255,255,255,0.85)',
+            textAlign: 'center',
+          }}
+        >
+          <p style={{ fontSize: '0.8125rem', fontWeight: 500, color: '#8899aa', letterSpacing: '0.04em', marginBottom: '16px' }}>
+            AI platform
+          </p>
+          
+          <h1
+            style={{
+              fontSize: 'clamp(2rem, 5vw, 2.7rem)',
+              fontWeight: 800,
+              color: '#1a2540',
+              lineHeight: 1.22,
+              marginBottom: '36px',
+              fontFamily: 'Georgia, serif',
+            }}
+          >
+            פתרו כל אתגר אקדמי,<br />
+            ביעילות חסרת תקדים
+          </h1>
 
-      {/* ── Main content ─────────────────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col overflow-y-auto">
-        <main className="flex-1 max-w-7xl mx-auto w-full px-4 md:px-6 py-6 md:py-8 flex flex-col md:flex-row gap-6">
-          <div className="w-full md:w-[38%] flex flex-col">
-            <PdfUploader key={pdfKey} onUpload={handleUpload} onRemove={handleRemove} t={t} />
+          <button
+            onClick={() => router.push('/login')}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '13px 32px',
+              borderRadius: '12px',
+              fontSize: '1rem',
+              fontWeight: 600,
+              color: 'white',
+              backgroundColor: '#5a8a42',
+              border: 'none',
+              cursor: 'pointer',
+              boxShadow: '0 4px 16px rgba(90,138,66,0.35)',
+              transition: 'opacity 0.2s, transform 0.1s',
+            }}
+          >
+            התחל עכשיו
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 18 3 12 9 6"/>
+            </svg>
+          </button>
+        </div>
+
+        {/* Profile Pill 1 - Upper Right */}
+        <div
+          style={{
+            position: 'absolute',
+            top: '22%',
+            right: '6%',
+            background: 'rgba(255, 255, 255, 0.90)',
+            backdropFilter: 'blur(14px)',
+            WebkitBackdropFilter: 'blur(14px)',
+            borderRadius: '50px',
+            padding: '9px 14px 9px 10px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            boxShadow: '0 4px 20px rgba(30,42,69,0.10)',
+            border: '1px solid rgba(255,255,255,0.95)',
+          }}
+        >
+          <span style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e2a45' }}>Shmuel Levy</span>
+          <div
+            style={{
+              width: '38px',
+              height: '38px',
+              borderRadius: '50%',
+              background: 'linear-gradient(135deg, #c5d8be 0%, #9ab898 100%)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              border: '2px solid rgba(255,255,255,0.8)',
+            }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4a7a4a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+              <circle cx="12" cy="7" r="4"/>
+            </svg>
           </div>
-          <div className="flex-1 flex flex-col gap-3 min-h-0">
+        </div>
 
-            {/* Mode tab switcher */}
-            <div className="flex gap-1 p-1 bg-[#080e1f] border border-[#1e2d4a] rounded-xl shrink-0">
-              <button onClick={() => setMode('chat')}
-                className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${
-                  mode === 'chat'
-                    ? 'bg-[#00d4ff]/10 border border-[#00d4ff]/20 text-[#00d4ff]'
-                    : 'text-slate-500 hover:text-slate-300'
-                }`}>
-                {t.tabChat}
-              </button>
-              <button onClick={() => setMode('paper')}
-                className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${
-                  mode === 'paper'
-                    ? 'bg-[#8b5cf6]/10 border border-[#8b5cf6]/20 text-[#8b5cf6]'
-                    : 'text-slate-500 hover:text-slate-300'
-                }`}>
-                {t.tabPaper}
-              </button>
-            </div>
+        {/* Connector dot */}
+        <div
+          style={{
+            position: 'absolute',
+            top: '49%',
+            right: '10%',
+            width: '9px',
+            height: '9px',
+            background: '#8aaa70',
+            borderRadius: '50%',
+            boxShadow: '0 0 0 3px rgba(138,170,112,0.25)',
+          }}
+        />
 
-            <div className={mode === 'chat' ? 'flex-1 flex flex-col' : 'hidden'}>
-              <ChatInterface
-                key={chatKey}
-                hasDoc={hasDoc}
-                sessionId={currentSessionId}
-                initialMessages={initialMessages}
-                onSessionCreated={handleSessionCreated}
-                onSessionsUpdated={fetchSessions}
-                lang={lang}
-                t={t}
-              />
-            </div>
-            <div className={mode === 'paper' ? 'flex-1 flex flex-col' : 'hidden'}>
-              <PaperWriter hasDoc={hasDoc} t={t} />
-            </div>
+        {/* Profile Pill 2 - Lower Right */}
+        <div
+          style={{
+            position: 'absolute',
+            top: '58%',
+            right: '6%',
+            background: 'rgba(255, 255, 255, 0.90)',
+            backdropFilter: 'blur(14px)',
+            WebkitBackdropFilter: 'blur(14px)',
+            borderRadius: '50px',
+            padding: '9px 14px 9px 10px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            boxShadow: '0 4px 20px rgba(30,42,69,0.10)',
+            border: '1px solid rgba(255,255,255,0.95)',
+          }}
+        >
+          <span style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e2a45' }}>Shmuel Levy</span>
+          <div
+            style={{
+              width: '38px',
+              height: '38px',
+              borderRadius: '50%',
+              background: 'linear-gradient(135deg, #d8cdb8 0%, #b8a888 100%)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              border: '2px solid rgba(255,255,255,0.8)',
+            }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7a6a48" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+              <circle cx="12" cy="7" r="4"/>
+            </svg>
           </div>
-        </main>
+        </div>
+      </main>
 
-        <footer className="py-3 text-center text-xs text-slate-700 shrink-0 border-t border-[#1e2d4a]/50">
-          {t.footer}
-        </footer>
-      </div>
+      {/* ─── FOOTER ─── */}
+      <footer
+        className="relative z-20 flex items-center justify-between px-8 py-3"
+        style={{
+          borderTop: '1px solid rgba(180,170,150,0.25)',
+          backgroundColor: 'rgba(232,228,217,0.65)',
+        }}
+      >
+        <div className="flex items-center gap-5">
+          <a href="#" className="flex items-center gap-1.5" style={{ fontSize: '0.75rem', color: '#777', textDecoration: 'none' }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="2" y1="12" x2="22" y2="12"/>
+              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+            </svg>
+            תמחור כפוחלים
+          </a>
+        </div>
+        <div className="flex items-center gap-5">
+          <a href="#" className="flex items-center gap-1.5" style={{ fontSize: '0.75rem', color: '#777', textDecoration: 'none' }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+            </svg>
+            התחבר
+          </a>
+          <a href="#" className="flex items-center gap-1.5" style={{ fontSize: '0.75rem', color: '#777', textDecoration: 'none' }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+            העחוניין
+          </a>
+        </div>
+      </footer>
     </div>
   );
 }

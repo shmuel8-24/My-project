@@ -60,6 +60,7 @@ class User(_Base):
     password_hash = Column(String(255), nullable=False)
     first_name    = Column(String(100), nullable=False, server_default='')
     last_name     = Column(String(100), nullable=False, server_default='')
+    role          = Column(String(20),  nullable=False, server_default='user')  # 'user' | 'admin'
     created_at    = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     sessions      = relationship(
         "ChatSession", back_populates="owner",
@@ -121,6 +122,10 @@ with _db_engine.connect() as _conn:
         (
             "ALTER TABLE users ADD COLUMN last_name VARCHAR(100) NOT NULL DEFAULT ''",
             "added last_name to users",
+        ),
+        (
+            "ALTER TABLE users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'user'",
+            "added role to users",
         ),
         # otp_codes is a new table — create_all handles it; no ALTER needed.
     ]:
@@ -327,11 +332,12 @@ def hybrid_search(user_id: int, query_text: str, n_results: int) -> tuple[list[s
 
 
 # ── JWT helpers ───────────────────────────────────────────────────────────────
-def _make_token(user_id: int, email: str) -> str:
+def _make_token(user_id: int, email: str, role: str = "user") -> str:
     payload = {
         "user_id":  user_id,
         "email":    email,
-        "is_admin": bool(ADMIN_EMAIL and email.lower() == ADMIN_EMAIL),
+        "role":     role,
+        "is_admin": role == "admin",
         "iat":      datetime.now(timezone.utc),
         "exp":      datetime.now(timezone.utc) + timedelta(hours=TOKEN_TTL_H),
     }
@@ -361,7 +367,7 @@ def token_required(f):
 
 
 def admin_required(f):
-    """Decorator: validates the Bearer JWT and verifies the caller is the platform admin."""
+    """Decorator: validates the Bearer JWT and enforces role == 'admin' (RBAC)."""
     @functools.wraps(f)
     def decorated(*args, **kwargs):
         auth = request.headers.get("Authorization", "")
@@ -374,9 +380,14 @@ def admin_required(f):
             return jsonify({"error": "Session expired. Please log in again."}), 401
         except pyjwt.InvalidTokenError:
             return jsonify({"error": "Invalid token. Please log in again."}), 401
+
+        # Primary check: role field in JWT
+        role         = payload.get("role", "user")
         caller_email = payload.get("email", "").lower()
-        if not ADMIN_EMAIL or caller_email != ADMIN_EMAIL:
-            return jsonify({"error": "Forbidden."}), 403
+        # Fallback: ADMIN_EMAIL env var (for tokens issued before role was added)
+        is_admin = role == "admin" or (ADMIN_EMAIL and caller_email == ADMIN_EMAIL)
+        if not is_admin:
+            return jsonify({"error": "Forbidden — admin access required."}), 403
         return f(payload["user_id"], *args, **kwargs)
     return decorated
 
@@ -659,27 +670,34 @@ def verify_otp():
         if not user:
             if not first_name or not last_name:
                 return jsonify({"error": "First and last name are required for new accounts."}), 400
+            assigned_role = "admin" if (ADMIN_EMAIL and email == ADMIN_EMAIL) else "user"
             user = User(
                 email=email,
-                # Random hash — account is passwordless, this field is kept for schema compat.
                 password_hash=generate_password_hash(secrets.token_hex(32)),
                 first_name=first_name,
                 last_name=last_name,
+                role=assigned_role,
             )
             db.add(user)
             db.flush()
-            print(f"[OTP] New user created: {first_name} {last_name} <{email}>")
+            print(f"[OTP] New user created: {first_name} {last_name} <{email}> role={assigned_role}")
+        else:
+            # Auto-promote existing admin-email user if role not yet set
+            if ADMIN_EMAIL and email == ADMIN_EMAIL and user.role != "admin":
+                user.role = "admin"
+                print(f"[OTP] Auto-promoted {email} to admin")
 
         db.commit()
         db.refresh(user)
 
-        token = _make_token(user.id, user.email)
-        print(f"[OTP] Verified: {email} (id={user.id})")
+        token = _make_token(user.id, user.email, user.role)
+        print(f"[OTP] Verified: {email} (id={user.id}, role={user.role})")
         return jsonify({
             "token":      token,
             "email":      user.email,
             "first_name": user.first_name,
             "last_name":  user.last_name,
+            "role":       user.role,
         }), 200
     finally:
         db.close()
@@ -792,6 +810,7 @@ def admin_list_users(_user_id: int):
                 "first_name":     user.first_name,
                 "last_name":      user.last_name,
                 "email":          user.email,
+                "role":           user.role,
                 "created_at":     user.created_at.isoformat() if user.created_at else None,
                 "session_count":  row.session_count,
                 "message_count":  row.message_count,
