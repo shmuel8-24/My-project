@@ -85,7 +85,11 @@ function StatChip({ label, value }: { label: string; value: number | string }) {
 export default function ProfilePage() {
   const router = useRouter();
 
-  const [lang,       setLang]       = useState<Lang>('he');
+  const [lang,       setLang]       = useState<Lang>(() => {
+    if (typeof window === 'undefined') return 'he';
+    const savedLang = localStorage.getItem('levy_ai_lang');
+    return savedLang === 'en' ? 'en' : 'he';
+  });
   const [loading,    setLoading]    = useState(true);
   const [editing,    setEditing]    = useState(false);
   const [saving,     setSaving]     = useState(false);
@@ -105,16 +109,15 @@ export default function ProfilePage() {
 
   const t = i18n[lang];
 
+  // Fetch profile once on mount. Deliberately excludes `t` from deps so that
+  // toggling the language never re-triggers the fetch (which was the loop).
   useEffect(() => {
-    const savedLang = localStorage.getItem('levy_ai_lang') as Lang | null;
-    if (savedLang === 'en' || savedLang === 'he') setLang(savedLang);
-
     const token = localStorage.getItem('levy_ai_token');
-    if (!token) { router.replace('/login'); return; }
+    if (!token) { router.replace('/'); return; }
 
     authFetch(`${API}/api/profile`)
       .then(async r => {
-        if (r.status === 401) { router.replace('/login'); return; }
+        if (r.status === 401) { router.replace('/'); return; }
         const data = await r.json();
         setFirstName(data.first_name     ?? '');
         setLastName(data.last_name       ?? '');
@@ -124,9 +127,9 @@ export default function ProfilePage() {
         setMessageCount(data.message_count  ?? 0);
         setDocumentCount(data.document_count ?? 0);
       })
-      .catch(() => setError(t.serverErr))
+      .catch(() => setError(i18n.he.serverErr))
       .finally(() => setLoading(false));
-  }, [router, t.serverErr]);
+  }, [router]);
 
   useEffect(() => {
     document.documentElement.dir  = lang === 'he' ? 'rtl' : 'ltr';
@@ -170,7 +173,7 @@ export default function ProfilePage() {
     ['levy_ai_token', 'levy_ai_email', 'levy_ai_first_name', 'levy_ai_last_name'].forEach(k =>
       localStorage.removeItem(k),
     );
-    router.push('/login');
+    router.push('/');
   };
 
   const initials = [firstName[0], lastName[0]].filter(Boolean).join('').toUpperCase()

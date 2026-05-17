@@ -50,3 +50,6 @@ chat.db
 node_modules/
 .next/
 frontend/.next/
+
+# Browser "Save Page As" artifacts (contain compiled CSS that triggers linter warnings)
+*_files/
