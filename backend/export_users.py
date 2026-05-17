@@ -2,7 +2,7 @@ import sqlite3
 import csv
 from pathlib import Path
 
-DB_PATH  = Path(__file__).parent / "chat.db"
+DB_PATH  = Path(__file__).parent / "data" / "chat.db"
 CSV_PATH = Path(__file__).parent / "users_export.csv"
 
 with sqlite3.connect(DB_PATH) as conn:

@@ -6,6 +6,7 @@ import type { KeyboardEvent, ChangeEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useDropzone } from 'react-dropzone';
 import type { FileRejection } from 'react-dropzone';
+import UserProfileModal from './UserProfileModal';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -26,7 +27,11 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
   } catch { return null; }
 }
 
-const _AUTH_KEYS = ['levy_ai_token', 'levy_ai_email', 'levy_ai_first_name', 'levy_ai_last_name'] as const;
+const _AUTH_KEYS = [
+  'levy_ai_token', 'levy_ai_email', 'levy_ai_first_name', 'levy_ai_last_name',
+  'levy_ai_institution', 'levy_ai_primary_major', 'levy_ai_degree_type',
+  'levy_ai_country', 'levy_ai_secondary_major',
+] as const;
 
 function _clearAuth() {
   _AUTH_KEYS.forEach(k => localStorage.removeItem(k));
@@ -200,6 +205,11 @@ const translations = {
     tabPaper: 'כתיבה אקדמית',
     footer: 'U-Note · מופעל על ידי OpenAI ו-Flask',
     logout: 'יציאה',
+    profileSettings: 'הגדרות פרופיל',
+    logoutTitle:     'יציאה מהמערכת',
+    logoutBody:      'האם אתה בטוח שברצונך להתנתק ולצאת?',
+    logoutYes:       'כן, צא',
+    cancel:          'ביטול',
     navNotes: 'Notes',
     navWorkspace: 'Workspace',
     navInsights: 'Insights',
@@ -311,6 +321,11 @@ const translations = {
     tabPaper: 'Academic Writing',
     footer: 'U-Note · Powered by OpenAI and Flask',
     logout: 'Logout',
+    profileSettings: 'Profile Settings',
+    logoutTitle:     'Log Out',
+    logoutBody:      'Are you sure you want to log out?',
+    logoutYes:       'Yes, Log Out',
+    cancel:          'Cancel',
     navNotes: 'Notes',
     navWorkspace: 'Workspace',
     navInsights: 'Insights',
@@ -1807,6 +1822,87 @@ function PaperWriter({ hasDoc, t }: { hasDoc: boolean; t: T }) {
   );
 }
 
+/* ─── Logout confirmation modal ─────────────────────────────────────────────── */
+function LogoutConfirmModal({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+  const { lang } = useLanguage();
+  const t = translations[lang];
+
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') onCancel(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center p-4 animate-slide-up-fade"
+      style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(8px)' }}
+      onClick={e => { if (e.target === e.currentTarget) onCancel(); }}
+    >
+      <div
+        dir={lang === 'he' ? 'rtl' : 'ltr'}
+        className="w-full max-w-sm rounded-3xl overflow-hidden"
+        style={{
+          background: 'rgba(255,255,255,0.98)',
+          backdropFilter: 'blur(20px)',
+          border: '1px solid rgba(220,38,38,0.18)',
+          boxShadow: '0 20px 60px rgba(30,10,10,0.22), 0 4px 16px rgba(220,38,38,0.08)',
+        }}
+      >
+        {/* Header */}
+        <div
+          className="flex items-center gap-3 px-5 py-4"
+          style={{ background: 'rgba(220,38,38,0.04)', borderBottom: '1px solid rgba(220,38,38,0.12)' }}
+        >
+          <div
+            className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0"
+            style={{ background: 'rgba(220,38,38,0.10)', border: '1px solid rgba(220,38,38,0.2)' }}
+          >
+            <svg className="w-5 h-5" style={{ color: '#dc2626' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round"
+                d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15M12 9l-3 3m0 0 3 3m-3-3h12.75" />
+            </svg>
+          </div>
+          <h2 className="text-base font-bold text-[#1a2e14]">{t.logoutTitle}</h2>
+        </div>
+
+        {/* Body */}
+        <div className="px-5 py-5">
+          <p className="text-sm text-[#4a5e3a] leading-relaxed">
+            {t.logoutBody}
+          </p>
+        </div>
+
+        {/* Actions */}
+        <div className="flex gap-2 px-4 pb-4">
+          <button
+            onClick={onCancel}
+            className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold border transition-all"
+            style={{ color: '#7a9268', borderColor: 'rgba(157,192,139,0.45)', background: 'transparent' }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(81,123,62,0.06)'; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
+          >
+            {t.cancel}
+          </button>
+          <button
+            onClick={onConfirm}
+            className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 text-white"
+            style={{ background: '#dc2626', boxShadow: '0 4px 14px rgba(220,38,38,0.30)' }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#b91c1c'; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = '#dc2626'; }}
+          >
+            <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round"
+                d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15M12 9l-3 3m0 0 3 3m-3-3h12.75" />
+            </svg>
+            {t.logoutYes}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ─── Sidebar ────────────────────────────────────────────────────────────────── */
 interface SidebarProps {
   sessions: ChatSession[];
@@ -1820,9 +1916,15 @@ interface SidebarProps {
   isAdmin: boolean;
   lang: Lang;
   t: T;
+  userFirstName: string;
+  userLastName: string;
+  userEmail: string;
+  userInitials: string;
+  onOpenProfile: () => void;
+  onRequestLogout: () => void;
 }
 
-function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDeleteSession, onSwitchMode, isOpen, onClose, isAdmin, lang, t }: SidebarProps) {
+function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDeleteSession, onSwitchMode, isOpen, onClose, isAdmin, lang, t, userFirstName, userLastName, userEmail, userInitials, onOpenProfile, onRequestLogout }: SidebarProps) {
   const router = useRouter();
   const fmtDate = (iso: string) =>
     new Date(iso).toLocaleString(lang === 'he' ? 'he-IL' : 'en-US', {
@@ -1947,6 +2049,54 @@ function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDel
             </div>
           )}
         </div>
+
+        {/* ── Bottom: Logout + User Profile ── */}
+        <div className="shrink-0 px-3 pt-2 pb-2.5" style={{ borderTop: '1px solid rgba(100,140,80,0.2)' }}>
+
+          {/* Logout ghost button */}
+          <button
+            dir="rtl"
+            onClick={() => { onClose(); onRequestLogout(); }}
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg transition-colors text-[#7a9268] hover:bg-red-50 hover:text-red-500 mb-1"
+          >
+            <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round"
+                d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15M12 9l-3 3m0 0 3 3m-3-3h12.75" />
+            </svg>
+            <span className="text-sm font-medium">{t.logout}</span>
+          </button>
+
+          {/* User profile trigger */}
+          <button
+            dir="rtl"
+            onClick={onOpenProfile}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all hover:bg-[#517B3E]/10 active:scale-[0.99] group"
+            style={{ textAlign: 'start' }}
+          >
+            <div
+              className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0 select-none transition-transform group-hover:scale-105"
+              style={{ background: 'linear-gradient(135deg, #517B3E 0%, #2A3B22 100%)' }}
+            >
+              {userInitials || '?'}
+            </div>
+            <div className="flex-1 min-w-0 text-start">
+              <p className="text-sm font-semibold text-[#2d3b25] truncate leading-snug">
+                {userFirstName} {userLastName}
+              </p>
+              <p className="text-[11px] text-[#7a9268] truncate">
+                {userEmail}
+              </p>
+            </div>
+            <svg
+              className="w-4 h-4 text-[#7a9268] shrink-0 opacity-50 group-hover:opacity-100 transition-opacity"
+              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round"
+                d="M12 6.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 12.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 18.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z" />
+            </svg>
+          </button>
+        </div>
+
       </aside>
     </>
   );
@@ -1978,6 +2128,11 @@ export default function Home() {
   const [userEmail]     = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_email')      ?? '') : '');
   const [userFirstName] = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_first_name') ?? '') : '');
   const [userLastName]  = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_last_name')  ?? '') : '');
+  const [userInstitution,  setUserInstitution]  = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_institution')   ?? '') : '');
+  const [userPrimaryMajor, setUserPrimaryMajor] = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_primary_major') ?? '') : '');
+  const [userDegreeType]                        = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_degree_type')     ?? '') : '');
+  const [userSecondaryMajor]                    = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_secondary_major') ?? '') : '');
+  const [userCountry]                           = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_country')         ?? '') : '');
 
   const [hasDoc, setHasDoc]                     = useState(false);
 
@@ -1997,14 +2152,33 @@ export default function Home() {
   const [pdfKey, setPdfKey]                     = useState<string>('initial');
   const { lang, toggleLanguage }                = useLanguage();
   const [sidebarOpen, setSidebarOpen]           = useState(false);
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const [showLogoutModal, setShowLogoutModal]   = useState(false);
   const [rateLimitToast, setRateLimitToast]     = useState(false);
+  const [profilePopoverOpen, setProfilePopoverOpen] = useState(false);
+  const profilePopoverRef = useRef<HTMLDivElement>(null);
 
   const t = translations[lang];
 
   useEffect(() => {
-    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') setSidebarOpen(false); };
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') { setSidebarOpen(false); setProfilePopoverOpen(false); setProfileModalOpen(false); setShowLogoutModal(false); }
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  /* ── Intercept browser Back button ── */
+  useEffect(() => {
+    // Push an extra history entry so the Back button has something to pop.
+    window.history.pushState(null, '', window.location.href);
+    const onPop = () => {
+      // Re-push to prevent actual navigation away from the workspace.
+      window.history.pushState(null, '', window.location.href);
+      setShowLogoutModal(true);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
   }, []);
 
   /* ── Rate-limit toast ── */
@@ -2052,6 +2226,31 @@ export default function Home() {
       .then((data: UsageInfo | null) => { if (data) setUsage(data); })
       .catch(() => {});
   }, [isAuthenticated]);
+
+  // Fetch profile fields for the popover widget.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    authFetch(`${API}/api/profile`)
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { institution?: string; primary_major?: string } | null) => {
+        if (!data) return;
+        if (data.institution)   { setUserInstitution(data.institution);   localStorage.setItem('levy_ai_institution',   data.institution); }
+        if (data.primary_major) { setUserPrimaryMajor(data.primary_major); localStorage.setItem('levy_ai_primary_major', data.primary_major); }
+      })
+      .catch(() => {});
+  }, [isAuthenticated]);
+
+  // Close profile popover on click outside.
+  useEffect(() => {
+    if (!profilePopoverOpen) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (profilePopoverRef.current && !profilePopoverRef.current.contains(e.target as Node)) {
+        setProfilePopoverOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
+  }, [profilePopoverOpen]);
 
   const startNewChat = useCallback(() => {
     setCurrentSessionId(null); setInitialMessages([]);
@@ -2102,7 +2301,7 @@ export default function Home() {
 
   const handleLogout = () => {
     _clearAuth();
-    router.push('/');
+    window.location.href = '/';
   };
 
   const userInitials = [userFirstName[0], userLastName[0]]
@@ -2162,7 +2361,7 @@ export default function Home() {
             <LogoMark size={40} />
           </div>
 
-          {/* End: Status + Lang + Avatar + Logout */}
+          {/* End: Status + Lang + Profile widget */}
           <div className="flex items-center gap-2">
             <div className="hidden sm:flex items-center gap-2 rounded-full px-4 py-1.5 bg-white/30 border border-white/50">
               <span className={`w-2 h-2 rounded-full transition-colors duration-500 ${hasDoc ? 'bg-[#2A3B22] animate-pulse' : 'bg-[#2A3B22]/30'}`} />
@@ -2173,19 +2372,90 @@ export default function Home() {
               <IconGlobe className="w-4 h-4 text-[#2d3b25]" />
               {t.langLabel}
             </button>
-            <button onClick={() => router.push('/profile')} title={userEmail} aria-label="Profile"
-              className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0 hover:scale-110 transition-transform select-none"
-              style={{ backgroundColor: '#2A3B22' }}>
-              {userInitials || '?'}
-            </button>
-            <button onClick={handleLogout} aria-label={t.logout}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-white/30 hover:bg-red-100/60 border border-white/50 hover:border-red-300/50 rounded-full text-xs text-[#2d3b25] hover:text-red-700 font-medium transition-all">
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round"
-                  d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15M12 9l-3 3m0 0 3 3m-3-3h12.75" />
-              </svg>
-              <span className="hidden sm:inline">{t.logout}</span>
-            </button>
+
+            {/* Profile avatar + dropdown popover */}
+            <div ref={profilePopoverRef} className="relative">
+              <button
+                onClick={() => setProfilePopoverOpen(p => !p)}
+                aria-label="Profile menu"
+                className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0 transition-all select-none"
+                style={{ backgroundColor: profilePopoverOpen ? '#3a5528' : '#2A3B22', boxShadow: profilePopoverOpen ? '0 0 0 3px rgba(255,255,255,0.35)' : 'none' }}>
+                {userInitials || '?'}
+              </button>
+
+              {/* Floating popover */}
+              {profilePopoverOpen && (
+                <div
+                  dir={lang === 'he' ? 'rtl' : 'ltr'}
+                  className="absolute top-full mt-2 z-50 w-64 rounded-2xl overflow-hidden animate-slide-up-fade"
+                  style={{
+                    ...(lang === 'he' ? { left: 0 } : { right: 0 }),
+                    background: 'rgba(255,255,255,0.98)',
+                    backdropFilter: 'blur(20px)',
+                    border: '1px solid rgba(157,192,139,0.35)',
+                    boxShadow: '0 8px 32px rgba(20,40,15,0.20), 0 2px 8px rgba(20,40,15,0.08)',
+                  }}
+                >
+                  {/* User info */}
+                  <div className="px-4 py-4" style={{ borderBottom: '1px solid rgba(157,192,139,0.22)' }}>
+                    <div className="flex items-center gap-3">
+                      <div
+                        className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-black shrink-0 select-none"
+                        style={{ backgroundColor: '#2A3B22' }}>
+                        {userInitials || '?'}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-bold text-[#1a2e14] text-sm truncate leading-snug">
+                          {userFirstName} {userLastName}
+                        </p>
+                        <p className="text-xs text-[#7a9268] truncate mt-0.5" title={userEmail}>
+                          {userEmail}
+                        </p>
+                      </div>
+                    </div>
+                    {(userInstitution || userPrimaryMajor) && (
+                      <div
+                        className="mt-3 px-2.5 py-1.5 rounded-xl text-xs font-medium"
+                        style={{ background: 'rgba(81,123,62,0.08)', border: '1px solid rgba(81,123,62,0.15)', color: '#517B3E' }}>
+                        {[userInstitution, userPrimaryMajor].filter(Boolean).join(' | ')}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="px-2 py-2 flex flex-col gap-0.5">
+                    <button
+                      onClick={() => { setProfilePopoverOpen(false); router.push('/profile'); }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm transition-colors"
+                      style={{ color: '#2d3b25', textAlign: 'start' }}
+                      onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = 'rgba(81,123,62,0.09)'}
+                      onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'transparent'}>
+                      <svg className="w-4 h-4 shrink-0" style={{ color: '#517B3E' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                        <path strokeLinecap="round" strokeLinejoin="round"
+                          d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                      </svg>
+                      {t.profileSettings}
+                    </button>
+
+                    <div style={{ height: 1, background: 'rgba(157,192,139,0.25)', margin: '2px 12px' }} />
+
+                    <button
+                      onClick={() => { setProfilePopoverOpen(false); setShowLogoutModal(true); }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm transition-colors"
+                      style={{ color: '#dc2626', textAlign: 'start' }}
+                      onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = 'rgba(220,38,38,0.06)'}
+                      onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'transparent'}>
+                      <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round"
+                          d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15M12 9l-3 3m0 0 3 3m-3-3h12.75" />
+                      </svg>
+                      {t.logout}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </header>
@@ -2203,7 +2473,38 @@ export default function Home() {
         isAdmin={isAdmin}
         lang={lang}
         t={t}
+        userFirstName={userFirstName}
+        userLastName={userLastName}
+        userEmail={userEmail}
+        userInitials={userInitials}
+        onOpenProfile={() => { setSidebarOpen(false); setProfileModalOpen(true); }}
+        onRequestLogout={() => { setSidebarOpen(false); setShowLogoutModal(true); }}
       />
+
+      {/* ── User profile modal ───────────────────────────────────────────────── */}
+      <UserProfileModal
+        isOpen={profileModalOpen}
+        onClose={() => setProfileModalOpen(false)}
+        onLogout={() => { setProfileModalOpen(false); setShowLogoutModal(true); }}
+        firstName={userFirstName}
+        lastName={userLastName}
+        email={userEmail}
+        initials={userInitials}
+        country={userCountry}
+        institution={userInstitution}
+        degreeType={userDegreeType}
+        primaryMajor={userPrimaryMajor}
+        secondaryMajor={userSecondaryMajor}
+        isAdmin={isAdmin}
+      />
+
+      {/* ── Logout confirmation modal (sidebar button + Back button) ────────── */}
+      {showLogoutModal && (
+        <LogoutConfirmModal
+          onConfirm={handleLogout}
+          onCancel={() => setShowLogoutModal(false)}
+        />
+      )}
 
       {/* ── Main content ─────────────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col overflow-y-auto">

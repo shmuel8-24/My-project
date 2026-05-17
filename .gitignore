@@ -44,10 +44,12 @@ htmlcov/
 chroma_storage/
 db/
 backend/db/
+backend/data/db/
 
 # Backend — SQLite chat-history DB (user data, not for version control)
 chat.db
 backend/chat.db
+backend/data/chat.db
 
 # Node / Next.js
 node_modules/

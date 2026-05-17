@@ -19,7 +19,7 @@ import os
 
 # Resolve paths relative to the project root (one level above scripts/)
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_DB   = os.path.join(_ROOT, "chat.db")
+_DB   = os.path.join(_ROOT, "data", "chat.db")
 
 
 def main() -> None:

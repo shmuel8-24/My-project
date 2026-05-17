@@ -128,17 +128,17 @@ export default function HomePage() {
   /* ── Register modal state ── */
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
   const [regStep,      setRegStep]      = useState(1);
+  const [regEmail,     setRegEmail]     = useState('');
+  const [regToken,     setRegToken]     = useState('');
   const [regFirstName, setRegFirstName] = useState('');
   const [regLastName,  setRegLastName]  = useState('');
-  const [regEmail,     setRegEmail]     = useState('');
   const [regPassword,  setRegPassword]  = useState('');
   const [regConfirm,   setRegConfirm]   = useState('');
   const [regError,     setRegError]     = useState('');
   const [regLoading,   setRegLoading]   = useState(false);
 
-  /* ── Register step 4: OTP verification ── */
-  const [regOtpDigits,  setRegOtpDigits]  = useState<string[]>(Array(6).fill(''));
-  const [regOtpLoading, setRegOtpLoading] = useState(false);
+  /* ── Register step 2: OTP boxes ── */
+  const [regOtpDigits, setRegOtpDigits] = useState<string[]>(Array(6).fill(''));
 
   /* ── Forgot password (inside login modal) ── */
   const [forgotView,    setForgotView]    = useState<ForgotView>(null);
@@ -175,11 +175,11 @@ export default function HomePage() {
   const closeRegisterModal = useCallback(() => {
     setIsRegisterModalOpen(false);
     setRegStep(1);
+    setRegEmail(''); setRegToken('');
     setRegFirstName(''); setRegLastName('');
-    setRegEmail(''); setRegPassword(''); setRegConfirm('');
+    setRegPassword(''); setRegConfirm('');
     setRegError('');
     setRegOtpDigits(Array(6).fill(''));
-    setRegOtpLoading(false);
   }, []);
 
   const openRegisterModal = useCallback(() => {
@@ -229,9 +229,9 @@ export default function HomePage() {
     return () => clearTimeout(t);
   }, [magicSent]);
 
-  /* ── Auto-focus first OTP box on register step 4 ── */
+  /* ── Auto-focus first OTP box on register step 2 ── */
   useEffect(() => {
-    if (regStep !== 4) return;
+    if (regStep !== 2) return;
     const t = setTimeout(() => regOtpRefs.current[0]?.focus(), 60);
     return () => clearTimeout(t);
   }, [regStep]);
@@ -390,65 +390,83 @@ export default function HomePage() {
     finally   { setLoading(false); }
   };
 
-  /* Register: validate + advance step, or submit on final step */
-  const handleRegNext = (e: React.FormEvent) => {
+  /* Step 1 — send verification OTP to the entered email */
+  const handleRegStep1 = async (e: React.FormEvent) => {
     e.preventDefault();
     setRegError('');
-    if (regStep === 1) {
-      if (!regFirstName.trim()) { setRegError(t.errNoFirstName); return; }
-      if (!regLastName.trim())  { setRegError(t.errNoLastName); return; }
-      setRegStep(2);
-    } else if (regStep === 2) {
-      const em = regEmail.trim().toLowerCase();
-      if (!em || !em.includes('@') || !em.split('@')[1]?.includes('.')) {
-        setRegError(t.errInvalidEmailReg); return;
-      }
-      setRegStep(3);
+    const em = regEmail.trim().toLowerCase();
+    if (!em || !em.includes('@') || !em.split('@')[1]?.includes('.')) {
+      setRegError(t.errInvalidEmailReg); return;
     }
-  };
-
-  const handleRegSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setRegError('');
-    if (regPassword.length < 6) { setRegError(t.errWeakPassword); return; }
-    if (regPassword !== regConfirm) { setRegError(t.errPasswordMismatch); return; }
     setRegLoading(true);
     try {
-      const res  = await fetch('http://127.0.0.1:5003/api/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email:      regEmail.trim().toLowerCase(),
-          password:   regPassword,
-          first_name: regFirstName.trim(),
-          last_name:  regLastName.trim(),
-        }),
+      const res  = await fetch('http://127.0.0.1:5003/api/register/send-otp', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: em }),
       });
       const data = await res.json();
-      if (!res.ok) { setRegError(data.error ?? t.errRegFailed); return; }
+      if (!res.ok) { setRegError(data.error ?? t.errSendCode); return; }
       setRegOtpDigits(Array(6).fill(''));
-      setRegStep(4);
-    } catch {
-      setRegError(t.errNoServer);
-    } finally {
-      setRegLoading(false);
-    }
+      setRegStep(2);
+    } catch { setRegError(t.errNoServer); }
+    finally  { setRegLoading(false); }
   };
 
-  /* Register step 4: verify OTP sent during registration */
-  const handleRegOtpVerify = async (e: React.FormEvent<HTMLFormElement>) => {
+  /* Step 2 — verify the OTP; receive reg_token */
+  const handleRegStep2 = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setRegError('');
     const code = regOtpDigits.join('');
     if (code.length !== 6) { setRegError(t.errInvalidOtp); return; }
-    setRegOtpLoading(true);
+    setRegLoading(true);
     try {
-      const res  = await fetch('http://127.0.0.1:5003/api/verify-otp', {
+      const res  = await fetch('http://127.0.0.1:5003/api/register/verify-otp', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: regEmail.trim().toLowerCase(), code }),
       });
       const data = await res.json();
       if (!res.ok) { setRegError(data.error ?? t.errBadCode); return; }
+      setRegToken(data.reg_token ?? '');
+      setRegStep(3);
+    } catch { setRegError(t.errNoServer); }
+    finally  { setRegLoading(false); }
+  };
+
+  /* Step 2 — resend OTP without leaving the step */
+  const handleRegResend = async () => {
+    setRegError('');
+    try {
+      const res = await fetch('http://127.0.0.1:5003/api/register/send-otp', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: regEmail.trim().toLowerCase() }),
+      });
+      if (!res.ok) { const d = await res.json(); setRegError(d.error ?? t.errSendCode); return; }
+      setRegOtpDigits(Array(6).fill(''));
+    } catch { setRegError(t.errNoServer); }
+  };
+
+  /* Step 3 — create the account with the verified reg_token */
+  const handleRegStep3 = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRegError('');
+    if (!regFirstName.trim()) { setRegError(t.errNoFirstName); return; }
+    if (!regLastName.trim())  { setRegError(t.errNoLastName);  return; }
+    if (regPassword.length < 6) { setRegError(t.errWeakPassword); return; }
+    if (regPassword !== regConfirm) { setRegError(t.errPasswordMismatch); return; }
+    setRegLoading(true);
+    try {
+      const res  = await fetch('http://127.0.0.1:5003/api/register', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email:      regEmail.trim().toLowerCase(),
+          password:   regPassword,
+          first_name: regFirstName.trim(),
+          last_name:  regLastName.trim(),
+          reg_token:  regToken,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setRegError(data.error ?? t.errRegFailed); return; }
       if (data.token)      localStorage.setItem('levy_ai_token',      data.token);
       if (data.email)      localStorage.setItem('levy_ai_email',      data.email);
       if (data.first_name) localStorage.setItem('levy_ai_first_name', data.first_name);
@@ -457,26 +475,9 @@ export default function HomePage() {
       closeRegisterModal();
       setIsTransitioning(true);
       setIsLoginModalOpen(true);
-      setTimeout(() => router.push(WORKSPACE_ROUTE), 1800);
+      setTimeout(() => router.push('/onboarding'), 1800);
     } catch { setRegError(t.errNoServer); }
-    finally  { setRegOtpLoading(false); }
-  };
-
-  /* Resend OTP from register step 4 */
-  const handleRegResendOtp = async () => {
-    setRegError('');
-    try {
-      const res  = await fetch('http://127.0.0.1:5003/api/send-otp', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: regEmail.trim().toLowerCase() }),
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        setRegError(data.error ?? t.errSendCode);
-        return;
-      }
-      setRegOtpDigits(Array(6).fill(''));
-    } catch { setRegError(t.errNoServer); }
+    finally  { setRegLoading(false); }
   };
 
   /* Forgot-password submit */
@@ -1691,42 +1692,39 @@ export default function HomePage() {
 
             {/* Title */}
             <h1 style={{ fontSize: '2rem', fontWeight: 800, color: '#1e2a45', lineHeight: 1.2, marginBottom: '6px', fontFamily: 'Georgia, serif', textAlign: 'center' }}>
-              {regStep === 4 ? t.regVerifyTitle : t.regTitle}
+              {regStep === 2 ? t.regVerifyTitle : t.regTitle}
             </h1>
             <p style={{ fontSize: '0.875rem', color: '#8899aa', textAlign: 'center', marginBottom: '24px' }}>
               {regStep === 1 && t.regStep1Sub}
               {regStep === 2 && t.regStep2Sub}
               {regStep === 3 && t.regStep3Sub}
-              {regStep === 4 && t.regStep4Sub}
             </p>
 
-            {/* Progress dots — hidden on verification step */}
-            {regStep < 4 && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '28px' }}>
-                {[1, 2, 3].map((s, i) => (
-                  <React.Fragment key={s}>
+            {/* Progress dots */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '28px' }}>
+              {[1, 2, 3].map((s, i) => (
+                <React.Fragment key={s}>
+                  <div style={{
+                    width:  regStep === s ? '12px' : '8px',
+                    height: regStep === s ? '12px' : '8px',
+                    borderRadius: '50%',
+                    backgroundColor: regStep >= s ? '#517B3E' : 'rgba(200,190,170,0.5)',
+                    transition: 'all 0.25s',
+                    boxShadow: regStep === s ? '0 0 0 4px rgba(81,123,62,0.20)' : 'none',
+                    flexShrink: 0,
+                  }} />
+                  {i < 2 && (
                     <div style={{
-                      width:  regStep === s ? '12px' : '8px',
-                      height: regStep === s ? '12px' : '8px',
-                      borderRadius: '50%',
-                      backgroundColor: regStep >= s ? '#517B3E' : 'rgba(200,190,170,0.5)',
-                      transition: 'all 0.25s',
-                      boxShadow: regStep === s ? '0 0 0 4px rgba(81,123,62,0.20)' : 'none',
+                      width: '48px', height: '2px',
+                      backgroundColor: regStep > s ? '#517B3E' : 'rgba(200,190,170,0.5)',
+                      transition: 'background-color 0.3s',
+                      margin: '0 6px',
                       flexShrink: 0,
                     }} />
-                    {i < 2 && (
-                      <div style={{
-                        width: '48px', height: '2px',
-                        backgroundColor: regStep > s ? '#517B3E' : 'rgba(200,190,170,0.5)',
-                        transition: 'background-color 0.3s',
-                        margin: '0 6px',
-                        flexShrink: 0,
-                      }} />
-                    )}
-                  </React.Fragment>
-                ))}
-              </div>
-            )}
+                  )}
+                </React.Fragment>
+              ))}
+            </div>
 
             {/* Error */}
             {regError && (
@@ -1739,46 +1737,9 @@ export default function HomePage() {
               </div>
             )}
 
-            {/* ── Step 1: Name ── */}
+            {/* ── Step 1: Email → send OTP ── */}
             {regStep === 1 && (
-              <form onSubmit={handleRegNext} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label style={LABEL_STYLE}>{t.regFirstName}</label>
-                  <input
-                    type="text" value={regFirstName}
-                    onChange={e => setRegFirstName(e.target.value)}
-                    placeholder={t.regFirstNamePh} required autoComplete="given-name"
-                    style={INPUT_STYLE} onFocus={focusInput} onBlur={blurInput}
-                  />
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label style={LABEL_STYLE}>{t.regLastName}</label>
-                  <input
-                    type="text" value={regLastName}
-                    onChange={e => setRegLastName(e.target.value)}
-                    placeholder={t.regLastNamePh} required autoComplete="family-name"
-                    style={INPUT_STYLE} onFocus={focusInput} onBlur={blurInput}
-                  />
-                </div>
-                <button
-                  type="submit"
-                  style={{
-                    marginTop: '8px', width: '100%',
-                    padding: '13px 32px', borderRadius: '12px',
-                    fontSize: '1rem', fontWeight: 600, color: 'white',
-                    backgroundColor: '#517B3E', border: 'none', cursor: 'pointer',
-                    boxShadow: '0 4px 16px rgba(81,123,62,0.38)',
-                    transition: 'background-color 0.2s',
-                  }}
-                >
-                  {t.regContinue}
-                </button>
-              </form>
-            )}
-
-            {/* ── Step 2: Email ── */}
-            {regStep === 2 && (
-              <form onSubmit={handleRegNext} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <form onSubmit={handleRegStep1} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   <label style={LABEL_STYLE}>{t.regEmailLabel}</label>
                   <input
@@ -1788,117 +1749,30 @@ export default function HomePage() {
                     style={INPUT_STYLE} onFocus={focusInput} onBlur={blurInput}
                   />
                 </div>
-                <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
-                  <button
-                    type="submit"
-                    style={{
-                      flex: 1, padding: '13px', borderRadius: '12px',
-                      fontSize: '0.9375rem', fontWeight: 600, color: 'white',
-                      backgroundColor: '#517B3E', border: 'none', cursor: 'pointer',
-                      boxShadow: '0 4px 16px rgba(81,123,62,0.35)',
-                      transition: 'background-color 0.2s',
-                    }}
-                  >
-                    {t.regContinue}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setRegStep(1); setRegError(''); }}
-                    style={{
-                      flex: 1, padding: '13px', borderRadius: '12px',
-                      fontSize: '0.9375rem', fontWeight: 500, color: '#4b5563',
-                      backgroundColor: 'transparent',
-                      border: '1.5px solid rgba(200,190,170,0.75)',
-                      cursor: 'pointer', transition: 'background-color 0.15s',
-                    }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'rgba(232,228,217,0.6)'; }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}
-                  >
-                    {t.regBack}
-                  </button>
-                </div>
-              </form>
-            )}
-
-            {/* ── Step 3: Password ── */}
-            {regStep === 3 && (
-              <form onSubmit={handleRegSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label style={LABEL_STYLE}>{t.regPassword}</label>
-                  <input
-                    type="password" value={regPassword}
-                    onChange={e => setRegPassword(e.target.value)}
-                    placeholder={t.regPasswordPh} required autoComplete="new-password"
-                    style={INPUT_STYLE} onFocus={focusInput} onBlur={blurInput}
-                  />
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label style={LABEL_STYLE}>{t.regPasswordConfirm}</label>
-                  <input
-                    type="password" value={regConfirm}
-                    onChange={e => setRegConfirm(e.target.value)}
-                    placeholder={t.regPasswordConfirmPh} required autoComplete="new-password"
-                    style={{
-                      ...INPUT_STYLE,
-                      borderColor: regConfirm && regConfirm !== regPassword
-                        ? 'rgba(220,38,38,0.5)'
-                        : 'rgba(200,190,170,0.75)',
-                    }}
-                    onFocus={focusInput} onBlur={blurInput}
-                  />
-                  {regConfirm && regConfirm !== regPassword && (
-                    <span style={{ fontSize: '0.75rem', color: '#b91c1c', marginTop: '2px' }}>
-                      {t.regPasswordMismatch}
-                    </span>
+                <button
+                  type="submit"
+                  disabled={regLoading}
+                  style={{
+                    marginTop: '8px', width: '100%',
+                    padding: '13px 32px', borderRadius: '12px',
+                    fontSize: '1rem', fontWeight: 600, color: 'white',
+                    backgroundColor: regLoading ? '#6B9053' : '#517B3E',
+                    border: 'none', cursor: regLoading ? 'not-allowed' : 'pointer',
+                    boxShadow: regLoading ? 'none' : '0 4px 16px rgba(81,123,62,0.38)',
+                    transition: 'background-color 0.2s',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '7px',
+                  }}
+                >
+                  {regLoading && (
+                    <span className="animate-spin" style={{ width: '14px', height: '14px', borderRadius: '50%', border: '2px solid rgba(255,255,255,0.35)', borderTopColor: 'white', display: 'inline-block', flexShrink: 0 }} />
                   )}
-                </div>
-                <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
-                  <button
-                    type="submit"
-                    disabled={regLoading}
-                    style={{
-                      flex: 1, padding: '13px', borderRadius: '12px',
-                      fontSize: '0.9375rem', fontWeight: 600, color: 'white',
-                      backgroundColor: regLoading ? '#6B9053' : '#517B3E',
-                      border: 'none', cursor: regLoading ? 'not-allowed' : 'pointer',
-                      boxShadow: regLoading ? 'none' : '0 4px 16px rgba(81,123,62,0.35)',
-                      transition: 'background-color 0.2s',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '7px',
-                    }}
-                  >
-                    {regLoading && (
-                      <span
-                        className="animate-spin"
-                        style={{
-                          width: '14px', height: '14px', borderRadius: '50%',
-                          border: '2px solid rgba(255,255,255,0.35)',
-                          borderTopColor: 'white', display: 'inline-block', flexShrink: 0,
-                        }}
-                      />
-                    )}
-                    {regLoading ? t.regSubmitting : t.regSubmit}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setRegStep(2); setRegError(''); }}
-                    style={{
-                      flex: 1, padding: '13px', borderRadius: '12px',
-                      fontSize: '0.9375rem', fontWeight: 500, color: '#4b5563',
-                      backgroundColor: 'transparent',
-                      border: '1.5px solid rgba(200,190,170,0.75)',
-                      cursor: 'pointer', transition: 'background-color 0.15s',
-                    }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'rgba(232,228,217,0.6)'; }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}
-                  >
-                    {t.regBack}
-                  </button>
-                </div>
+                  {regLoading ? t.loginSending : t.regSendCode}
+                </button>
               </form>
             )}
 
-            {/* ── Step 4: Email verification OTP ── */}
-            {regStep === 4 && (
+            {/* ── Step 2: Verify OTP ── */}
+            {regStep === 2 && (
               <div style={{ padding: '4px 0' }}>
                 <div style={{ textAlign: 'center', marginBottom: '22px' }}>
                   <div style={{
@@ -1911,12 +1785,10 @@ export default function HomePage() {
                     </svg>
                   </div>
                   <p style={{ fontSize: '0.9375rem', fontWeight: 600, color: '#1e2a45', marginBottom: '6px' }}>{t.regVerifyMsg}</p>
-                  <p style={{ fontSize: '0.8125rem', color: '#7a8a9a', lineHeight: 1.6 }}>
-                    {t.regVerifyCheck}
-                  </p>
+                  <p style={{ fontSize: '0.8125rem', color: '#7a8a9a', lineHeight: 1.6 }}>{t.regVerifyCheck}</p>
                 </div>
 
-                <form onSubmit={handleRegOtpVerify} style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '18px' }}>
+                <form onSubmit={handleRegStep2} style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '14px' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                     <label style={{ ...LABEL_STYLE, textAlign: 'center' }}>{t.loginEnterCode}</label>
                     <div dir="ltr" style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
@@ -1924,10 +1796,7 @@ export default function HomePage() {
                         <input
                           key={i}
                           ref={el => { regOtpRefs.current[i] = el; }}
-                          type="text"
-                          inputMode="numeric"
-                          pattern="[0-9]*"
-                          maxLength={1}
+                          type="text" inputMode="numeric" pattern="[0-9]*" maxLength={1}
                           value={digit}
                           autoComplete={i === 0 ? 'one-time-code' : 'off'}
                           className="w-12 h-14 text-center text-2xl font-bold border-2 rounded-xl outline-none transition-all"
@@ -1938,21 +1807,13 @@ export default function HomePage() {
                           }}
                           onChange={e => {
                             const d = e.target.value.replace(/\D/g, '').slice(-1);
-                            const next = [...regOtpDigits];
-                            next[i] = d;
-                            setRegOtpDigits(next);
+                            const next = [...regOtpDigits]; next[i] = d; setRegOtpDigits(next);
                             if (d && i < 5) regOtpRefs.current[i + 1]?.focus();
                           }}
                           onKeyDown={e => {
-                            if (e.key === 'Backspace' && !regOtpDigits[i] && i > 0) {
-                              regOtpRefs.current[i - 1]?.focus();
-                            } else if (e.key === 'ArrowLeft' && i > 0) {
-                              e.preventDefault();
-                              regOtpRefs.current[i - 1]?.focus();
-                            } else if (e.key === 'ArrowRight' && i < 5) {
-                              e.preventDefault();
-                              regOtpRefs.current[i + 1]?.focus();
-                            }
+                            if (e.key === 'Backspace' && !regOtpDigits[i] && i > 0) { regOtpRefs.current[i - 1]?.focus(); }
+                            else if (e.key === 'ArrowLeft'  && i > 0) { e.preventDefault(); regOtpRefs.current[i - 1]?.focus(); }
+                            else if (e.key === 'ArrowRight' && i < 5) { e.preventDefault(); regOtpRefs.current[i + 1]?.focus(); }
                           }}
                           onPaste={e => {
                             e.preventDefault();
@@ -1963,31 +1824,95 @@ export default function HomePage() {
                             setRegOtpDigits(next);
                             regOtpRefs.current[Math.min(pasted.length, 5)]?.focus();
                           }}
-                          onFocus={e => {
-                            e.target.style.borderColor = '#527C40';
-                            e.target.style.boxShadow = '0 0 0 3px rgba(82,124,64,0.18)';
-                          }}
-                          onBlur={e => {
-                            e.target.style.borderColor = digit ? '#527C40' : 'rgba(200,190,170,0.75)';
-                            e.target.style.boxShadow = 'none';
-                          }}
+                          onFocus={e => { e.target.style.borderColor = '#527C40'; e.target.style.boxShadow = '0 0 0 3px rgba(82,124,64,0.18)'; }}
+                          onBlur={e => { e.target.style.borderColor = digit ? '#527C40' : 'rgba(200,190,170,0.75)'; e.target.style.boxShadow = 'none'; }}
                         />
                       ))}
                     </div>
                   </div>
-                  <SubmitButton loading={regOtpLoading} label={t.loginVerify} loadingLabel={t.loginVerifying} />
+                  <SubmitButton loading={regLoading} label={t.loginVerify} loadingLabel={t.loginVerifying} />
                 </form>
 
-                <div style={{ textAlign: 'center' }}>
-                  <button
-                    type="button"
-                    onClick={handleRegResendOtp}
-                    style={{ fontSize: '0.8125rem', color: '#517B3E', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', textUnderlineOffset: '2px' }}
-                  >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <button type="button" onClick={() => { setRegStep(1); setRegError(''); setRegOtpDigits(Array(6).fill('')); }}
+                    style={{ fontSize: '0.8125rem', color: '#8899aa', background: 'none', border: 'none', cursor: 'pointer' }}>
+                    ← {t.regBack}
+                  </button>
+                  <button type="button" onClick={handleRegResend}
+                    style={{ fontSize: '0.8125rem', color: '#517B3E', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', textUnderlineOffset: '2px' }}>
                     {t.regVerifyResend}
                   </button>
                 </div>
               </div>
+            )}
+
+            {/* ── Step 3: Name + Password → complete registration ── */}
+            {regStep === 3 && (
+              <form onSubmit={handleRegStep3} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <label style={LABEL_STYLE}>{t.regFirstName}</label>
+                    <input type="text" value={regFirstName} onChange={e => setRegFirstName(e.target.value)}
+                      placeholder={t.regFirstNamePh} required autoComplete="given-name"
+                      style={INPUT_STYLE} onFocus={focusInput} onBlur={blurInput} />
+                  </div>
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <label style={LABEL_STYLE}>{t.regLastName}</label>
+                    <input type="text" value={regLastName} onChange={e => setRegLastName(e.target.value)}
+                      placeholder={t.regLastNamePh} required autoComplete="family-name"
+                      style={INPUT_STYLE} onFocus={focusInput} onBlur={blurInput} />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={LABEL_STYLE}>{t.regPassword}</label>
+                  <input type="password" value={regPassword} onChange={e => setRegPassword(e.target.value)}
+                    placeholder={t.regPasswordPh} required autoComplete="new-password"
+                    style={INPUT_STYLE} onFocus={focusInput} onBlur={blurInput} />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={LABEL_STYLE}>{t.regPasswordConfirm}</label>
+                  <input type="password" value={regConfirm} onChange={e => setRegConfirm(e.target.value)}
+                    placeholder={t.regPasswordConfirmPh} required autoComplete="new-password"
+                    style={{
+                      ...INPUT_STYLE,
+                      borderColor: regConfirm && regConfirm !== regPassword ? 'rgba(220,38,38,0.5)' : 'rgba(200,190,170,0.75)',
+                    }}
+                    onFocus={focusInput} onBlur={blurInput} />
+                  {regConfirm && regConfirm !== regPassword && (
+                    <span style={{ fontSize: '0.75rem', color: '#b91c1c', marginTop: '2px' }}>{t.regPasswordMismatch}</span>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
+                  <button type="submit" disabled={regLoading}
+                    style={{
+                      flex: 1, padding: '13px', borderRadius: '12px',
+                      fontSize: '0.9375rem', fontWeight: 600, color: 'white',
+                      backgroundColor: regLoading ? '#6B9053' : '#517B3E',
+                      border: 'none', cursor: regLoading ? 'not-allowed' : 'pointer',
+                      boxShadow: regLoading ? 'none' : '0 4px 16px rgba(81,123,62,0.35)',
+                      transition: 'background-color 0.2s',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '7px',
+                    }}
+                  >
+                    {regLoading && (
+                      <span className="animate-spin" style={{ width: '14px', height: '14px', borderRadius: '50%', border: '2px solid rgba(255,255,255,0.35)', borderTopColor: 'white', display: 'inline-block', flexShrink: 0 }} />
+                    )}
+                    {regLoading ? t.regSubmitting : t.regFinish}
+                  </button>
+                  <button type="button" onClick={() => { setRegStep(2); setRegError(''); setRegOtpDigits(Array(6).fill('')); }}
+                    style={{
+                      flex: 1, padding: '13px', borderRadius: '12px',
+                      fontSize: '0.9375rem', fontWeight: 500, color: '#4b5563',
+                      backgroundColor: 'transparent', border: '1.5px solid rgba(200,190,170,0.75)',
+                      cursor: 'pointer', transition: 'background-color 0.15s',
+                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'rgba(232,228,217,0.6)'; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}
+                  >
+                    {t.regBack}
+                  </button>
+                </div>
+              </form>
             )}
 
             {/* Login link */}

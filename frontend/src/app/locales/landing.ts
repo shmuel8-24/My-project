@@ -106,9 +106,11 @@ const landing = {
 
     // Register modal
     regTitle: 'יצירת חשבון',
-    regStep1Sub: 'ספר לנו קצת עליך',
-    regStep2Sub: 'כיצד ניצור איתך קשר?',
-    regStep3Sub: 'בחר סיסמה לחשבון',
+    regStep1Sub: 'הזן את כתובת המייל שלך לאימות',
+    regStep2Sub: 'הזן את הקוד שנשלח למייל שלך',
+    regStep3Sub: 'השלם את פרטי החשבון',
+    regSendCode: 'שלח קוד אימות',
+    regFinish: 'סיים הרשמה',
     regFirstName: 'שם פרטי',
     regFirstNamePh: 'ישראל',
     regLastName: 'שם משפחה',
@@ -262,9 +264,11 @@ const landing = {
 
     // Register modal
     regTitle: 'Create Account',
-    regStep1Sub: 'Tell us about yourself',
-    regStep2Sub: 'How can we reach you?',
-    regStep3Sub: 'Choose a password',
+    regStep1Sub: 'Enter your email address to verify it',
+    regStep2Sub: 'Enter the code sent to your email',
+    regStep3Sub: 'Complete your account details',
+    regSendCode: 'Send Verification Code',
+    regFinish: 'Complete Registration',
     regFirstName: 'First Name',
     regFirstNamePh: 'John',
     regLastName: 'Last Name',

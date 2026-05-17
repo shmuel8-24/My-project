@@ -15,16 +15,24 @@ const LanguageContext = createContext<LanguageContextValue>({
 });
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
-  const [lang, setLang] = useState<Lang>(() => {
-    if (typeof window === 'undefined') return 'he';
-    return localStorage.getItem('levy_ai_lang') === 'en' ? 'en' : 'he';
-  });
+  // Always initialize to the server default ('he') so the first client render
+  // matches the server HTML (layout.tsx: <html lang="he" dir="rtl">).
+  // localStorage is only read after mount to avoid hydration mismatches.
+  const [lang, setLang] = useState<Lang>('he');
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    const stored = localStorage.getItem('levy_ai_lang');
+    if (stored === 'en') setLang('en');
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
     document.documentElement.lang = lang;
     document.documentElement.dir  = lang === 'he' ? 'rtl' : 'ltr';
     localStorage.setItem('levy_ai_lang', lang);
-  }, [lang]);
+  }, [lang, mounted]);
 
   const toggleLanguage = () => setLang(l => (l === 'he' ? 'en' : 'he'));
 
