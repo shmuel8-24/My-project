@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!backend/.env.example
 
 # Python
 __pycache__/
@@ -39,12 +40,14 @@ htmlcov/
 # macOS
 .DS_Store
 
-# ChromaDB vector store (large, auto-rebuilt from PDFs)
+# Backend — ChromaDB vector store (large, auto-rebuilt from PDFs)
 chroma_storage/
 db/
+backend/db/
 
-# SQLite chat-history DB (user data, not for version control)
+# Backend — SQLite chat-history DB (user data, not for version control)
 chat.db
+backend/chat.db
 
 # Node / Next.js
 node_modules/

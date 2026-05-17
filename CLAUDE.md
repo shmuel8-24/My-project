@@ -2,10 +2,32 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Monorepo layout
+
+```
+.
+├── backend/      # Flask + Python
+│   ├── app.py
+│   ├── requirements.txt
+│   ├── .env           # gitignored — copy from .env.example
+│   ├── .env.example
+│   ├── chat.db        # SQLite (gitignored)
+│   ├── db/            # ChromaDB (gitignored)
+│   ├── export_users.py
+│   └── scripts/
+│       └── make_admin.py
+└── frontend/     # Next.js 16 + React 19
+    ├── app/
+    ├── components/
+    ├── lib/
+    └── ...
+```
+
 ## Setup
 
 ```bash
 # Backend
+cd backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 # macOS only — required by WeasyPrint for /export-pdf:
@@ -19,8 +41,8 @@ cd frontend && npm install
 ## Running
 
 ```bash
-# Flask backend  (terminal 1)
-source .venv/bin/activate && python app.py
+# Flask backend  (terminal 1) — must run from backend/ so relative paths resolve
+cd backend && source .venv/bin/activate && python app.py
 # → http://localhost:5003
 
 # Next.js frontend  (terminal 2)
@@ -42,7 +64,7 @@ npx tsc --noEmit # type-check without emitting
 
 ## Environment variables
 
-All secrets live in `.env` (gitignored). `.env.example` is the committed template.
+All secrets live in `backend/.env` (gitignored). `backend/.env.example` is the committed template.
 
 | Variable | Purpose | Default |
 |---|---|---|
@@ -71,7 +93,7 @@ All secrets live in `.env` (gitignored). `.env.example` is the committed templat
 
 Full-stack RAG app for Hebrew-speaking university students. Students upload study materials and ask questions in Hebrew or English, or generate full academic papers.
 
-### Backend — `app.py`
+### Backend — `backend/app.py`
 
 Single Flask file. All module-level singletons are instantiated once at startup:
 
@@ -128,7 +150,7 @@ Next.js 16 · React 19 · TypeScript · Tailwind CSS v4 · `react-dropzone` v15
 
 | Store | Location | Contents | Cleared by |
 |---|---|---|---|
-| ChromaDB | `./db/` | Text chunks + embeddings | Manual deletion or re-upload |
-| SQLite | `./chat.db` | Chat sessions and messages | Manual deletion |
+| ChromaDB | `backend/db/` | Text chunks + embeddings | Manual deletion or re-upload |
+| SQLite | `backend/chat.db` | Chat sessions and messages | Manual deletion |
 | BM25 index | Memory | Rebuilt from ChromaDB | Server restart |
 | Images | Memory | Base64 of uploaded images | Server restart |
