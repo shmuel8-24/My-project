@@ -31,6 +31,7 @@ class User(_Base):
     degree_type           = Column(String(50),  nullable=True)
     primary_major         = Column(String(200), nullable=True)
     secondary_major       = Column(String(200), nullable=True)
+    gender                = Column(String(20),  nullable=True)
     created_at            = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     sessions = relationship("ChatSession", back_populates="owner", cascade="all, delete-orphan")
 
@@ -138,6 +139,7 @@ with _db_engine.connect() as _conn:
         ("ALTER TABLE users ADD COLUMN degree_type VARCHAR(50)", "added degree_type to users"),
         ("ALTER TABLE users ADD COLUMN primary_major VARCHAR(200)", "added primary_major to users"),
         ("ALTER TABLE users ADD COLUMN secondary_major VARCHAR(200)", "added secondary_major to users"),
+        ("ALTER TABLE users ADD COLUMN gender VARCHAR(20)", "added gender to users"),
     ]:
         try:
             _conn.execute(sql_text(_stmt))

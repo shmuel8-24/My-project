@@ -30,7 +30,7 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
 const _AUTH_KEYS = [
   'levy_ai_token', 'levy_ai_email', 'levy_ai_first_name', 'levy_ai_last_name',
   'levy_ai_institution', 'levy_ai_primary_major', 'levy_ai_degree_type',
-  'levy_ai_country', 'levy_ai_secondary_major',
+  'levy_ai_country', 'levy_ai_secondary_major', 'levy_ai_gender',
 ] as const;
 
 function _clearAuth() {
@@ -520,6 +520,31 @@ function IconBarChart({ className }: { className?: string }) {
 }
 
 /* ─── Helpers ───────────────────────────────────────────────────────────────── */
+/* Renders gender-specific icon (Mars/Venus) or falls back to initials. */
+function AvatarContent({ gender, initials }: { gender: string; initials: string }) {
+  if (gender === 'זכר') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"
+        style={{ width: '62%', height: '62%' }}>
+        <circle cx="9.5" cy="13" r="5.8"/>
+        <line x1="14" y1="8.5" x2="20" y2="3"/>
+        <polyline points="15.5 3 20 3 20 7.5"/>
+      </svg>
+    );
+  }
+  if (gender === 'נקבה') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"
+        style={{ width: '62%', height: '62%' }}>
+        <circle cx="12" cy="8.5" r="5.8"/>
+        <line x1="12" y1="14.3" x2="12" y2="20.5"/>
+        <line x1="9" y1="17.5" x2="15" y2="17.5"/>
+      </svg>
+    );
+  }
+  return <>{initials || '?'}</>;
+}
+
 function getDomain(url: string): string {
   try { return new URL(url).hostname.replace(/^www\./, ''); }
   catch { return url; }
@@ -1822,6 +1847,310 @@ function PaperWriter({ hasDoc, t }: { hasDoc: boolean; t: T }) {
   );
 }
 
+/* ─── Pricing modal ──────────────────────────────────────────────────────────── */
+function PricingModal({ onClose }: { onClose: () => void }) {
+  const { lang } = useLanguage();
+  const [selected, setSelected] = useState<'monthly' | 'semester'>('semester');
+  const [closing, setClosing] = useState(false);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleClose = useCallback(() => {
+    setClosing(true);
+    closeTimerRef.current = setTimeout(onClose, 230);
+  }, [onClose]);
+
+  // Clear timer on unmount to prevent stale-closure side effects
+  useEffect(() => () => { if (closeTimerRef.current) clearTimeout(closeTimerRef.current); }, []);
+
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') handleClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [handleClose]);
+
+  const he = lang === 'he';
+
+  const CHECK = (
+    <svg className="w-[14px] h-[14px] shrink-0" fill="none" viewBox="0 0 24 24"
+      stroke="currentColor" strokeWidth={2.5} style={{ color: '#517B3E' }}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+    </svg>
+  );
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6"
+      style={{
+        backgroundColor: 'rgba(12,22,10,0.52)',
+        backdropFilter: 'blur(18px)',
+        animation: closing
+          ? 'overlay-exit 0.24s ease-in both'
+          : 'overlay-enter 0.3s ease-out both',
+      }}
+      onClick={e => { if (e.target === e.currentTarget) handleClose(); }}
+    >
+      {/* ── Modal card ── */}
+      <div
+        dir={he ? 'rtl' : 'ltr'}
+        className="relative w-full max-w-2xl rounded-3xl overflow-hidden"
+        style={{
+          background: 'rgba(248,252,244,0.97)',
+          backdropFilter: 'blur(28px)',
+          border: '1px solid rgba(157,192,139,0.28)',
+          boxShadow: '0 20px 56px rgba(20,36,16,0.18), 0 4px 16px rgba(81,123,62,0.10)',
+          maxHeight: '92vh',
+          overflowY: 'auto',
+          animation: closing
+            ? 'pricing-exit 0.22s cubic-bezier(0.4,0,0.6,1) both'
+            : 'pricing-enter 0.38s cubic-bezier(0.16,1,0.3,1) both',
+        }}
+      >
+        {/* ── Decorative organic background ── */}
+        <div className="absolute inset-0 pointer-events-none overflow-hidden" aria-hidden="true">
+          {/* Radial bloom — top-end corner */}
+          <div className="absolute -top-24 -end-20 w-80 h-80 rounded-full"
+            style={{ background: 'radial-gradient(circle at center, rgba(164,214,136,0.2) 0%, transparent 65%)' }} />
+          {/* Radial bloom — bottom-start corner */}
+          <div className="absolute -bottom-20 -start-20 w-72 h-72 rounded-full"
+            style={{ background: 'radial-gradient(circle at center, rgba(81,123,62,0.09) 0%, transparent 65%)' }} />
+          {/* Concentric ripple rings — centred */}
+          <div className="absolute rounded-full" style={{
+            width: 440, height: 440,
+            top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
+            border: '1px solid rgba(157,192,139,0.08)',
+          }} />
+          <div className="absolute rounded-full" style={{
+            width: 290, height: 290,
+            top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
+            border: '1px solid rgba(157,192,139,0.06)',
+          }} />
+
+          {/* Minimalist bonsai — bottom-end */}
+          <svg width="96" height="96" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg"
+            className="absolute bottom-4 end-4" style={{ opacity: 0.065 }}>
+            <path d="M48 90 C47 76 45 66 48 54" stroke="#2A3B22" strokeWidth="3.5" strokeLinecap="round"/>
+            <path d="M48 63 C43 57 32 54 23 47" stroke="#2A3B22" strokeWidth="2.5" strokeLinecap="round"/>
+            <path d="M48 57 C53 50 63 47 72 40" stroke="#2A3B22" strokeWidth="2.5" strokeLinecap="round"/>
+            <path d="M48 54 C47 45 47 37 48 31" stroke="#2A3B22" strokeWidth="2" strokeLinecap="round"/>
+            <circle cx="21" cy="43" r="11" fill="#517B3E"/>
+            <circle cx="32" cy="36" r="9" fill="#2A3B22"/>
+            <circle cx="72" cy="36" r="10" fill="#517B3E"/>
+            <circle cx="59" cy="29" r="8" fill="#2A3B22"/>
+            <circle cx="48" cy="25" r="12" fill="#517B3E"/>
+            <circle cx="40" cy="31" r="7" fill="#3d5530"/>
+            <rect x="38" y="90" width="20" height="5" rx="2.5" fill="#2A3B22"/>
+            <path d="M35 90 L37 98 H59 L61 90 Z" fill="#3d5530"/>
+          </svg>
+
+          {/* Minimalist matcha cup — top-start */}
+          <svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg"
+            className="absolute top-3 start-3" style={{ opacity: 0.07 }}>
+            <path d="M28 22 C27 17 31 16 30 11" stroke="#517B3E" strokeWidth="1.8" strokeLinecap="round"/>
+            <path d="M40 20 C39 15 43 14 42 9" stroke="#517B3E" strokeWidth="1.8" strokeLinecap="round"/>
+            <path d="M52 22 C51 17 55 16 54 11" stroke="#517B3E" strokeWidth="1.8" strokeLinecap="round"/>
+            <rect x="17" y="26" width="46" height="6" rx="3" fill="#2A3B22"/>
+            <path d="M21 32 L23 60 H57 L59 32 Z" fill="#517B3E"/>
+            <path d="M59 36 C68 36 70 41 70 45 C70 49 68 54 59 54"
+              stroke="#2A3B22" strokeWidth="3" fill="none" strokeLinecap="round"/>
+            <ellipse cx="40" cy="62" rx="25" ry="4.5" fill="#2A3B22"/>
+          </svg>
+        </div>
+
+        {/* ── Header ── */}
+        <div className="relative px-6 pt-5 pb-3 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-black text-[#1a2e14] leading-snug tracking-tight">
+              {he ? 'שדרג את החשבון שלך' : 'Upgrade Your Account'}
+            </h2>
+            <p className="text-[13px] text-[#7a9268] mt-1">
+              {he ? 'בחר את המסלול המתאים לך' : 'Choose the plan that fits you'}
+            </p>
+          </div>
+          <button
+            onClick={handleClose}
+            aria-label={he ? 'סגור' : 'Close'}
+            className="shrink-0 mt-0.5 p-2 rounded-xl transition-all"
+            style={{ color: '#9aad8a', background: 'rgba(157,192,139,0.10)' }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(157,192,139,0.22)'; (e.currentTarget as HTMLButtonElement).style.color = '#517B3E'; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(157,192,139,0.10)'; (e.currentTarget as HTMLButtonElement).style.color = '#9aad8a'; }}
+          >
+            <IconX className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Thin divider */}
+        <div className="mx-5 mb-4" style={{ height: '1px', background: 'rgba(157,192,139,0.22)' }} />
+
+        {/* ── Side-by-side plan cards ──
+            RTL flex-row: first child → right (Semester)
+                          second child → left (Monthly)            ── */}
+        <div className="px-5 flex flex-col sm:flex-row gap-3">
+
+          {/* Semester — right in RTL, first in DOM */}
+          <button
+            type="button"
+            onClick={() => setSelected('semester')}
+            className="flex-1 text-start rounded-2xl relative overflow-hidden transition-all"
+            style={{
+              padding: '0 20px 20px',
+              background: selected === 'semester'
+                ? 'rgba(192,232,170,0.32)'
+                : 'rgba(214,240,198,0.20)',
+              border: selected === 'semester'
+                ? '1.5px solid rgba(81,123,62,0.45)'
+                : '1.5px solid rgba(157,192,139,0.30)',
+              boxShadow: selected === 'semester'
+                ? '0 4px 22px rgba(81,123,62,0.13)'
+                : 'none',
+            }}
+          >
+            {/* Full-width top banner badge */}
+            <div
+              className="flex items-center justify-center gap-1.5 py-1.5 -mx-5 mb-4 text-[10px] font-bold tracking-widest uppercase"
+              style={{
+                background: 'linear-gradient(90deg, #2A3B22 0%, #517B3E 50%, #2A3B22 100%)',
+                color: 'rgba(255,255,255,0.9)',
+                letterSpacing: '0.08em',
+              }}
+            >
+              <IconSparkles className="w-3 h-3" />
+              {he ? 'הכי משתלם' : 'Best Value'}
+            </div>
+
+            {/* Radio + title row */}
+            <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+              <div
+                className="w-[17px] h-[17px] rounded-full border-2 flex items-center justify-center shrink-0 transition-all"
+                style={{ borderColor: selected === 'semester' ? '#517B3E' : 'rgba(157,192,139,0.5)' }}
+              >
+                {selected === 'semester' && (
+                  <div className="w-[7px] h-[7px] rounded-full" style={{ background: '#517B3E' }} />
+                )}
+              </div>
+              <span className="text-[15px] font-bold text-[#1a2e14]">
+                {he ? 'סמסטר' : 'Semester'}
+              </span>
+              <span
+                className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-full tracking-wide"
+                style={{ background: 'rgba(81,123,62,0.14)', color: '#2A3B22' }}
+              >
+                {he ? 'חיסכון 15%' : 'Save 15%'}
+              </span>
+            </div>
+
+            {/* Price */}
+            <div className="leading-none mb-0.5">
+              <span className="text-[44px] font-black text-[#1a2e14]">₪100</span>
+            </div>
+            <p className="text-[12px] text-[#7a9268]">{he ? 'ל-4 חודשים' : 'for 4 months'}</p>
+            <p className="text-[12px] font-semibold mb-4" style={{ color: '#517B3E' }}>
+              {he ? '₪25 לחודש בלבד' : '₪25/month only'}
+            </p>
+
+            {/* Features */}
+            <ul className="space-y-2.5 mb-4">
+              {(he
+                ? ['כל תכונות ה-Pro', 'חיסכון של 15%', 'שקט נפשי לכל הסמסטר']
+                : ['All Pro features', 'Save 15%', 'Peace of mind all semester']
+              ).map(f => (
+                <li key={f} className="flex items-center gap-2.5 text-[13px] text-[#3a5228]">
+                  {CHECK}{f}
+                </li>
+              ))}
+            </ul>
+
+            <p className="text-[11px]" style={{ color: 'rgba(100,130,80,0.85)' }}>
+              {he ? 'תשלום חד פעמי — ללא חיוב חוזר' : 'One-time payment — no recurring charges'}
+            </p>
+          </button>
+
+          {/* Monthly — left in RTL, second in DOM */}
+          <button
+            type="button"
+            onClick={() => setSelected('monthly')}
+            className="flex-1 text-start rounded-2xl p-5 transition-all"
+            style={{
+              background: selected === 'monthly'
+                ? 'rgba(255,255,255,0.92)'
+                : 'rgba(255,255,255,0.60)',
+              border: selected === 'monthly'
+                ? '1.5px solid rgba(157,192,139,0.55)'
+                : '1.5px solid rgba(200,215,188,0.48)',
+              boxShadow: selected === 'monthly'
+                ? '0 4px 18px rgba(81,123,62,0.09)'
+                : 'none',
+            }}
+          >
+            {/* Radio + title */}
+            <div className="flex items-center gap-2 mb-1.5">
+              <div
+                className="w-[17px] h-[17px] rounded-full border-2 flex items-center justify-center shrink-0 transition-all"
+                style={{ borderColor: selected === 'monthly' ? '#517B3E' : 'rgba(157,192,139,0.5)' }}
+              >
+                {selected === 'monthly' && (
+                  <div className="w-[7px] h-[7px] rounded-full" style={{ background: '#517B3E' }} />
+                )}
+              </div>
+              <span className="text-[15px] font-bold text-[#1a2e14]">
+                {he ? 'מסלול חודשי' : 'Monthly Plan'}
+              </span>
+            </div>
+
+            {/* Price */}
+            <div className="leading-none mb-0.5">
+              <span className="text-[44px] font-black text-[#1a2e14]">₪29</span>
+            </div>
+            <p className="text-[12px] text-[#7a9268] mb-5">{he ? 'לחודש' : '/month'}</p>
+
+            {/* Features */}
+            <ul className="space-y-2.5 mb-4">
+              {(he
+                ? ['גישה מלאה ל-AI', 'העלאת קבצים ללא הגבלה', 'תמיכה מועדפת']
+                : ['Full AI access', 'Unlimited file uploads', 'Priority support']
+              ).map(f => (
+                <li key={f} className="flex items-center gap-2.5 text-[13px] text-[#3a5228]">
+                  {CHECK}{f}
+                </li>
+              ))}
+            </ul>
+
+            <p className="text-[11px]" style={{ color: 'rgba(100,130,80,0.85)' }}>
+              {he ? 'חיוב חודשי חוזר' : 'Recurring monthly billing'}
+            </p>
+          </button>
+        </div>
+
+        {/* ── Disabled CTA ── */}
+        <div className="px-5 pt-4 pb-6">
+          <button
+            disabled
+            className="w-full py-3.5 rounded-full flex items-center justify-center gap-2 cursor-not-allowed"
+            style={{
+              background: 'linear-gradient(135deg, #2A3B22 0%, #3d5530 100%)',
+              color: 'rgba(200,225,185,0.38)',
+              fontSize: '0.875rem',
+              fontWeight: 700,
+              opacity: 0.46,
+              letterSpacing: '0.01em',
+            }}
+          >
+            <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round"
+                d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
+            </svg>
+            {he ? 'מעבר לתשלום' : 'Continue to Payment'}
+          </button>
+          <p className="text-center text-[11px] text-[#7a9268] mt-2.5 leading-snug">
+            {he
+              ? 'התשלום יהיה זמין בקרוב (המערכת בשדרוג)'
+              : 'Payment coming soon (system upgrade in progress)'}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ─── Logout confirmation modal ─────────────────────────────────────────────── */
 function LogoutConfirmModal({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
   const { lang } = useLanguage();
@@ -1920,11 +2249,12 @@ interface SidebarProps {
   userLastName: string;
   userEmail: string;
   userInitials: string;
+  userGender: string;
   onOpenProfile: () => void;
   onRequestLogout: () => void;
 }
 
-function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDeleteSession, onSwitchMode, isOpen, onClose, isAdmin, lang, t, userFirstName, userLastName, userEmail, userInitials, onOpenProfile, onRequestLogout }: SidebarProps) {
+function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDeleteSession, onSwitchMode, isOpen, onClose, isAdmin, lang, t, userFirstName, userLastName, userEmail, userInitials, userGender, onOpenProfile, onRequestLogout }: SidebarProps) {
   const router = useRouter();
   const fmtDate = (iso: string) =>
     new Date(iso).toLocaleString(lang === 'he' ? 'he-IL' : 'en-US', {
@@ -2077,7 +2407,7 @@ function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDel
               className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0 select-none transition-transform group-hover:scale-105"
               style={{ background: 'linear-gradient(135deg, #517B3E 0%, #2A3B22 100%)' }}
             >
-              {userInitials || '?'}
+              <AvatarContent gender={userGender} initials={userInitials} />
             </div>
             <div className="flex-1 min-w-0 text-start">
               <p className="text-sm font-semibold text-[#2d3b25] truncate leading-snug">
@@ -2133,6 +2463,7 @@ export default function Home() {
   const [userDegreeType]                        = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_degree_type')     ?? '') : '');
   const [userSecondaryMajor]                    = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_secondary_major') ?? '') : '');
   const [userCountry]                           = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_country')         ?? '') : '');
+  const [userGender, setUserGender]             = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_gender')          ?? '') : '');
 
   const [hasDoc, setHasDoc]                     = useState(false);
 
@@ -2154,6 +2485,7 @@ export default function Home() {
   const [sidebarOpen, setSidebarOpen]           = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [showLogoutModal, setShowLogoutModal]   = useState(false);
+  const [showPricingModal, setShowPricingModal] = useState(false);
   const [rateLimitToast, setRateLimitToast]     = useState(false);
   const [profilePopoverOpen, setProfilePopoverOpen] = useState(false);
   const profilePopoverRef = useRef<HTMLDivElement>(null);
@@ -2162,7 +2494,7 @@ export default function Home() {
 
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key === 'Escape') { setSidebarOpen(false); setProfilePopoverOpen(false); setProfileModalOpen(false); setShowLogoutModal(false); }
+      if (e.key === 'Escape') { setSidebarOpen(false); setProfilePopoverOpen(false); setShowLogoutModal(false); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -2232,10 +2564,11 @@ export default function Home() {
     if (!isAuthenticated) return;
     authFetch(`${API}/api/profile`)
       .then(r => r.ok ? r.json() : null)
-      .then((data: { institution?: string; primary_major?: string } | null) => {
+      .then((data: { institution?: string; primary_major?: string; gender?: string } | null) => {
         if (!data) return;
         if (data.institution)   { setUserInstitution(data.institution);   localStorage.setItem('levy_ai_institution',   data.institution); }
         if (data.primary_major) { setUserPrimaryMajor(data.primary_major); localStorage.setItem('levy_ai_primary_major', data.primary_major); }
+        if (data.gender)        { setUserGender(data.gender);              localStorage.setItem('levy_ai_gender',        data.gender); }
       })
       .catch(() => {});
   }, [isAuthenticated]);
@@ -2380,7 +2713,7 @@ export default function Home() {
                 aria-label="Profile menu"
                 className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0 transition-all select-none"
                 style={{ backgroundColor: profilePopoverOpen ? '#3a5528' : '#2A3B22', boxShadow: profilePopoverOpen ? '0 0 0 3px rgba(255,255,255,0.35)' : 'none' }}>
-                {userInitials || '?'}
+                <AvatarContent gender={userGender} initials={userInitials} />
               </button>
 
               {/* Floating popover */}
@@ -2402,7 +2735,7 @@ export default function Home() {
                       <div
                         className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-black shrink-0 select-none"
                         style={{ backgroundColor: '#2A3B22' }}>
-                        {userInitials || '?'}
+                        <AvatarContent gender={userGender} initials={userInitials} />
                       </div>
                       <div className="min-w-0">
                         <p className="font-bold text-[#1a2e14] text-sm truncate leading-snug">
@@ -2477,6 +2810,7 @@ export default function Home() {
         userLastName={userLastName}
         userEmail={userEmail}
         userInitials={userInitials}
+        userGender={userGender}
         onOpenProfile={() => { setSidebarOpen(false); setProfileModalOpen(true); }}
         onRequestLogout={() => { setSidebarOpen(false); setShowLogoutModal(true); }}
       />
@@ -2490,6 +2824,7 @@ export default function Home() {
         lastName={userLastName}
         email={userEmail}
         initials={userInitials}
+        gender={userGender}
         country={userCountry}
         institution={userInstitution}
         degreeType={userDegreeType}
@@ -2504,6 +2839,11 @@ export default function Home() {
           onConfirm={handleLogout}
           onCancel={() => setShowLogoutModal(false)}
         />
+      )}
+
+      {/* ── Pricing modal ─────────────────────────────────────────────────────── */}
+      {showPricingModal && (
+        <PricingModal onClose={() => setShowPricingModal(false)} />
       )}
 
       {/* ── Main content ─────────────────────────────────────────────────────── */}
@@ -2534,7 +2874,7 @@ export default function Home() {
                       </span>
                     </div>
                     <button
-                      onClick={() => router.push('/#pricing')}
+                      onClick={() => setShowPricingModal(true)}
                       className="shrink-0 text-[#517B3E] font-semibold hover:underline transition-colors bg-transparent border-none cursor-pointer p-0"
                       style={{ fontSize: '0.72rem' }}>
                       {t.upgradePrompt} →

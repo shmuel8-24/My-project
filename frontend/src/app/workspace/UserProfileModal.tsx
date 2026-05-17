@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLanguage } from '../providers/language';
 
@@ -22,6 +22,7 @@ interface UserProfileModalProps {
   lastName:       string;
   email:          string;
   initials:       string;
+  gender:         string;
   country:        string;
   institution:    string;
   degreeType:     string;
@@ -46,11 +47,37 @@ function DetailRow({ icon, label, value }: { icon: string; label: string; value:
   );
 }
 
+// ─── Gender-aware avatar ──────────────────────────────────────────────────────
+
+function AvatarContent({ gender, initials }: { gender: string; initials: string }) {
+  if (gender === 'זכר') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"
+        style={{ width: '62%', height: '62%' }}>
+        <circle cx="9.5" cy="13" r="5.8"/>
+        <line x1="14" y1="8.5" x2="20" y2="3"/>
+        <polyline points="15.5 3 20 3 20 7.5"/>
+      </svg>
+    );
+  }
+  if (gender === 'נקבה') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"
+        style={{ width: '62%', height: '62%' }}>
+        <circle cx="12" cy="8.5" r="5.8"/>
+        <line x1="12" y1="14.3" x2="12" y2="20.5"/>
+        <line x1="9" y1="17.5" x2="15" y2="17.5"/>
+      </svg>
+    );
+  }
+  return <>{initials || '?'}</>;
+}
+
 // ─── Modal ────────────────────────────────────────────────────────────────────
 
 export default function UserProfileModal({
   isOpen, onClose, onLogout,
-  firstName, lastName, email, initials,
+  firstName, lastName, email, initials, gender,
   country, institution, degreeType, primaryMajor, secondaryMajor,
   isAdmin,
 }: UserProfileModalProps) {
@@ -58,12 +85,31 @@ export default function UserProfileModal({
   const { lang } = useLanguage();
   const he = lang === 'he';
 
-  // Close on Escape
+  const [closing, setClosing] = useState(false);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Stable ref to latest onClose — avoids recreating handleClose on every render
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+
+  // Stable close handler: plays exit animation then fires onClose
+  const handleClose = useCallback(() => {
+    if (closeTimerRef.current) return;
+    setClosing(true);
+    closeTimerRef.current = setTimeout(() => {
+      closeTimerRef.current = null;
+      onCloseRef.current();
+    }, 240);
+  }, []);
+
+  // Cleanup timer on unmount
+  useEffect(() => () => { if (closeTimerRef.current) clearTimeout(closeTimerRef.current); }, []);
+
+  // Escape key
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') handleClose(); };
     if (isOpen) window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen, onClose]);
+  }, [isOpen, handleClose]);
 
   if (!isOpen) return null;
 
@@ -77,17 +123,24 @@ export default function UserProfileModal({
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center p-4"
-      style={{ backgroundColor: 'rgba(0,0,0,0.40)', backdropFilter: 'blur(6px)' }}
-      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      style={{
+        backgroundColor: 'rgba(0,0,0,0.40)',
+        backdropFilter: 'blur(6px)',
+        animation: closing ? 'overlay-exit 0.26s ease-in both' : 'overlay-enter 0.3s ease-out both',
+      }}
+      onClick={e => { if (e.target === e.currentTarget) handleClose(); }}
     >
       <div
         dir={he ? 'rtl' : 'ltr'}
-        className="w-full max-w-sm rounded-3xl overflow-hidden animate-slide-up-fade"
+        className="w-full max-w-sm rounded-3xl overflow-hidden"
         style={{
           background: 'rgba(255,255,255,0.98)',
           backdropFilter: 'blur(20px)',
           border: '1px solid rgba(157,192,139,0.35)',
           boxShadow: '0 20px 60px rgba(20,40,15,0.22), 0 4px 16px rgba(20,40,15,0.08)',
+          animation: closing
+            ? 'pricing-exit 0.22s cubic-bezier(0.4,0,0.6,1) both'
+            : 'pricing-enter 0.38s cubic-bezier(0.16,1,0.3,1) both',
         }}
       >
 
@@ -100,9 +153,9 @@ export default function UserProfileModal({
             {he ? 'הפרופיל שלי' : 'My Profile'}
           </span>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             aria-label={he ? 'סגור' : 'Close'}
-            className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-black/10 transition-colors text-[#7a9268] text-xl leading-none select-none"
+            className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-black/10 transition-all active:scale-[0.90] text-[#7a9268] text-xl leading-none select-none"
           >
             ×
           </button>
@@ -119,7 +172,7 @@ export default function UserProfileModal({
                 boxShadow: '0 4px 14px rgba(81,123,62,0.38)',
               }}
             >
-              {initials || '?'}
+              <AvatarContent gender={gender} initials={initials} />
             </div>
 
             <div className="min-w-0 flex-1">
@@ -164,8 +217,8 @@ export default function UserProfileModal({
 
           {/* Profile settings */}
           <button
-            onClick={() => { onClose(); router.push('/profile'); }}
-            className="w-full flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all"
+            onClick={() => { handleClose(); router.push('/profile'); }}
+            className="w-full flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-[0.97]"
             style={{
               color: '#2d3b25',
               background: 'rgba(81,123,62,0.07)',
@@ -186,8 +239,8 @@ export default function UserProfileModal({
           {/* Close + Logout */}
           <div className="flex gap-2 mt-1">
             <button
-              onClick={onClose}
-              className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold border transition-all"
+              onClick={handleClose}
+              className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold border transition-all active:scale-[0.97]"
               style={{ color: '#7a9268', borderColor: 'rgba(157,192,139,0.45)', background: 'transparent' }}
               onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(81,123,62,0.06)'; }}
               onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
@@ -196,7 +249,7 @@ export default function UserProfileModal({
             </button>
             <button
               onClick={onLogout}
-              className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-1.5"
+              className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-[0.97] flex items-center justify-center gap-1.5"
               style={{ color: '#dc2626', background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.18)' }}
               onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(220,38,38,0.12)'; }}
               onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(220,38,38,0.06)'; }}

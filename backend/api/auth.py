@@ -277,6 +277,7 @@ def register():
     first_name = strip_html((data.get("first_name") or "").strip())
     last_name  = strip_html((data.get("last_name")  or "").strip())
     reg_token  = (data.get("reg_token")  or "").strip()
+    gender     = strip_html((data.get("gender")     or "").strip())
 
     if not email:         return jsonify({"success": False, "error": "Email is required"}), 400
     if not reg_token:     return jsonify({"success": False, "error": "אימות מייל נדרש לפני ההרשמה"}), 400
@@ -304,11 +305,12 @@ def register():
             first_name=first_name,
             last_name=last_name,
             role=assigned_role,
+            gender=gender or None,
         )
         db.add(user)
         db.commit()
         db.refresh(user)
-        print(f"[Register] {first_name} {last_name} <{email}> role={assigned_role}")
+        print(f"[Register] {first_name} {last_name} <{email}> role={assigned_role} gender={gender!r}")
         token = _make_token(user.id, user.email, user.role)
         return jsonify({
             "success":    True,
@@ -471,6 +473,7 @@ def get_profile(user_id: int):
             "degree_type":    user.degree_type    or '',
             "primary_major":  user.primary_major  or '',
             "secondary_major": user.secondary_major or '',
+            "gender":         user.gender          or '',
         }), 200
     finally:
         db.close()
@@ -485,6 +488,7 @@ def user_onboarding(user_id: int):
     degree_type     = strip_html((data.get("degree_type")     or "").strip())
     primary_major   = strip_html((data.get("primary_major")   or "").strip())
     secondary_major = strip_html((data.get("secondary_major") or "").strip())
+    gender          = strip_html((data.get("gender")          or "").strip())
 
     db = SessionLocal()
     try:
@@ -496,14 +500,16 @@ def user_onboarding(user_id: int):
         user.degree_type     = degree_type
         user.primary_major   = primary_major
         user.secondary_major = secondary_major if degree_type in ('double', 'specialized') else ''
+        user.gender          = gender
         db.commit()
-        print(f"[Onboarding] u{user_id}: country={country!r} institution={institution!r} degree={degree_type!r} major={primary_major!r}")
+        print(f"[Onboarding] u{user_id}: country={country!r} institution={institution!r} degree={degree_type!r} major={primary_major!r} gender={gender!r}")
         return jsonify({
             "country":         user.country        or '',
             "institution":     user.institution    or '',
             "degree_type":     user.degree_type    or '',
             "primary_major":   user.primary_major  or '',
             "secondary_major": user.secondary_major or '',
+            "gender":          user.gender          or '',
         }), 200
     finally:
         db.close()

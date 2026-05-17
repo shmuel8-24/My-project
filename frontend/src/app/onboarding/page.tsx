@@ -257,6 +257,7 @@ export default function OnboardingPage() {
   const router = useRouter();
 
   // Field values
+  const [gender,         setGender]         = useState('');
   const [country,        setCountry]        = useState('');
   const [institution,    setInstitution]    = useState('');
   const [degreeType,     setDegreeType]     = useState('regular');
@@ -384,6 +385,7 @@ export default function OnboardingPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          gender,
           country,
           institution,
           degree_type:     degreeType,
@@ -396,6 +398,7 @@ export default function OnboardingPage() {
         setError((d as { error?: string }).error ?? 'שגיאה בשמירת הנתונים');
         return;
       }
+      localStorage.setItem('levy_ai_gender',           gender);
       localStorage.setItem('levy_ai_country',          country);
       localStorage.setItem('levy_ai_institution',      institution);
       localStorage.setItem('levy_ai_degree_type',      degreeType);
@@ -464,6 +467,52 @@ export default function OnboardingPage() {
           </div>
 
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+            {/* ── 0. Gender ── */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <label style={labelStyle}>מגדר</label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                {([
+                  { value: 'זכר',  label: 'זכר'  },
+                  { value: 'נקבה', label: 'נקבה' },
+                  { value: 'אחר',  label: 'אחר'  },
+                ] as { value: string; label: string }[]).map(opt => {
+                  const isSelected = gender === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setGender(opt.value)}
+                      style={{
+                        padding: '10px 8px',
+                        borderRadius: 10,
+                        border: isSelected ? '1.5px solid #517B3E' : '1.5px solid rgba(200,190,170,0.6)',
+                        background: isSelected ? 'rgba(81,123,62,0.09)' : 'rgba(255,255,255,0.6)',
+                        cursor: 'pointer',
+                        textAlign: 'center',
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      {isSelected
+                        ? (
+                          <div className="flex justify-center mb-1">
+                            <span className="w-4 h-4 rounded-full flex items-center justify-center" style={{ background: '#517B3E' }}>
+                              <svg className="w-2.5 h-2.5" viewBox="0 0 10 10" fill="white">
+                                <path d="M2 5l2.5 2.5L8 3" stroke="white" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                              </svg>
+                            </span>
+                          </div>
+                        )
+                        : <div style={{ height: 24 }} />
+                      }
+                      <p style={{ fontSize: '0.8125rem', fontWeight: 700, color: isSelected ? '#517B3E' : '#374151', lineHeight: 1.3 }}>
+                        {opt.label}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
             {/* ── 1. Country ── */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

@@ -108,7 +108,7 @@ const landing = {
     regTitle: 'יצירת חשבון',
     regStep1Sub: 'הזן את כתובת המייל שלך לאימות',
     regStep2Sub: 'הזן את הקוד שנשלח למייל שלך',
-    regStep3Sub: 'השלם את פרטי החשבון',
+    regStep3Sub: 'ספר לנו קצת על עצמך',
     regSendCode: 'שלח קוד אימות',
     regFinish: 'סיים הרשמה',
     regFirstName: 'שם פרטי',
@@ -137,8 +137,17 @@ const landing = {
     errRegFailed: 'שגיאה ברישום. נסה שוב.',
     errNoServer: 'לא ניתן להתחבר לשרת. בדוק את החיבור ונסה שוב.',
 
-    // Register step 4 — email verification
-    regStep4Sub: 'הזן את הקוד שנשלח אליך במייל',
+    // Register step 0 — gender
+    regGenderTitle: 'בחר מגדר',
+    regGenderSub: 'נשמח לדעת עם מי אנחנו מדברים',
+    regGenderMale: 'זכר',
+    regGenderFemale: 'נקבה',
+    regGenderOther: 'אחר / מעדיף לא לציין',
+    regGenderOtherDesc: 'לכל מי שלא מוצא את עצמו בקטגוריות הקודמות',
+    errNoGender: 'יש לבחור מגדר לפני המשך',
+
+    // Register step 4 — password
+    regStep4Sub: 'בחר סיסמה חזקה לחשבון שלך',
     regVerifyTitle: 'אימות כתובת המייל',
     regVerifyMsg: 'נשלח אליך מייל אימות.',
     regVerifyCheck: 'בדוק את תיבת הדואר שלך (וגם את תיקיית הספאם) והזן את הקוד בן 6 הספרות.',
@@ -266,7 +275,7 @@ const landing = {
     regTitle: 'Create Account',
     regStep1Sub: 'Enter your email address to verify it',
     regStep2Sub: 'Enter the code sent to your email',
-    regStep3Sub: 'Complete your account details',
+    regStep3Sub: 'Tell us a bit about yourself',
     regSendCode: 'Send Verification Code',
     regFinish: 'Complete Registration',
     regFirstName: 'First Name',
@@ -295,8 +304,17 @@ const landing = {
     errRegFailed: 'Registration error. Please try again.',
     errNoServer: 'Cannot connect to server. Check your connection and try again.',
 
-    // Register step 4 — email verification
-    regStep4Sub: 'Enter the code sent to your email',
+    // Register step 0 — gender
+    regGenderTitle: 'Choose Gender',
+    regGenderSub: "We'd love to know who we're talking to",
+    regGenderMale: 'Male',
+    regGenderFemale: 'Female',
+    regGenderOther: 'Other / Prefer not to say',
+    regGenderOtherDesc: "For anyone who doesn't identify with the previous categories",
+    errNoGender: 'Please select a gender to continue',
+
+    // Register step 4 — password
+    regStep4Sub: 'Create a secure password for your account',
     regVerifyTitle: 'Verify your Email',
     regVerifyMsg: 'A verification email has been sent.',
     regVerifyCheck: 'Check your inbox (and spam folder) and enter the 6-digit code.',

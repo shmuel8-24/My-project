@@ -66,6 +66,7 @@ function SubmitButton({ loading, label, loadingLabel }: { loading: boolean; labe
     <button
       type="submit"
       disabled={loading}
+      className="active:scale-[0.97]"
       style={{
         marginTop: '8px',
         display: 'inline-flex',
@@ -81,7 +82,7 @@ function SubmitButton({ loading, label, loadingLabel }: { loading: boolean; labe
         border: 'none',
         cursor: loading ? 'not-allowed' : 'pointer',
         boxShadow: loading ? 'none' : '0 4px 16px rgba(81,123,62,0.38)',
-        transition: 'background-color 0.2s, box-shadow 0.2s',
+        transition: 'background-color 0.2s, box-shadow 0.2s, transform 0.1s',
         width: '100%',
       }}
     >
@@ -100,6 +101,29 @@ function SubmitButton({ loading, label, loadingLabel }: { loading: boolean; labe
       )}
       {loading ? loadingLabel : label}
     </button>
+  );
+}
+
+/* ─── Gender avatar images ───────────────────────────────────────────────────── */
+function MaleAvatar() {
+  return (
+    /* eslint-disable-next-line @next/next/no-img-element */
+    <img
+      src="/assets/avatars/IMG_1.PNG"
+      alt="זכר"
+      style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+    />
+  );
+}
+
+function FemaleAvatar() {
+  return (
+    /* eslint-disable-next-line @next/next/no-img-element */
+    <img
+      src="/assets/avatars/IMG_2.PNG"
+      alt="נקבה"
+      style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+    />
   );
 }
 
@@ -136,6 +160,7 @@ export default function HomePage() {
   const [regConfirm,   setRegConfirm]   = useState('');
   const [regError,     setRegError]     = useState('');
   const [regLoading,   setRegLoading]   = useState(false);
+  const [regGender,    setRegGender]    = useState<'' | 'male' | 'female' | 'other'>('');
 
   /* ── Register step 2: OTP boxes ── */
   const [regOtpDigits, setRegOtpDigits] = useState<string[]>(Array(6).fill(''));
@@ -158,7 +183,20 @@ export default function HomePage() {
   const [pricingInView,     setPricingInView]     = useState(false);
   const [activeBlogId,      setActiveBlogId]      = useState<number | null>(null);
 
+  const [loginModalClosing,    setLoginModalClosing]    = useState(false);
+  const [registerModalClosing, setRegisterModalClosing] = useState(false);
+  const loginCloseTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const registerCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup timers on unmount
+  useEffect(() => () => {
+    if (loginCloseTimerRef.current)    clearTimeout(loginCloseTimerRef.current);
+    if (registerCloseTimerRef.current) clearTimeout(registerCloseTimerRef.current);
+  }, []);
+
   const closeModal = useCallback(() => {
+    if (loginCloseTimerRef.current) { clearTimeout(loginCloseTimerRef.current); loginCloseTimerRef.current = null; }
+    setLoginModalClosing(false);
     setIsLoginModalOpen(false);
     setIsTransitioning(false);
     setError(''); setNetError(false);
@@ -173,8 +211,11 @@ export default function HomePage() {
   }, []);
 
   const closeRegisterModal = useCallback(() => {
+    if (registerCloseTimerRef.current) { clearTimeout(registerCloseTimerRef.current); registerCloseTimerRef.current = null; }
+    setRegisterModalClosing(false);
     setIsRegisterModalOpen(false);
     setRegStep(1);
+    setRegGender('');
     setRegEmail(''); setRegToken('');
     setRegFirstName(''); setRegLastName('');
     setRegPassword(''); setRegConfirm('');
@@ -186,6 +227,25 @@ export default function HomePage() {
     closeModal();
     setIsRegisterModalOpen(true);
   }, [closeModal]);
+
+  // Animated close — plays exit animation then fires the actual close
+  const handleCloseLoginModal = useCallback(() => {
+    if (loginCloseTimerRef.current) return;
+    setLoginModalClosing(true);
+    loginCloseTimerRef.current = setTimeout(() => {
+      loginCloseTimerRef.current = null;
+      closeModal();
+    }, 240);
+  }, [closeModal]);
+
+  const handleCloseRegisterModal = useCallback(() => {
+    if (registerCloseTimerRef.current) return;
+    setRegisterModalClosing(true);
+    registerCloseTimerRef.current = setTimeout(() => {
+      registerCloseTimerRef.current = null;
+      closeRegisterModal();
+    }, 240);
+  }, [closeRegisterModal]);
 
   /* ── Auto-open modal when redirected from a protected route or /login /register ── */
   useEffect(() => {
@@ -203,24 +263,24 @@ export default function HomePage() {
   useEffect(() => {
     if (!isLoginModalOpen) return;
     document.body.style.overflow = 'hidden';
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeModal(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') handleCloseLoginModal(); };
     document.addEventListener('keydown', onKey);
     return () => {
       document.body.style.overflow = '';
       document.removeEventListener('keydown', onKey);
     };
-  }, [isLoginModalOpen, closeModal]);
+  }, [isLoginModalOpen, handleCloseLoginModal]);
 
   useEffect(() => {
     if (!isRegisterModalOpen) return;
     document.body.style.overflow = 'hidden';
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeRegisterModal(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') handleCloseRegisterModal(); };
     document.addEventListener('keydown', onKey);
     return () => {
       document.body.style.overflow = '';
       document.removeEventListener('keydown', onKey);
     };
-  }, [isRegisterModalOpen, closeRegisterModal]);
+  }, [isRegisterModalOpen, handleCloseRegisterModal]);
 
   /* ── Auto-focus first OTP box when the OTP step appears ── */
   useEffect(() => {
@@ -445,12 +505,19 @@ export default function HomePage() {
     } catch { setRegError(t.errNoServer); }
   };
 
-  /* Step 3 — create the account with the verified reg_token */
-  const handleRegStep3 = async (e: React.FormEvent) => {
+  /* Step 4 — validate personal details, advance to step 5 (no API call) */
+  const handleRegStep3 = (e: React.FormEvent) => {
     e.preventDefault();
     setRegError('');
     if (!regFirstName.trim()) { setRegError(t.errNoFirstName); return; }
     if (!regLastName.trim())  { setRegError(t.errNoLastName);  return; }
+    setRegStep(5);
+  };
+
+  /* Step 4 — create the account with the verified reg_token */
+  const handleRegStep4 = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRegError('');
     if (regPassword.length < 6) { setRegError(t.errWeakPassword); return; }
     if (regPassword !== regConfirm) { setRegError(t.errPasswordMismatch); return; }
     setRegLoading(true);
@@ -463,6 +530,7 @@ export default function HomePage() {
           first_name: regFirstName.trim(),
           last_name:  regLastName.trim(),
           reg_token:  regToken,
+          gender:     regGender || null,
         }),
       });
       const data = await res.json();
@@ -1284,10 +1352,10 @@ export default function HomePage() {
       {isLoginModalOpen && (
         <div
           className="fixed inset-0 bg-black/40 backdrop-blur-md z-50 flex items-center justify-center overflow-y-auto py-8"
-          onClick={closeModal}
+          style={{ animation: loginModalClosing ? 'overlay-exit 0.26s ease-in both' : 'overlay-enter 0.3s ease-out both' }}
+          onClick={handleCloseLoginModal}
         >
           <div
-            className="animate-slide-up-fade"
             onClick={e => e.stopPropagation()}
             style={{
               position: 'relative',
@@ -1301,6 +1369,9 @@ export default function HomePage() {
               padding: '48px 44px 44px',
               boxShadow: '0 16px 64px rgba(30,42,69,0.22), 0 2px 12px rgba(30,42,69,0.10)',
               border: '1px solid rgba(255,255,255,0.88)',
+              animation: loginModalClosing
+                ? 'pricing-exit 0.22s cubic-bezier(0.4,0,0.6,1) both'
+                : 'pricing-enter 0.38s cubic-bezier(0.16,1,0.3,1) both',
             }}
           >
             {isTransitioning ? (
@@ -1328,7 +1399,8 @@ export default function HomePage() {
             {/* X close button */}
             <button
               type="button"
-              onClick={closeModal}
+              onClick={handleCloseLoginModal}
+              className="active:scale-[0.88]"
               style={{
                 position: 'absolute', top: '14px', right: '14px',
                 width: '32px', height: '32px',
@@ -1336,7 +1408,7 @@ export default function HomePage() {
                 borderRadius: '8px',
                 background: 'rgba(0,0,0,0.05)',
                 border: 'none', cursor: 'pointer',
-                color: '#6b7280', transition: 'background 0.15s, color 0.15s',
+                color: '#6b7280', transition: 'background 0.15s, color 0.15s, transform 0.1s',
               }}
               onMouseEnter={e => {
                 (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,0,0,0.10)';
@@ -1647,10 +1719,10 @@ export default function HomePage() {
       {isRegisterModalOpen && (
         <div
           className="fixed inset-0 bg-black/40 backdrop-blur-md z-50 flex items-center justify-center overflow-y-auto py-8"
-          onClick={closeRegisterModal}
+          style={{ animation: registerModalClosing ? 'overlay-exit 0.26s ease-in both' : 'overlay-enter 0.3s ease-out both' }}
+          onClick={handleCloseRegisterModal}
         >
           <div
-            className="animate-slide-up-fade"
             onClick={e => e.stopPropagation()}
             style={{
               position: 'relative',
@@ -1664,19 +1736,23 @@ export default function HomePage() {
               padding: '48px 44px 44px',
               boxShadow: '0 16px 64px rgba(30,42,69,0.22), 0 2px 12px rgba(30,42,69,0.10)',
               border: '1px solid rgba(255,255,255,0.88)',
+              animation: registerModalClosing
+                ? 'pricing-exit 0.22s cubic-bezier(0.4,0,0.6,1) both'
+                : 'pricing-enter 0.38s cubic-bezier(0.16,1,0.3,1) both',
             }}
           >
             {/* Close */}
             <button
               type="button"
-              onClick={closeRegisterModal}
+              onClick={handleCloseRegisterModal}
+              className="active:scale-[0.88]"
               style={{
                 position: 'absolute', top: '14px', right: '14px',
                 width: '32px', height: '32px',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 borderRadius: '8px', background: 'rgba(0,0,0,0.05)',
                 border: 'none', cursor: 'pointer',
-                color: '#6b7280', transition: 'background 0.15s, color 0.15s',
+                color: '#6b7280', transition: 'background 0.15s, color 0.15s, transform 0.1s',
               }}
               onMouseEnter={e => {
                 (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,0,0,0.10)';
@@ -1692,17 +1768,19 @@ export default function HomePage() {
 
             {/* Title */}
             <h1 style={{ fontSize: '2rem', fontWeight: 800, color: '#1e2a45', lineHeight: 1.2, marginBottom: '6px', fontFamily: 'Georgia, serif', textAlign: 'center' }}>
-              {regStep === 2 ? t.regVerifyTitle : t.regTitle}
+              {regStep === 2 ? t.regVerifyTitle : regStep === 3 ? t.regGenderTitle : t.regTitle}
             </h1>
             <p style={{ fontSize: '0.875rem', color: '#8899aa', textAlign: 'center', marginBottom: '24px' }}>
               {regStep === 1 && t.regStep1Sub}
               {regStep === 2 && t.regStep2Sub}
-              {regStep === 3 && t.regStep3Sub}
+              {regStep === 3 && t.regGenderSub}
+              {regStep === 4 && t.regStep3Sub}
+              {regStep === 5 && t.regStep4Sub}
             </p>
 
-            {/* Progress dots */}
+            {/* Progress dots — 5 steps */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '28px' }}>
-              {[1, 2, 3].map((s, i) => (
+              {[1, 2, 3, 4, 5].map((s, i) => (
                 <React.Fragment key={s}>
                   <div style={{
                     width:  regStep === s ? '12px' : '8px',
@@ -1713,12 +1791,12 @@ export default function HomePage() {
                     boxShadow: regStep === s ? '0 0 0 4px rgba(81,123,62,0.20)' : 'none',
                     flexShrink: 0,
                   }} />
-                  {i < 2 && (
+                  {i < 4 && (
                     <div style={{
-                      width: '48px', height: '2px',
+                      width: '28px', height: '2px',
                       backgroundColor: regStep > s ? '#517B3E' : 'rgba(200,190,170,0.5)',
                       transition: 'background-color 0.3s',
-                      margin: '0 6px',
+                      margin: '0 4px',
                       flexShrink: 0,
                     }} />
                   )}
@@ -1734,6 +1812,138 @@ export default function HomePage() {
                 color: '#b91c1c', fontSize: '0.8125rem', textAlign: 'center',
               }}>
                 {regError}
+              </div>
+            )}
+
+            {/* ── Step 3: Gender Selection ── */}
+            {regStep === 3 && (
+              <div className="animate-slide-up-fade" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {/* Male + Female cards side by side */}
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  {(['male', 'female'] as const).map(g => {
+                    const sel = regGender === g;
+                    return (
+                      <button
+                        key={g}
+                        type="button"
+                        onClick={() => { setRegGender(g); setRegError(''); }}
+                        style={{
+                          flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
+                          gap: '10px', padding: '16px 10px 14px',
+                          borderRadius: '16px', position: 'relative',
+                          border: `2px solid ${sel ? '#517B3E' : 'rgba(200,190,170,0.60)'}`,
+                          background: sel ? 'rgba(81,123,62,0.07)' : 'rgba(255,255,255,0.60)',
+                          cursor: 'pointer',
+                          boxShadow: sel ? '0 4px 20px rgba(81,123,62,0.22)' : '0 2px 8px rgba(0,0,0,0.04)',
+                          transition: 'all 0.2s',
+                        }}
+                        onMouseEnter={e => {
+                          if (!sel) {
+                            (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(81,123,62,0.40)';
+                            (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.80)';
+                            (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 4px 16px rgba(0,0,0,0.08)';
+                          }
+                        }}
+                        onMouseLeave={e => {
+                          if (!sel) {
+                            (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(200,190,170,0.60)';
+                            (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.60)';
+                            (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 2px 8px rgba(0,0,0,0.04)';
+                          }
+                        }}
+                      >
+                        {/* Radio circle */}
+                        <div style={{
+                          position: 'absolute', top: '10px',
+                          insetInlineEnd: '10px',
+                          width: '18px', height: '18px', borderRadius: '50%',
+                          border: `2px solid ${sel ? '#517B3E' : 'rgba(200,190,170,0.80)'}`,
+                          background: 'white',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          transition: 'border-color 0.2s', flexShrink: 0,
+                        }}>
+                          {sel && <div style={{ width: '9px', height: '9px', borderRadius: '50%', backgroundColor: '#517B3E' }} />}
+                        </div>
+                        {/* Avatar */}
+                        <div style={{ width: '120px', height: '120px' }}>
+                          {g === 'male' ? <MaleAvatar /> : <FemaleAvatar />}
+                        </div>
+                        <span style={{ fontSize: '0.9375rem', fontWeight: 700, color: sel ? '#2A3B22' : '#374151' }}>
+                          {g === 'male' ? t.regGenderMale : t.regGenderFemale}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Other / Prefer not to say — full-width bar */}
+                {(() => {
+                  const sel = regGender === 'other';
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => { setRegGender('other'); setRegError(''); }}
+                      style={{
+                        width: '100%', padding: '13px 16px',
+                        borderRadius: '14px',
+                        border: `1.5px solid ${sel ? '#517B3E' : 'rgba(200,190,170,0.60)'}`,
+                        background: sel ? 'rgba(81,123,62,0.07)' : 'rgba(255,255,255,0.50)',
+                        cursor: 'pointer', textAlign: 'start',
+                        display: 'flex', alignItems: 'center', gap: '14px',
+                        transition: 'all 0.2s',
+                        boxShadow: sel ? '0 2px 12px rgba(81,123,62,0.15)' : 'none',
+                      }}
+                      onMouseEnter={e => {
+                        if (!sel) {
+                          (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(81,123,62,0.35)';
+                          (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.75)';
+                        }
+                      }}
+                      onMouseLeave={e => {
+                        if (!sel) {
+                          (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(200,190,170,0.60)';
+                          (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.50)';
+                        }
+                      }}
+                    >
+                      <div style={{
+                        width: '18px', height: '18px', borderRadius: '50%', flexShrink: 0,
+                        border: `2px solid ${sel ? '#517B3E' : 'rgba(200,190,170,0.80)'}`,
+                        background: 'white',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        transition: 'border-color 0.2s',
+                      }}>
+                        {sel && <div style={{ width: '9px', height: '9px', borderRadius: '50%', backgroundColor: '#517B3E' }} />}
+                      </div>
+                      <p style={{ fontSize: '0.875rem', fontWeight: 600, color: '#374151', margin: 0, flex: 1 }}>
+                        {t.regGenderOther}
+                      </p>
+                    </button>
+                  );
+                })()}
+
+                {/* Continue — full width */}
+                <button
+                  type="button"
+                  disabled={!regGender}
+                  onClick={() => {
+                    if (!regGender) { setRegError(t.errNoGender); return; }
+                    setRegError('');
+                    setRegStep(4);
+                  }}
+                  className="active:scale-[0.97]"
+                  style={{
+                    marginTop: '6px', width: '100%',
+                    padding: '13px', borderRadius: '12px',
+                    fontSize: '0.9375rem', fontWeight: 600, color: 'white',
+                    backgroundColor: regGender ? '#2A3B22' : 'rgba(175,175,165,0.70)',
+                    border: 'none', cursor: regGender ? 'pointer' : 'not-allowed',
+                    boxShadow: regGender ? '0 4px 18px rgba(42,59,34,0.32)' : 'none',
+                    transition: 'background-color 0.2s, box-shadow 0.2s, transform 0.1s',
+                  }}
+                >
+                  {t.regContinue}
+                </button>
               </div>
             )}
 
@@ -1767,6 +1977,10 @@ export default function HomePage() {
                     <span className="animate-spin" style={{ width: '14px', height: '14px', borderRadius: '50%', border: '2px solid rgba(255,255,255,0.35)', borderTopColor: 'white', display: 'inline-block', flexShrink: 0 }} />
                   )}
                   {regLoading ? t.loginSending : t.regSendCode}
+                </button>
+                <button type="button" onClick={() => { closeRegisterModal(); setIsLoginModalOpen(true); }}
+                  style={{ fontSize: '0.8125rem', color: '#8899aa', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'center' }}>
+                  ← {t.regBack}
                 </button>
               </form>
             )}
@@ -1846,9 +2060,9 @@ export default function HomePage() {
               </div>
             )}
 
-            {/* ── Step 3: Name + Password → complete registration ── */}
-            {regStep === 3 && (
-              <form onSubmit={handleRegStep3} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            {/* ── Step 4: Personal details (name only) ── */}
+            {regStep === 4 && (
+              <form onSubmit={handleRegStep3} className="animate-slide-up-fade" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <div style={{ display: 'flex', gap: '10px' }}>
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     <label style={LABEL_STYLE}>{t.regFirstName}</label>
@@ -1863,6 +2077,40 @@ export default function HomePage() {
                       style={INPUT_STYLE} onFocus={focusInput} onBlur={blurInput} />
                   </div>
                 </div>
+                <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
+                  <button type="submit"
+                    className="active:scale-[0.97]"
+                    style={{
+                      flex: 1, padding: '13px', borderRadius: '12px',
+                      fontSize: '0.9375rem', fontWeight: 600, color: 'white',
+                      backgroundColor: '#517B3E',
+                      border: 'none', cursor: 'pointer',
+                      boxShadow: '0 4px 16px rgba(81,123,62,0.35)',
+                      transition: 'background-color 0.2s, transform 0.1s',
+                    }}
+                  >
+                    {t.regContinue}
+                  </button>
+                  <button type="button" onClick={() => { setRegStep(3); setRegError(''); setRegOtpDigits(Array(6).fill('')); }}
+                    className="active:scale-[0.97]"
+                    style={{
+                      flex: 1, padding: '13px', borderRadius: '12px',
+                      fontSize: '0.9375rem', fontWeight: 500, color: '#4b5563',
+                      backgroundColor: 'transparent', border: '1.5px solid rgba(200,190,170,0.75)',
+                      cursor: 'pointer', transition: 'background-color 0.15s, transform 0.1s',
+                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'rgba(232,228,217,0.6)'; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}
+                  >
+                    {t.regBack}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* ── Step 5: Security (password only) → submit ── */}
+            {regStep === 5 && (
+              <form onSubmit={handleRegStep4} className="animate-slide-up-fade" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   <label style={LABEL_STYLE}>{t.regPassword}</label>
                   <input type="password" value={regPassword} onChange={e => setRegPassword(e.target.value)}
@@ -1884,27 +2132,29 @@ export default function HomePage() {
                 </div>
                 <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
                   <button type="submit" disabled={regLoading}
+                    className="active:scale-[0.97]"
                     style={{
                       flex: 1, padding: '13px', borderRadius: '12px',
                       fontSize: '0.9375rem', fontWeight: 600, color: 'white',
                       backgroundColor: regLoading ? '#6B9053' : '#517B3E',
                       border: 'none', cursor: regLoading ? 'not-allowed' : 'pointer',
                       boxShadow: regLoading ? 'none' : '0 4px 16px rgba(81,123,62,0.35)',
-                      transition: 'background-color 0.2s',
+                      transition: 'background-color 0.2s, transform 0.1s',
                       display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '7px',
                     }}
                   >
                     {regLoading && (
                       <span className="animate-spin" style={{ width: '14px', height: '14px', borderRadius: '50%', border: '2px solid rgba(255,255,255,0.35)', borderTopColor: 'white', display: 'inline-block', flexShrink: 0 }} />
                     )}
-                    {regLoading ? t.regSubmitting : t.regFinish}
+                    {regLoading ? t.regSubmitting : t.regSubmit}
                   </button>
-                  <button type="button" onClick={() => { setRegStep(2); setRegError(''); setRegOtpDigits(Array(6).fill('')); }}
+                  <button type="button" onClick={() => { setRegStep(4); setRegError(''); }}
+                    className="active:scale-[0.97]"
                     style={{
                       flex: 1, padding: '13px', borderRadius: '12px',
                       fontSize: '0.9375rem', fontWeight: 500, color: '#4b5563',
                       backgroundColor: 'transparent', border: '1.5px solid rgba(200,190,170,0.75)',
-                      cursor: 'pointer', transition: 'background-color 0.15s',
+                      cursor: 'pointer', transition: 'background-color 0.15s, transform 0.1s',
                     }}
                     onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'rgba(232,228,217,0.6)'; }}
                     onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}
