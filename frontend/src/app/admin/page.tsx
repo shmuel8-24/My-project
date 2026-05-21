@@ -1,7 +1,9 @@
 'use client';
 
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import AiAccountantChat, { type AiAccountantStats } from './AiAccountantChat';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '../providers/auth';
 
 /*
  * Direct calls to the Flask backend — same pattern as the workspace page.
@@ -62,6 +64,27 @@ interface AdminUser {
   session_count: number;
   message_count: number;
   document_count: number;
+}
+
+/* ── CFO Notification types ──────────────────────────────────────────────────── */
+interface CfoNotifItem {
+  id: number;
+  title: string;
+  message: string;
+  type: 'info' | 'warning' | 'critical';
+  created_at: string | null;
+  is_read: boolean;
+}
+
+function relTime(iso: string | null): string {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  const min  = Math.floor(diff / 60_000);
+  if (min < 1)  return 'כרגע';
+  if (min < 60) return `לפני ${min} דקות`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24)  return `לפני ${hr} שעות`;
+  return `לפני ${Math.floor(hr / 24)} ימים`;
 }
 
 /* ── Helpers ─────────────────────────────────────────────────────────────────── */
@@ -261,10 +284,260 @@ const BASIC_UPLOAD_LIMIT   = 2;
 const BASIC_QUESTION_LIMIT = 15;
 
 /* ═══════════════════════════════════════════════════════════════════════════════
+   CfoNotificationBell
+═══════════════════════════════════════════════════════════════════════════════ */
+
+function CfoNotificationBell({ onOpenChat }: {
+  onOpenChat: (message: string) => void;
+}) {
+  const [open,   setOpen]   = useState(false);
+  const [notifs, setNotifs] = useState<CfoNotifItem[]>([]);
+  const [unread, setUnread] = useState(0);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  const fetchNotifs = useCallback(async () => {
+    try {
+      const res = await authFetch(`${API}/api/admin/notifications`);
+      if (!res.ok) return;
+      const data = await res.json() as { notifications?: CfoNotifItem[]; unread_count?: number };
+      setNotifs(data.notifications ?? []);
+      setUnread(data.unread_count ?? 0);
+    } catch { /* silent — Flask not yet running */ }
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => { void fetchNotifs(); }, 0);
+    const id = setInterval(() => { void fetchNotifs(); }, 30_000);
+    return () => { clearTimeout(t); clearInterval(id); };
+  }, [fetchNotifs]);
+
+  // Close panel on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const markRead = useCallback(async (id: number) => {
+    setNotifs(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+    setUnread(prev => Math.max(0, prev - 1));
+    try { await authFetch(`${API}/api/admin/notifications/${id}/read`, { method: 'POST' }); }
+    catch { /* optimistic update — ignore */ }
+  }, []);
+
+  const markAllRead = useCallback(async () => {
+    setNotifs(prev => prev.map(n => ({ ...n, is_read: true })));
+    setUnread(0);
+    try { await authFetch(`${API}/api/admin/notifications/read-all`, { method: 'POST' }); }
+    catch { /* optimistic */ }
+  }, []);
+
+  const typeAccent = (type: CfoNotifItem['type']) => {
+    if (type === 'critical') return { border: '#dc2626', dot: '#dc2626', bg: 'rgba(220,38,38,0.04)' };
+    if (type === 'warning')  return { border: '#d97706', dot: '#d97706', bg: 'rgba(217,119,6,0.04)' };
+    return                          { border: '#517B3E', dot: '#517B3E', bg: 'rgba(81,123,62,0.04)' };
+  };
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative' }}>
+      {/* ── Bell button ──────────────────────────────────────────────────────── */}
+      <button
+        onClick={() => setOpen(o => !o)}
+        aria-label="CFO financial alerts"
+        title="התראות CFO"
+        style={{
+          position: 'relative', background: 'transparent', border: 'none',
+          cursor: 'pointer', padding: 6, borderRadius: 8,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: open ? '#517B3E' : '#64748b', transition: 'color 0.15s',
+        }}
+      >
+        <svg width="20" height="20" fill="none" viewBox="0 0 24 24"
+          stroke="currentColor" strokeWidth={1.8}>
+          <path strokeLinecap="round" strokeLinejoin="round"
+            d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0" />
+        </svg>
+        {unread > 0 && (
+          <span style={{
+            position: 'absolute', top: 1, right: 1,
+            minWidth: 16, height: 16, borderRadius: 99,
+            background: '#dc2626', color: 'white',
+            fontSize: 9, fontWeight: 800, lineHeight: 1,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '0 3px', border: '1.5px solid rgba(245,243,237,0.95)',
+          }}>
+            {unread > 9 ? '9+' : unread}
+          </span>
+        )}
+      </button>
+
+      {/* ── Dropdown panel ───────────────────────────────────────────────────── */}
+      {open && (
+        <div
+          dir="rtl"
+          style={{
+            position: 'absolute', top: 'calc(100% + 10px)', right: 0,
+            width: 380, maxHeight: 500,
+            background: '#FDFCF8', border: '1px solid #E2DAC8',
+            borderRadius: 16, boxShadow: '0 8px 32px rgba(0,0,0,0.14)',
+            zIndex: 60, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          }}
+        >
+          {/* Header */}
+          <div style={{
+            padding: '14px 16px 12px',
+            borderBottom: '1px solid rgba(226,218,200,0.6)',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            background: 'linear-gradient(135deg,rgba(81,123,62,0.07) 0%,transparent 100%)',
+            flexShrink: 0,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{
+                fontSize: 11, fontWeight: 800, color: '#517B3E',
+                textTransform: 'uppercase', letterSpacing: '0.08em',
+              }}>
+                התראות CFO
+              </span>
+              {unread > 0 && (
+                <span style={{
+                  fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 99,
+                  background: 'rgba(220,38,38,0.1)', color: '#dc2626',
+                  border: '1px solid rgba(220,38,38,0.2)',
+                }}>
+                  {unread} חדשות
+                </span>
+              )}
+            </div>
+            {unread > 0 && (
+              <button
+                onClick={() => { void markAllRead(); }}
+                style={{
+                  fontSize: 11, fontWeight: 600, color: '#517B3E',
+                  background: 'transparent', border: 'none', cursor: 'pointer',
+                  padding: '2px 6px', borderRadius: 6,
+                }}
+              >
+                סמן הכל כנקרא
+              </button>
+            )}
+          </div>
+
+          {/* Notification list */}
+          <div style={{ overflowY: 'auto', flex: 1 }}>
+            {notifs.length === 0 ? (
+              <div style={{ padding: '32px 20px', textAlign: 'center' }}>
+                <div style={{
+                  width: 40, height: 40, borderRadius: 10,
+                  background: 'rgba(81,123,62,0.07)', border: '1px solid rgba(81,123,62,0.15)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  margin: '0 auto 12px',
+                }}>
+                  <svg width="18" height="18" fill="none" viewBox="0 0 24 24"
+                    stroke="#517B3E" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round"
+                      d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                  </svg>
+                </div>
+                <p style={{ fontWeight: 600, color: '#64748b', fontSize: 13, marginBottom: 4 }}>הכל תקין!</p>
+                <p style={{ fontSize: 12, color: '#94a3b8', margin: 0 }}>אין התראות פיננסיות כרגע</p>
+              </div>
+            ) : notifs.map(n => {
+              const acc = typeAccent(n.type);
+              return (
+                <div
+                  key={n.id}
+                  onClick={() => { if (!n.is_read) void markRead(n.id); }}
+                  style={{
+                    padding: '12px 14px',
+                    borderBottom: '1px solid rgba(226,218,200,0.4)',
+                    borderRight: `3px solid ${acc.border}`,
+                    background: n.is_read ? 'transparent' : acc.bg,
+                    cursor: 'default', transition: 'background 0.15s',
+                  }}
+                >
+                  {/* Title row */}
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
+                    <span style={{
+                      width: 7, height: 7, borderRadius: '50%', flexShrink: 0, marginTop: 4,
+                      background: n.is_read ? '#cbd5e1' : acc.dot,
+                    }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{
+                        fontSize: 12, fontWeight: n.is_read ? 600 : 700,
+                        color: n.is_read ? '#64748b' : '#1e293b',
+                        lineHeight: 1.4, marginBottom: 4, margin: '0 0 4px',
+                      }}>
+                        {n.title}
+                      </p>
+                      <p style={{
+                        fontSize: 11, color: '#64748b', lineHeight: 1.5,
+                        margin: 0, maxHeight: '3.3em', overflow: 'hidden',
+                      }}>
+                        {n.message}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Footer: timestamp + open-chat CTA */}
+                  <div style={{
+                    display: 'flex', alignItems: 'center',
+                    justifyContent: 'space-between', paddingRight: 15, marginTop: 6,
+                  }}>
+                    <span style={{ fontSize: 10, color: '#94a3b8' }}>
+                      {relTime(n.created_at)}
+                    </span>
+                    <button
+                      onClick={e => {
+                        e.stopPropagation();
+                        if (!n.is_read) void markRead(n.id);
+                        onOpenChat(
+                          `דוח התראת CFO — ${n.title}\n\n${n.message}\n\nאנא נתח התראה זו ותן המלצות קונקרטיות לטיפול.`,
+                        );
+                        setOpen(false);
+                      }}
+                      style={{
+                        fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap',
+                        color: '#517B3E', background: 'rgba(81,123,62,0.09)',
+                        border: '1px solid rgba(81,123,62,0.22)',
+                        borderRadius: 6, padding: '3px 8px', cursor: 'pointer',
+                      }}
+                    >
+                      פתח צ׳אט עם הרואה חשבון
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Footer */}
+          {notifs.length > 0 && (
+            <div style={{
+              padding: '10px 16px', flexShrink: 0,
+              borderTop: '1px solid rgba(226,218,200,0.6)',
+              background: 'rgba(245,243,237,0.6)',
+              fontSize: 10, color: '#94a3b8', textAlign: 'center',
+            }}>
+              {notifs.length} התראות · מתרענן אוטומטית כל 30 שניות
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
    Admin Page
 ═══════════════════════════════════════════════════════════════════════════════ */
 export default function AdminPage() {
   const router = useRouter();
+  const { user: authUser, isLoading: authLoading, updateToken } = useAuth();
 
   /* All useState calls first — before any early return */
   const [isClient, setIsClient] = useState(false);
@@ -277,6 +550,9 @@ export default function AdminPage() {
   const [search,   setSearch]   = useState('');
   const [toast,    setToast]    = useState<{ msg: string; ok: boolean } | null>(null);
   const [busyRow,  setBusyRow]  = useState<number | null>(null);
+  const [chatPreload, setChatPreload] = useState('');
+
+  const chatSectionRef = useRef<HTMLDivElement>(null);
 
   /* ── Callbacks ─────────────────────────────────────────────────────────── */
   const showToast = useCallback((msg: string, ok = true) => {
@@ -376,6 +652,13 @@ export default function AdminPage() {
     }
   }, [showToast, fetchUsers]);
 
+  const handleOpenChatFromAlert = useCallback((message: string) => {
+    setChatPreload(message);
+    requestAnimationFrame(() => {
+      chatSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }, []);
+
   /* ── useMemo (before early returns) ────────────────────────────────────── */
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -400,32 +683,64 @@ export default function AdminPage() {
     Promise.resolve().then(() => setIsClient(true));
   }, []);
 
-  /* 2. Silent token refresh + admin guard */
-  useEffect(() => {
-    if (!isClient) return;
-    void (async () => {
-      const stored = localStorage.getItem('levy_ai_token');
-      if (!stored) { router.replace('/'); return; }
+  /* 2. Silent token refresh + admin guard
+   *
+   * Waits for both the isClient flip AND the AuthProvider to finish reading
+   * localStorage (authLoading=false) before running.  Uses a `mounted` flag
+   * to cancel the async tail if the user navigates away before the token
+   * refresh completes — the previous race condition that caused stale
+   * router.replace calls after navigation.
+   *
+   * After a successful refresh, `updateToken` syncs the global context so
+   * any other mounted page (workspace, profile) immediately sees the fresh token.
+   *
+   * authUser is intentionally read via ref inside the async IIFE — capturing it
+   * at call-time prevents a dep-array loop when updateToken changes authUser.
+   */
+  const authUserRef = useRef(authUser);
+  authUserRef.current = authUser;
 
+  useEffect(() => {
+    if (!isClient || authLoading) return;
+    let mounted = true;
+    void (async () => {
+      const currentAuthUser = authUserRef.current;
+
+      // Context says there is no valid session — no point refreshing.
+      if (!currentAuthUser) {
+        if (mounted) router.replace('/?login=true');
+        return;
+      }
+
+      // Attempt a silent token refresh using the token the context already has.
+      const stored = currentAuthUser.token;
       try {
         const res = await fetch(`${API}/api/refresh-token`, {
           headers: { Authorization: `Bearer ${stored}` },
         });
         if (res.ok) {
           const data = await res.json() as { token?: string };
-          if (data.token) localStorage.setItem('levy_ai_token', data.token);
+          if (data.token && mounted) {
+            localStorage.setItem('levy_ai_token', data.token);
+            updateToken(data.token); // keep global context in sync
+          }
         }
       } catch { /* server not yet up — fall back to stored token */ }
+
+      // Guard navigated away before the async refresh completed — do nothing.
+      if (!mounted) return;
 
       const latest  = localStorage.getItem('levy_ai_token');
       const payload = latest ? decodeJwtPayload(latest) : null;
       if (!payload || (!payload.is_admin && payload.role !== 'admin')) {
-        router.replace('/');
+        router.replace('/?login=true');
         return;
       }
       setIsAdmin(true);
     })();
-  }, [isClient, router]);
+    return () => { mounted = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isClient, authLoading, router, updateToken]);
 
   /* 3. Load real users once admin is confirmed */
   useEffect(() => {
@@ -478,11 +793,14 @@ export default function AdminPage() {
           </div>
         </div>
         <div className="flex items-center gap-5">
+          {isAdmin && <CfoNotificationBell onOpenChat={handleOpenChatFromAlert} />}
           <button onClick={handleRefreshToken}
             className="text-xs font-semibold text-[#6B904A] hover:text-[#4a7a36] transition-colors">
             Sync Admin Token
           </button>
-          <button onClick={() => router.push('/')}
+          <button
+            type="button"
+            onClick={e => { e.preventDefault(); router.push('/workspace'); }}
             className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 transition-colors">
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
@@ -563,6 +881,37 @@ export default function AdminPage() {
                 Retry
               </button>
             </div>
+          </div>
+        )}
+
+        {/* ── AI Accountant ──────────────────────────────────────────────────── */}
+        {isAdmin && (
+          <div ref={chatSectionRef} className="mb-10">
+            <div className="mb-5">
+              <h2 className="text-xl font-black text-slate-900 tracking-tight">רואה חשבון AI</h2>
+              <p className="text-slate-500 text-sm mt-1">
+                ייעוץ פיננסי, דוחות ותחזיות — מבוסס נתוני המערכת בזמן אמת
+              </p>
+            </div>
+            <AiAccountantChat
+              api={API}
+              preloadMessage={chatPreload}
+              onPreloadConsumed={() => setChatPreload('')}
+              stats={
+                {
+                  report_date:    new Date().toLocaleDateString('he-IL', { day: '2-digit', month: 'long', year: 'numeric' }),
+                  total_users:    kpi.total,
+                  plan_breakdown: {
+                    basic:    users.filter(u => u.plan_type === 'basic').length,
+                    pro:      users.filter(u => u.plan_type === 'pro').length,
+                    semester: users.filter(u => u.plan_type === 'semester').length,
+                  },
+                  active_users:    kpi.active,
+                  total_messages:  kpi.messages,
+                  total_sessions:  users.reduce((s, u) => s + u.session_count, 0),
+                } satisfies AiAccountantStats
+              }
+            />
           </div>
         )}
 

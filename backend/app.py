@@ -50,6 +50,10 @@ from services.startup import start_background_threads  # noqa: E402
 
 start_background_threads()
 
+# Start proactive CFO alerts scheduler (APScheduler — daily + startup run)
+from api.admin import start_cfo_scheduler  # noqa: E402
+start_cfo_scheduler()
+
 if __name__ == "__main__":
     port  = int(os.getenv("PORT", 5003))
     debug = os.getenv("FLASK_ENV") == "development"

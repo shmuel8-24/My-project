@@ -474,6 +474,8 @@ def get_profile(user_id: int):
             "primary_major":  user.primary_major  or '',
             "secondary_major": user.secondary_major or '',
             "gender":         user.gender          or '',
+            "study_year":     user.study_year      or '',
+            "ai_style":       user.ai_style        or '',
         }), 200
     finally:
         db.close()
@@ -489,6 +491,8 @@ def user_onboarding(user_id: int):
     primary_major   = strip_html((data.get("primary_major")   or "").strip())
     secondary_major = strip_html((data.get("secondary_major") or "").strip())
     gender          = strip_html((data.get("gender")          or "").strip())
+    study_year      = strip_html((data.get("study_year")      or "").strip())
+    ai_style        = strip_html((data.get("ai_style")        or "").strip())
 
     db = SessionLocal()
     try:
@@ -501,8 +505,10 @@ def user_onboarding(user_id: int):
         user.primary_major   = primary_major
         user.secondary_major = secondary_major if degree_type in ('double', 'specialized') else ''
         user.gender          = gender
+        user.study_year      = study_year
+        user.ai_style        = ai_style
         db.commit()
-        print(f"[Onboarding] u{user_id}: country={country!r} institution={institution!r} degree={degree_type!r} major={primary_major!r} gender={gender!r}")
+        print(f"[Onboarding] u{user_id}: country={country!r} institution={institution!r} degree={degree_type!r} major={primary_major!r} gender={gender!r} study_year={study_year!r} ai_style={ai_style!r}")
         return jsonify({
             "country":         user.country        or '',
             "institution":     user.institution    or '',
@@ -510,6 +516,8 @@ def user_onboarding(user_id: int):
             "primary_major":   user.primary_major  or '',
             "secondary_major": user.secondary_major or '',
             "gender":          user.gender          or '',
+            "study_year":      user.study_year      or '',
+            "ai_style":        user.ai_style        or '',
         }), 200
     finally:
         db.close()
@@ -518,9 +526,10 @@ def user_onboarding(user_id: int):
 @auth_bp.route("/api/profile", methods=["PATCH"])
 @token_required
 def update_profile(user_id: int):
-    data       = request.get_json()
-    first_name = strip_html((data.get("first_name") or "").strip() if data else "")
-    last_name  = strip_html((data.get("last_name")  or "").strip() if data else "")
+    data       = request.get_json(silent=True) or {}
+    first_name = strip_html((data.get("first_name") or "").strip())
+    last_name  = strip_html((data.get("last_name")  or "").strip())
+    gender     = strip_html((data.get("gender")     or "").strip())
     if not first_name or not last_name:
         return jsonify({"error": "First and last name are required"}), 400
     db = SessionLocal()
@@ -530,8 +539,15 @@ def update_profile(user_id: int):
             return jsonify({"error": "User not found"}), 404
         user.first_name = first_name
         user.last_name  = last_name
+        user.gender     = gender or None
         db.commit()
-        return jsonify({"email": user.email, "first_name": user.first_name, "last_name": user.last_name}), 200
+        db.refresh(user)
+        return jsonify({
+            "email":      user.email,
+            "first_name": user.first_name,
+            "last_name":  user.last_name,
+            "gender":     user.gender or '',
+        }), 200
     finally:
         db.close()
 
@@ -547,6 +563,45 @@ def refresh_token(user_id: int):
         new_token = _make_token(user.id, user.email, user.role)
         print(f"[refresh-token] user_id={user_id} email={user.email} role={user.role}")
         return jsonify({"token": new_token, "role": user.role, "is_admin": user.role == "admin"}), 200
+    finally:
+        db.close()
+
+
+@auth_bp.route("/api/profile/documents", methods=["GET"])
+@token_required
+def get_profile_documents(user_id: int):
+    from extensions import chroma_client as cc
+    db = SessionLocal()
+    try:
+        records = (
+            db.query(UserDocument)
+            .filter(UserDocument.user_id == user_id)
+            .order_by(UserDocument.uploaded_at.desc())
+            .all()
+        )
+        chunk_map: dict = {}
+        try:
+            col = cc.get_collection(f"documents_u{user_id}")
+            if col.count() > 0:
+                metas = col.get(include=["metadatas"])["metadatas"]
+                for m in metas:
+                    fid = m.get("file_id", "")
+                    if fid:
+                        chunk_map[fid] = chunk_map.get(fid, 0) + 1
+        except Exception:
+            pass
+        return jsonify({
+            "documents": [
+                {
+                    "file_id":         r.file_id,
+                    "filename":        r.filename,
+                    "uploaded_at":     r.uploaded_at.isoformat() if r.uploaded_at else None,
+                    "file_size_bytes": r.file_size_bytes,
+                    "chunks":          chunk_map.get(r.file_id, 0),
+                }
+                for r in records
+            ]
+        }), 200
     finally:
         db.close()
 
@@ -568,6 +623,8 @@ def get_usage(user_id: int):
             "upload_limit":          BASIC_UPLOAD_LIMIT if plan == "basic" else None,
             "questions_this_month":  user.questions_this_month,
             "question_limit":        BASIC_QUESTION_LIMIT if plan == "basic" else None,
+            "prof_sims_this_month":  user.prof_sims_this_month or 0,
+            "prof_sim_limit":        2 if plan == "basic" else None,
         }), 200
     finally:
         db.close()

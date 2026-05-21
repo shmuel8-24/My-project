@@ -399,19 +399,26 @@ export default function HomePage() {
     finally   { setLoading(false); }
   };
 
-  /* Verify OTP */
-  const handleVerifyOtp = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault(); clearErrors();
-    const code = otpDigits.join('');
-    if (code.length !== 6) { setError(t.errInvalidOtp); return; }
+  /* Verify OTP — accepts an optional pre-assembled code so it can be called
+     directly from onChange/onPaste before React commits the new state. */
+  const handleVerifyOtp = async (code?: string) => {
+    clearErrors();
+    const otp = code ?? otpDigits.join('');
+    if (otp.length !== 6) { setError(t.errInvalidOtp); return; }
+    if (otpLoading) return;
     setOtpLoading(true);
     try {
       const res  = await fetch('http://127.0.0.1:5003/api/verify-otp', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim().toLowerCase(), code }),
+        body: JSON.stringify({ email: email.trim().toLowerCase(), code: otp }),
       });
       const data = await res.json();
-      if (!res.ok) { setError(data.error ?? t.errBadCode); return; }
+      if (!res.ok) {
+        setError(data.error ?? t.errBadCode);
+        setOtpDigits(Array(6).fill(''));
+        setTimeout(() => otpRefs.current[0]?.focus(), 50);
+        return;
+      }
       if (data.token)      localStorage.setItem('levy_ai_token',      data.token);
       if (data.email)      localStorage.setItem('levy_ai_email',      data.email);
       if (data.first_name) localStorage.setItem('levy_ai_first_name', data.first_name);
@@ -473,19 +480,24 @@ export default function HomePage() {
   };
 
   /* Step 2 — verify the OTP; receive reg_token */
-  const handleRegStep2 = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
+  const handleRegStep2 = async (code?: string) => {
     setRegError('');
-    const code = regOtpDigits.join('');
-    if (code.length !== 6) { setRegError(t.errInvalidOtp); return; }
+    const otp = code ?? regOtpDigits.join('');
+    if (otp.length !== 6) { setRegError(t.errInvalidOtp); return; }
+    if (regLoading) return;
     setRegLoading(true);
     try {
       const res  = await fetch('http://127.0.0.1:5003/api/register/verify-otp', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: regEmail.trim().toLowerCase(), code }),
+        body: JSON.stringify({ email: regEmail.trim().toLowerCase(), code: otp }),
       });
       const data = await res.json();
-      if (!res.ok) { setRegError(data.error ?? t.errBadCode); return; }
+      if (!res.ok) {
+        setRegError(data.error ?? t.errBadCode);
+        setRegOtpDigits(Array(6).fill(''));
+        setTimeout(() => regOtpRefs.current[0]?.focus(), 50);
+        return;
+      }
       setRegToken(data.reg_token ?? '');
       setRegStep(3);
     } catch { setRegError(t.errNoServer); }
@@ -1576,8 +1588,8 @@ export default function HomePage() {
                   </p>
                 </div>
 
-                {/* 6-box OTP form */}
-                <form onSubmit={handleVerifyOtp} style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '18px' }}>
+                {/* 6-box OTP form — auto-submits when the 6th digit is entered */}
+                <form onSubmit={e => { e.preventDefault(); void handleVerifyOtp(); }} style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '18px' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                     <label style={{ ...LABEL_STYLE, textAlign: 'center' }}>{t.loginEnterCode}</label>
                     <div dir="ltr" style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
@@ -1590,12 +1602,14 @@ export default function HomePage() {
                           pattern="[0-9]*"
                           maxLength={1}
                           value={digit}
+                          disabled={otpLoading}
                           autoComplete={i === 0 ? 'one-time-code' : 'off'}
                           className="w-12 h-14 text-center text-2xl font-bold border-2 rounded-xl outline-none transition-all"
                           style={{
-                            borderColor: digit ? '#527C40' : 'rgba(200,190,170,0.75)',
-                            background: digit ? 'rgba(82,124,64,0.08)' : 'rgba(255,255,255,0.75)',
+                            borderColor: otpLoading ? '#527C40' : (digit ? '#527C40' : 'rgba(200,190,170,0.75)'),
+                            background: otpLoading ? 'rgba(82,124,64,0.12)' : (digit ? 'rgba(82,124,64,0.08)' : 'rgba(255,255,255,0.75)'),
                             color: '#1a2540',
+                            opacity: otpLoading ? 0.8 : 1,
                           }}
                           onChange={e => {
                             const d = e.target.value.replace(/\D/g, '').slice(-1);
@@ -1603,6 +1617,7 @@ export default function HomePage() {
                             next[i] = d;
                             setOtpDigits(next);
                             if (d && i < 5) otpRefs.current[i + 1]?.focus();
+                            if (d && next.every(v => v !== '')) void handleVerifyOtp(next.join(''));
                           }}
                           onKeyDown={e => {
                             if (e.key === 'Backspace' && !otpDigits[i] && i > 0) {
@@ -1623,20 +1638,28 @@ export default function HomePage() {
                             for (let j = 0; j < pasted.length; j++) next[j] = pasted[j];
                             setOtpDigits(next);
                             otpRefs.current[Math.min(pasted.length, 5)]?.focus();
+                            if (pasted.length === 6) void handleVerifyOtp(next.join(''));
                           }}
                           onFocus={e => {
-                            e.target.style.borderColor = '#527C40';
-                            e.target.style.boxShadow = '0 0 0 3px rgba(82,124,64,0.18)';
+                            if (!otpLoading) {
+                              e.target.style.borderColor = '#527C40';
+                              e.target.style.boxShadow = '0 0 0 3px rgba(82,124,64,0.18)';
+                            }
                           }}
                           onBlur={e => {
-                            e.target.style.borderColor = digit ? '#527C40' : 'rgba(200,190,170,0.75)';
+                            e.target.style.borderColor = (otpLoading || digit) ? '#527C40' : 'rgba(200,190,170,0.75)';
                             e.target.style.boxShadow = 'none';
                           }}
                         />
                       ))}
                     </div>
                   </div>
-                  <SubmitButton loading={otpLoading} label={t.loginVerify} loadingLabel={t.loginVerifying} />
+                  {otpLoading && (
+                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', padding: '4px 0' }}>
+                      <div className="w-4 h-4 rounded-full border-2 border-[#517B3E] border-t-transparent animate-spin" />
+                      <span style={{ fontSize: '0.8125rem', color: '#517B3E', fontWeight: 500 }}>{t.loginVerifying}</span>
+                    </div>
+                  )}
                 </form>
 
                 <div style={{ textAlign: 'center' }}>
@@ -2002,7 +2025,7 @@ export default function HomePage() {
                   <p style={{ fontSize: '0.8125rem', color: '#7a8a9a', lineHeight: 1.6 }}>{t.regVerifyCheck}</p>
                 </div>
 
-                <form onSubmit={handleRegStep2} style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '14px' }}>
+                <form onSubmit={e => { e.preventDefault(); void handleRegStep2(); }} style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '14px' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                     <label style={{ ...LABEL_STYLE, textAlign: 'center' }}>{t.loginEnterCode}</label>
                     <div dir="ltr" style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
@@ -2012,17 +2035,20 @@ export default function HomePage() {
                           ref={el => { regOtpRefs.current[i] = el; }}
                           type="text" inputMode="numeric" pattern="[0-9]*" maxLength={1}
                           value={digit}
+                          disabled={regLoading}
                           autoComplete={i === 0 ? 'one-time-code' : 'off'}
                           className="w-12 h-14 text-center text-2xl font-bold border-2 rounded-xl outline-none transition-all"
                           style={{
-                            borderColor: digit ? '#527C40' : 'rgba(200,190,170,0.75)',
-                            background: digit ? 'rgba(82,124,64,0.08)' : 'rgba(255,255,255,0.75)',
+                            borderColor: regLoading ? '#527C40' : (digit ? '#527C40' : 'rgba(200,190,170,0.75)'),
+                            background: regLoading ? 'rgba(82,124,64,0.12)' : (digit ? 'rgba(82,124,64,0.08)' : 'rgba(255,255,255,0.75)'),
                             color: '#1a2540',
+                            opacity: regLoading ? 0.8 : 1,
                           }}
                           onChange={e => {
                             const d = e.target.value.replace(/\D/g, '').slice(-1);
                             const next = [...regOtpDigits]; next[i] = d; setRegOtpDigits(next);
                             if (d && i < 5) regOtpRefs.current[i + 1]?.focus();
+                            if (d && next.every(v => v !== '')) void handleRegStep2(next.join(''));
                           }}
                           onKeyDown={e => {
                             if (e.key === 'Backspace' && !regOtpDigits[i] && i > 0) { regOtpRefs.current[i - 1]?.focus(); }
@@ -2037,14 +2063,25 @@ export default function HomePage() {
                             for (let j = 0; j < pasted.length; j++) next[j] = pasted[j];
                             setRegOtpDigits(next);
                             regOtpRefs.current[Math.min(pasted.length, 5)]?.focus();
+                            if (pasted.length === 6) void handleRegStep2(next.join(''));
                           }}
-                          onFocus={e => { e.target.style.borderColor = '#527C40'; e.target.style.boxShadow = '0 0 0 3px rgba(82,124,64,0.18)'; }}
-                          onBlur={e => { e.target.style.borderColor = digit ? '#527C40' : 'rgba(200,190,170,0.75)'; e.target.style.boxShadow = 'none'; }}
+                          onFocus={e => {
+                            if (!regLoading) { e.target.style.borderColor = '#527C40'; e.target.style.boxShadow = '0 0 0 3px rgba(82,124,64,0.18)'; }
+                          }}
+                          onBlur={e => {
+                            e.target.style.borderColor = (regLoading || digit) ? '#527C40' : 'rgba(200,190,170,0.75)';
+                            e.target.style.boxShadow = 'none';
+                          }}
                         />
                       ))}
                     </div>
                   </div>
-                  <SubmitButton loading={regLoading} label={t.loginVerify} loadingLabel={t.loginVerifying} />
+                  {regLoading && (
+                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', padding: '4px 0' }}>
+                      <div className="w-4 h-4 rounded-full border-2 border-[#517B3E] border-t-transparent animate-spin" />
+                      <span style={{ fontSize: '0.8125rem', color: '#517B3E', fontWeight: 500 }}>{t.loginVerifying}</span>
+                    </div>
+                  )}
                 </form>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

@@ -3,6 +3,7 @@ import { Heebo } from "next/font/google";
 import "./globals.css";
 import "katex/dist/katex.min.css";
 import { LanguageProvider } from "./providers/language";
+import { AuthProvider } from "./providers/auth";
 
 const heebo = Heebo({
   subsets: ["hebrew", "latin"],
@@ -23,7 +24,9 @@ export default function RootLayout({
   return (
     <html lang="he" dir="rtl" className={`${heebo.variable} h-full`} suppressHydrationWarning>
       <body className="font-sans antialiased min-h-full flex flex-col">
-        <LanguageProvider>{children}</LanguageProvider>
+        <LanguageProvider>
+          <AuthProvider>{children}</AuthProvider>
+        </LanguageProvider>
       </body>
     </html>
   );

@@ -165,11 +165,13 @@ def upload_pdf(user_id: int):
                                 UserDocument.file_id == ocr_file_id,
                             ).first()
                             if existing:
-                                existing.filename    = filename
-                                existing.uploaded_at = datetime.now(timezone.utc)
+                                existing.filename        = filename
+                                existing.uploaded_at     = datetime.now(timezone.utc)
+                                existing.file_size_bytes = len(img_bytes)
                             else:
                                 _ocr_db.add(UserDocument(
-                                    user_id=user_id, file_id=ocr_file_id, filename=filename))
+                                    user_id=user_id, file_id=ocr_file_id, filename=filename,
+                                    file_size_bytes=len(img_bytes)))
                             _ocr_db.commit()
                         except Exception as reg_exc:
                             print(f"[OCR] WARNING: ownership registration failed: {reg_exc}")
@@ -258,10 +260,12 @@ def upload_pdf(user_id: int):
                 UserDocument.file_id == file_id,
             ).first()
             if existing:
-                existing.filename    = filename
-                existing.uploaded_at = datetime.now(timezone.utc)
+                existing.filename        = filename
+                existing.uploaded_at     = datetime.now(timezone.utc)
+                existing.file_size_bytes = len(raw_bytes)
             else:
-                _reg_db.add(UserDocument(user_id=user_id, file_id=file_id, filename=filename))
+                _reg_db.add(UserDocument(user_id=user_id, file_id=file_id, filename=filename,
+                                         file_size_bytes=len(raw_bytes)))
             _reg_db.commit()
         except Exception as reg_exc:
             print(f"[upload] WARNING: could not register document ownership: {reg_exc}")

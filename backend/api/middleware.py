@@ -82,6 +82,9 @@ def _get_user_refreshed(db, user_id: int):
     if user.question_month_key != month_key:
         user.question_month_key    = month_key
         user.questions_this_month  = 0
+    if user.prof_sim_month_key != month_key:
+        user.prof_sim_month_key   = month_key
+        user.prof_sims_this_month = 0
     return user
 
 

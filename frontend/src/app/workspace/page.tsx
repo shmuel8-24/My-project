@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useLanguage } from '../providers/language';
+import { useAuth } from '../providers/auth';
 import type { KeyboardEvent, ChangeEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useDropzone } from 'react-dropzone';
@@ -242,6 +243,7 @@ const translations = {
     quizClose:      'סגור',
     quizErr:        'שגיאה ביצירת החידון. נסה שוב.',
     rateLimitMsg:   'יותר מדי בקשות — אנא המתן רגע.',
+    navProfSim:     'הראש של המרצה',
   },
   en: {
     subtitle: 'Your Academic Sidekick',
@@ -358,6 +360,7 @@ const translations = {
     quizClose:      'Close',
     quizErr:        'Quiz generation failed. Please try again.',
     rateLimitMsg:   'Too many requests. Please wait a moment.',
+    navProfSim:     "Professor's Brain",
   },
 };
 
@@ -2322,6 +2325,11 @@ function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDel
               <IconPen className="w-4 h-4 text-[#517B3E]/70 shrink-0" />
               {t.navInsights}
             </button>
+            <button onClick={() => { router.push('/workspace/professor-simulator'); onClose(); }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
+              <span className="text-base leading-none shrink-0">🧠</span>
+              {t.navProfSim}
+            </button>
             <button onClick={() => { router.push('/dashboard'); onClose(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
               <IconBarChart className="w-4 h-4 text-[#517B3E]/70 shrink-0" />
@@ -2443,6 +2451,7 @@ interface UsageInfo {
 /* ─── Root page ──────────────────────────────────────────────────────────────── */
 export default function Home() {
   const router = useRouter();
+  const { user: authUser, isLoading: authLoading, logout: authLogout } = useAuth();
 
   // isAuthenticated always starts false (same on server and client) to avoid
   // the SSR/hydration mismatch where the server returns null but the client
@@ -2481,6 +2490,7 @@ export default function Home() {
   const [initialMessages, setInitialMessages]   = useState<Message[]>([]);
   const [chatKey, setChatKey]                   = useState<string>('new');
   const [pdfKey, setPdfKey]                     = useState<string>('initial');
+
   const { lang, toggleLanguage }                = useLanguage();
   const [sidebarOpen, setSidebarOpen]           = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
@@ -2533,14 +2543,13 @@ export default function Home() {
     } catch { /* backend not running yet */ }
   }, []);
 
-  // Check auth on mount — synchronous localStorage read avoids SSR mismatch.
+  // Auth check — waits for the global AuthProvider to finish reading localStorage,
+  // then gates on the context user object so the check survives client-side
+  // navigation without re-reading localStorage on every mount.
   useEffect(() => {
-    const token = localStorage.getItem('levy_ai_token');
-    if (!token) { router.replace('/?login=true'); return; }
-    const payload = decodeJwtPayload(token);
-    if (payload?.exp && (payload.exp as number) * 1000 < Date.now()) {
-      _clearAuth();
-      router.replace('/?login=true');
+    if (authLoading) return;           // provider not ready yet
+    if (!authUser) {
+      router.replace('/?login=true');  // context says no valid session
       return;
     }
     setIsAuthenticated(true);
@@ -2548,7 +2557,7 @@ export default function Home() {
       .then(r => r.ok ? r.json() : { sessions: [] })
       .then((data: { sessions?: ChatSession[] }) => setSessions(data.sessions ?? []))
       .catch(() => {});
-  }, [router]);
+  }, [authLoading, authUser, router]);
 
   // Fetch usage stats once after auth is confirmed.
   useEffect(() => {
@@ -2632,10 +2641,7 @@ export default function Home() {
     setHasDoc(false); startNewChat();
   }, [startNewChat]);
 
-  const handleLogout = () => {
-    _clearAuth();
-    window.location.href = '/';
-  };
+  const handleLogout = () => authLogout();
 
   const userInitials = [userFirstName[0], userLastName[0]]
     .filter(Boolean).join('').toUpperCase()
