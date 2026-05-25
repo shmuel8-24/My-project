@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useAuth } from '../../providers/auth';
 import { useLanguage } from '../../providers/language';
 import { UpgradeModal } from '../UpgradeModal';
@@ -62,6 +62,13 @@ function formatBytes(b: number): string {
   return `${(b / 1_048_576).toFixed(1)} MB`;
 }
 
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(b64));
+  } catch { return null; }
+}
+
 // ── Small shared components ───────────────────────────────────────────────────
 function LogoMark({ size = 36 }: { size?: number }) {
   return (
@@ -110,6 +117,15 @@ function AvatarContent({ gender, initials }: { gender: string; initials: string 
   return <>{initials || '?'}</>;
 }
 
+function IconShield({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round"
+        d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
+    </svg>
+  );
+}
+
 // ── Logout confirmation modal ─────────────────────────────────────────────────
 function LogoutConfirmModal({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
   return (
@@ -150,6 +166,7 @@ function LogoutConfirmModal({ onConfirm, onCancel }: { onConfirm: () => void; on
 interface ProfSimSidebarProps {
   isOpen: boolean;
   onClose: () => void;
+  isAdmin: boolean;
   lang: 'he' | 'en';
   userFirstName: string;
   userLastName: string;
@@ -157,10 +174,12 @@ interface ProfSimSidebarProps {
   userGender: string;
   userInitials: string;
   onRequestLogout: () => void;
+  isProcessing?: boolean;
 }
 
-function ProfSimSidebar({ isOpen, onClose, lang, userFirstName, userLastName, userEmail, userGender, userInitials, onRequestLogout }: ProfSimSidebarProps) {
-  const router = useRouter();
+function ProfSimSidebar({ isOpen, onClose, isAdmin, lang, userFirstName, userLastName, userEmail, userGender, userInitials, onRequestLogout, isProcessing = false }: ProfSimSidebarProps) {
+  const router   = useRouter();
+  const pathname = usePathname();
   const translateClass = isOpen
     ? 'translate-x-0'
     : lang === 'he' ? 'translate-x-full' : '-translate-x-full';
@@ -204,35 +223,59 @@ function ProfSimSidebar({ isOpen, onClose, lang, userFirstName, userLastName, us
 
             <button onClick={() => { router.push('/workspace'); onClose(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
-              <svg className="w-4 h-4 text-[#517B3E]/70 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z" />
-              </svg>
-              Workspace
+              <span className="text-base leading-none shrink-0">🌱</span>
+              {lang === 'he' ? 'מרחב לימוד' : 'StudyLab'}
             </button>
 
-            <button onClick={() => { router.push('/workspace'); onClose(); }}
-              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
-              <svg className="w-4 h-4 text-[#517B3E]/70 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
-              </svg>
-              {lang === 'he' ? 'כתיבה אקדמית' : 'Academic Writing'}
-            </button>
-
-            {/* ── Active item ── */}
+            {/* ── Active item: הראש של המרצה ──────────────────────────────────
+                 Three visual states driven by the isProcessing prop:
+                 • idle      — standard active highlight, no animation
+                 • processing — border intensifies, brain icon gets glow ring,
+                                three staggered dots appear at the trailing edge  ── */}
             <button
-              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm border"
-              style={{ backgroundColor: 'rgba(81,123,62,0.12)', borderColor: 'rgba(81,123,62,0.3)', color: '#517B3E', fontWeight: 600 }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm border transition-all duration-300"
+              style={{
+                backgroundColor: isProcessing
+                  ? 'rgba(81,123,62,0.18)'
+                  : 'rgba(81,123,62,0.12)',
+                borderColor: isProcessing
+                  ? 'rgba(81,123,62,0.50)'
+                  : 'rgba(81,123,62,0.30)',
+                color: '#517B3E',
+                fontWeight: 600,
+              }}
             >
-              <span className="text-base leading-none shrink-0">🧠</span>
-              {lang === 'he' ? 'הראש של המרצה' : "Professor's Brain"}
-            </button>
+              {/* Brain icon — gains a pulsing ring glow while AI is processing */}
+              <span
+                className={[
+                  'w-6 h-6 flex items-center justify-center rounded-full shrink-0',
+                  'text-base leading-none transition-all duration-300',
+                  isProcessing ? 'animate-brain-ring' : '',
+                ].join(' ')}
+                style={isProcessing
+                  ? { backgroundColor: 'rgba(81,123,62,0.12)' }
+                  : undefined}
+              >
+                🧠
+              </span>
 
-            <button onClick={() => { router.push('/dashboard'); onClose(); }}
-              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
-              <svg className="w-4 h-4 text-[#517B3E]/70 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z" />
-              </svg>
-              Dashboard
+              {/* Label */}
+              <span className="flex-1 min-w-0 truncate">
+                {lang === 'he' ? 'הראש של המרצה' : "Professor's Brain"}
+              </span>
+
+              {/* Processing indicator — three staggered dots */}
+              {isProcessing && (
+                <span className="ms-auto flex items-center gap-[3px] shrink-0" aria-hidden="true">
+                  {[0, 180, 360].map(delay => (
+                    <span
+                      key={delay}
+                      className="w-1 h-1 rounded-full bg-[#517B3E] animate-pulse"
+                      style={{ animationDelay: `${delay}ms` }}
+                    />
+                  ))}
+                </span>
+              )}
             </button>
 
             <button disabled
@@ -246,6 +289,43 @@ function ProfSimSidebar({ isOpen, onClose, lang, userFirstName, userLastName, us
           </div>
 
           <div className="flex-1" />
+
+          {/* Admin CT — visible only to admin users */}
+          {isAdmin && (
+            <div className="px-3 py-3 shrink-0 space-y-0.5" style={{ borderTop: '1px solid rgba(100,140,80,0.2)' }}>
+              <p className="text-[10px] font-semibold text-[#7a9268] uppercase tracking-widest px-2 mb-2">Admin CT</p>
+
+              <button
+                onClick={() => { router.push('/dashboard'); onClose(); }}
+                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
+                  pathname === '/dashboard'
+                    ? 'border'
+                    : 'hover:bg-[#517B3E]/10 text-[#2d3b25]'
+                }`}
+                style={pathname === '/dashboard'
+                  ? { backgroundColor: 'rgba(81,123,62,0.12)', borderColor: 'rgba(81,123,62,0.3)', color: '#517B3E', fontWeight: 600 }
+                  : undefined}
+              >
+                <span className="text-base leading-none shrink-0">🖥️</span>
+                Platform
+              </button>
+
+              <button
+                onClick={() => { router.push('/admin'); onClose(); }}
+                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
+                  pathname === '/admin'
+                    ? 'border'
+                    : 'hover:bg-[#517B3E]/10 text-[#7a9268] hover:text-[#2d3b25]'
+                }`}
+                style={pathname === '/admin'
+                  ? { backgroundColor: 'rgba(81,123,62,0.12)', borderColor: 'rgba(81,123,62,0.3)', color: '#517B3E', fontWeight: 600 }
+                  : undefined}
+              >
+                <IconShield className="w-4 h-4 shrink-0" />
+                Admin
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Bottom: Logout + User profile */}
@@ -334,6 +414,13 @@ export default function ProfessorSimulatorPage() {
   const [profilePopoverOpen, setProfilePopoverOpen] = useState(false);
   const profilePopoverRef = useRef<HTMLDivElement>(null);
 
+  const [isAdmin] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    const token = localStorage.getItem('levy_ai_token');
+    if (!token) return false;
+    const p = decodeJwtPayload(token);
+    return p?.is_admin === true;
+  });
   const [userEmail]     = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_email')      ?? '') : '');
   const [userFirstName] = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_first_name') ?? '') : '');
   const [userLastName]  = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_last_name')  ?? '') : '');
@@ -522,20 +609,19 @@ export default function ProfessorSimulatorPage() {
   // ── Render ────────────────────────────────────────────────────────────────────
   if (authLoading || !authUser) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: '#F7F5EF' }}>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: '#F2F5F1' }}>
         <Spinner />
       </div>
     );
   }
 
   return (
-    <div dir={lang === 'he' ? 'rtl' : 'ltr'} className="min-h-screen flex flex-col" style={{ background: '#F7F5EF' }}>
+    <div dir={lang === 'he' ? 'rtl' : 'ltr'} className="min-h-screen flex flex-col" style={{ background: '#F2F5F1' }}>
 
       {/* ── Header ── */}
       <header className="shrink-0 relative z-30" style={{
-        backgroundColor: 'rgba(157,192,139,0.97)',
-        backdropFilter: 'blur(12px)',
-        borderBottom: '1px solid rgba(80,110,60,0.25)',
+        backgroundColor: '#517B3E',
+        borderBottom: '1px solid rgba(0,0,0,0.15)',
       }}>
         <div className="max-w-full px-4 py-3 flex items-center justify-between gap-3">
 
@@ -544,7 +630,7 @@ export default function ProfessorSimulatorPage() {
             <button
               onClick={() => setSidebarOpen(true)}
               aria-label={lang === 'he' ? 'פתח תפריט' : 'Open menu'}
-              className="p-2 rounded-lg hover:bg-black/10 transition-colors text-[#2d3b25]"
+              className="p-2 rounded-lg hover:bg-white/15 transition-colors text-white"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
@@ -559,7 +645,7 @@ export default function ProfessorSimulatorPage() {
             {/* Language toggle */}
             <button
               onClick={toggleLanguage}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-white/30 hover:bg-white/55 border border-white/50 rounded-full text-sm text-[#2d3b25] font-semibold transition-all"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white/15 hover:bg-white/25 border border-white/25 rounded-full text-sm text-white font-semibold transition-all"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round"
@@ -575,7 +661,7 @@ export default function ProfessorSimulatorPage() {
                 aria-label="Profile menu"
                 className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0 transition-all select-none"
                 style={{
-                  backgroundColor: profilePopoverOpen ? '#3a5528' : '#2A3B22',
+                  backgroundColor: profilePopoverOpen ? 'rgba(255,255,255,0.28)' : 'rgba(255,255,255,0.15)',
                   boxShadow: profilePopoverOpen ? '0 0 0 3px rgba(255,255,255,0.35)' : 'none',
                 }}
               >
@@ -603,9 +689,6 @@ export default function ProfessorSimulatorPage() {
                       <div className="min-w-0">
                         <p className="font-bold text-[#1a2e14] text-sm truncate leading-snug">
                           {userFirstName} {userLastName}
-                        </p>
-                        <p className="text-xs text-[#7a9268] truncate mt-0.5" title={userEmail}>
-                          {userEmail}
                         </p>
                       </div>
                     </div>
@@ -653,6 +736,7 @@ export default function ProfessorSimulatorPage() {
       <ProfSimSidebar
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
+        isAdmin={isAdmin}
         lang={lang}
         userFirstName={userFirstName}
         userLastName={userLastName}
@@ -660,6 +744,7 @@ export default function ProfessorSimulatorPage() {
         userGender={userGender}
         userInitials={userInitials}
         onRequestLogout={() => { setSidebarOpen(false); setShowLogoutModal(true); }}
+        isProcessing={sending || uploading}
       />
 
       {/* ── Logout confirmation modal ── */}
@@ -947,7 +1032,7 @@ export default function ProfessorSimulatorPage() {
                       style={{ background: 'linear-gradient(135deg,#517B3E,#2A3B22)' }}
                     >
                       <span>🧠</span>
-                      <span>ג׳נרט סימולציה</span>
+                      <span>צור סימולציה</span>
                     </button>
                   )}
                 </div>
@@ -1028,7 +1113,7 @@ export default function ProfessorSimulatorPage() {
                 >
                   {sending
                     ? <><Spinner size="sm" /><span>מייצר...</span></>
-                    : <><span>🧠</span><span>ג׳נרט סימולציית מבחן (GPT-4o)</span></>
+                    : <><span>🧠</span><span>צור סימולציית מבחן</span></>
                   }
                 </button>
               )}

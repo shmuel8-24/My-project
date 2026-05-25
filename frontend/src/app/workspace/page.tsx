@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { useLanguage } from '../providers/language';
 import { useAuth } from '../providers/auth';
 import type { KeyboardEvent, ChangeEvent } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useDropzone } from 'react-dropzone';
 import type { FileRejection } from 'react-dropzone';
 import UserProfileModal from './UserProfileModal';
@@ -212,10 +212,9 @@ const translations = {
     logoutYes:       'כן, צא',
     cancel:          'ביטול',
     navNotes: 'Notes',
-    navWorkspace: 'Workspace',
-    navInsights: 'Insights',
+    navStudyLab: 'מרחב לימוד',
     navAdmin: 'Admin',
-    navDashboard: 'Dashboard',
+    navDashboard: 'Platform',
     usageUploads:   (used: number, limit: number) => `${used}/${limit} העלאות בוצעו`,
     usageQuestions: (used: number, limit: number) => `${used}/${limit} שאלות נשאלו`,
     usageUnlimited: 'Pro — ללא הגבלה',
@@ -329,10 +328,9 @@ const translations = {
     logoutYes:       'Yes, Log Out',
     cancel:          'Cancel',
     navNotes: 'Notes',
-    navWorkspace: 'Workspace',
-    navInsights: 'Insights',
+    navStudyLab: 'StudyLab',
     navAdmin: 'Admin',
-    navDashboard: 'Dashboard',
+    navDashboard: 'Platform',
     usageUploads:   (used: number, limit: number) => `${used}/${limit} uploads used`,
     usageQuestions: (used: number, limit: number) => `${used}/${limit} questions used`,
     usageUnlimited: 'Pro — unlimited',
@@ -513,15 +511,6 @@ function IconBrain({ className }: { className?: string }) {
     </svg>
   );
 }
-function IconBarChart({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round"
-        d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z" />
-    </svg>
-  );
-}
-
 /* ─── Helpers ───────────────────────────────────────────────────────────────── */
 /* Renders gender-specific icon (Mars/Venus) or falls back to initials. */
 function AvatarContent({ gender, initials }: { gender: string; initials: string }) {
@@ -862,10 +851,9 @@ function PdfUploader({ onUpload, onRemove, t }: {
   return (
     <div className="flex flex-col gap-4 h-full">
       <div className="rounded-2xl p-6 flex flex-col gap-5" style={{
-        background: 'rgba(255,255,255,0.72)',
-        backdropFilter: 'blur(16px)',
-        border: '1px solid rgba(157,192,139,0.35)',
-        boxShadow: '0 4px 24px rgba(60,90,40,0.08)',
+        background: '#ffffff',
+        border: '1px solid rgba(0,0,0,0.06)',
+        boxShadow: '0 8px 30px rgba(0,0,0,0.04)',
       }}>
 
         <div className="flex items-center gap-3">
@@ -916,18 +904,14 @@ function PdfUploader({ onUpload, onRemove, t }: {
           <div {...getRootProps()}
             className={[
               'rounded-2xl border-2 border-dashed flex flex-col items-center justify-center',
-              'gap-4 min-h-52 cursor-pointer transition-all duration-200 px-6 py-10 text-center select-none',
+              'gap-4 min-h-52 transition-all duration-300 ease-in-out px-6 py-10 text-center select-none',
               uploading
-                ? 'opacity-50 cursor-not-allowed'
+                ? 'opacity-50 cursor-not-allowed border-[#9DC08B]/40 bg-[#9DC08B]/5'
                 : isDragActive
-                  ? 'scale-[1.01]'
-                  : '',
+                  ? 'scale-[1.01] border-[#517B3E] bg-[#517B3E]/[.08] cursor-default'
+                  : 'cursor-pointer border-[#7A9A5A]/30 bg-[#7A9A5A]/5 hover:bg-[#7A9A5A]/10 hover:border-[#517B3E]/50',
             ].join(' ')}
-            style={{
-              borderColor: isDragActive ? '#517B3E' : 'rgba(157,192,139,0.45)',
-              backgroundColor: isDragActive ? 'rgba(81,123,62,0.08)' : 'rgba(255,255,255,0.45)',
-              boxShadow: isDragActive ? '0 0 20px rgba(81,123,62,0.12)' : 'none',
-            }}>
+            style={isDragActive ? { boxShadow: '0 0 20px rgba(81,123,62,0.12)' } : undefined}>
             <input {...getInputProps()} />
             {uploading && (
               <>
@@ -962,13 +946,14 @@ function PdfUploader({ onUpload, onRemove, t }: {
           <div {...getRootProps()}
             className={[
               'rounded-xl border-2 border-dashed flex items-center justify-center gap-3',
-              'py-3 px-4 cursor-pointer transition-all duration-150 select-none',
-              uploading ? 'opacity-50 cursor-not-allowed' : '',
+              'py-3 px-4 transition-all duration-200 ease-in-out select-none',
+              uploading
+                ? 'opacity-50 cursor-not-allowed border-[#9DC08B]/30 bg-transparent'
+                : isDragActive
+                  ? 'border-[#517B3E] bg-[#517B3E]/[.08] cursor-default'
+                  : 'cursor-pointer border-[#7A9A5A]/30 bg-transparent hover:bg-[#7A9A5A]/10 hover:border-[#517B3E]/50',
             ].join(' ')}
-            style={{
-              borderColor: isDragActive ? '#517B3E' : 'rgba(157,192,139,0.4)',
-              backgroundColor: isDragActive ? 'rgba(81,123,62,0.08)' : 'transparent',
-            }}>
+            style={isDragActive ? { boxShadow: '0 0 12px rgba(81,123,62,0.10)' } : undefined}>
             <input {...getInputProps()} />
             {uploading
               ? <div className="w-4 h-4 rounded-full border-2 border-[#9DC08B]/30 border-t-[#517B3E] animate-spin" />
@@ -989,7 +974,7 @@ function PdfUploader({ onUpload, onRemove, t }: {
       </div>
 
       {/* How to use panel */}
-      <div className="flex-1 rounded-2xl p-5" style={{ background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(16px)', border: '1px solid rgba(157,192,139,0.3)' }}>
+      <div className="flex-1 rounded-2xl p-5" style={{ background: '#ffffff', border: '1px solid rgba(0,0,0,0.06)', boxShadow: '0 4px 16px rgba(0,0,0,0.03)' }}>
         <p className="text-sm font-semibold text-[#517B3E] mb-3">{t.howToUse}</p>
         <ul className="space-y-2.5">
           {t.tips.map((tip, i) => (
@@ -1254,10 +1239,9 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
 
   return (
     <div className="rounded-2xl flex flex-col flex-1 min-h-[520px]" style={{
-      background: 'rgba(255,255,255,0.72)',
-      backdropFilter: 'blur(16px)',
-      border: '1px solid rgba(157,192,139,0.35)',
-      boxShadow: '0 4px 24px rgba(60,90,40,0.08)',
+      background: '#ffffff',
+      border: '1px solid rgba(0,0,0,0.06)',
+      boxShadow: '0 8px 30px rgba(0,0,0,0.04)',
     }}>
 
       {/* Header */}
@@ -1697,10 +1681,9 @@ function PaperWriter({ hasDoc, t }: { hasDoc: boolean; t: T }) {
 
   return (
     <div className="rounded-2xl flex flex-col flex-1 min-h-[520px]" style={{
-      background: 'rgba(255,255,255,0.72)',
-      backdropFilter: 'blur(16px)',
-      border: '1px solid rgba(157,192,139,0.35)',
-      boxShadow: '0 4px 24px rgba(60,90,40,0.08)',
+      background: '#ffffff',
+      border: '1px solid rgba(0,0,0,0.06)',
+      boxShadow: '0 8px 30px rgba(0,0,0,0.04)',
     }}>
 
       <div className="px-5 py-4 flex items-center gap-3 shrink-0" style={{ borderBottom: '1px solid rgba(157,192,139,0.3)' }}>
@@ -2258,7 +2241,8 @@ interface SidebarProps {
 }
 
 function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDeleteSession, onSwitchMode, isOpen, onClose, isAdmin, lang, t, userFirstName, userLastName, userEmail, userInitials, userGender, onOpenProfile, onRequestLogout }: SidebarProps) {
-  const router = useRouter();
+  const router   = useRouter();
+  const pathname = usePathname();
   const fmtDate = (iso: string) =>
     new Date(iso).toLocaleString(lang === 'he' ? 'he-IL' : 'en-US', {
       month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
@@ -2316,24 +2300,26 @@ function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDel
           <div className="px-3 py-3 space-y-1" style={{ borderBottom: '1px solid rgba(100,140,80,0.2)' }}>
             <p className="text-[10px] font-semibold text-[#7a9268] uppercase tracking-widest px-2 mb-2">Navigation</p>
             <button onClick={() => { onSwitchMode('chat'); onClose(); }}
-              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
-              <IconSparkles className="w-4 h-4 text-[#517B3E]/70 shrink-0" />
-              {t.navWorkspace}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm border transition-colors"
+              style={{ backgroundColor: 'rgba(81,123,62,0.12)', borderColor: 'rgba(81,123,62,0.3)', color: '#517B3E', fontWeight: 600 }}
+            >
+              <span className="text-base leading-none shrink-0">🌱</span>
+              {t.navStudyLab}
             </button>
-            <button onClick={() => { onSwitchMode('paper'); onClose(); }}
-              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
-              <IconPen className="w-4 h-4 text-[#517B3E]/70 shrink-0" />
-              {t.navInsights}
-            </button>
-            <button onClick={() => { router.push('/workspace/professor-simulator'); onClose(); }}
-              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
+            <button
+              onClick={() => { router.push('/workspace/professor-simulator'); onClose(); }}
+              className={[
+                'w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors',
+                pathname === '/workspace/professor-simulator'
+                  ? 'border'
+                  : 'hover:bg-[#517B3E]/10 text-[#2d3b25]',
+              ].join(' ')}
+              style={pathname === '/workspace/professor-simulator'
+                ? { backgroundColor: 'rgba(81,123,62,0.12)', borderColor: 'rgba(81,123,62,0.3)', color: '#517B3E', fontWeight: 600 }
+                : undefined}
+            >
               <span className="text-base leading-none shrink-0">🧠</span>
               {t.navProfSim}
-            </button>
-            <button onClick={() => { router.push('/dashboard'); onClose(); }}
-              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
-              <IconBarChart className="w-4 h-4 text-[#517B3E]/70 shrink-0" />
-              {t.navDashboard}
             </button>
             <button disabled
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[#7a9268] text-sm cursor-not-allowed opacity-50">
@@ -2376,11 +2362,37 @@ function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDel
             )}
           </div>
 
-          {/* Admin link (hidden — only for admins) */}
+          {/* Admin CT — visible only to admin users */}
           {isAdmin && (
-            <div className="px-3 py-3 shrink-0" style={{ borderTop: '1px solid rgba(100,140,80,0.2)' }}>
-              <button onClick={() => { router.push('/admin'); onClose(); }}
-                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#7a9268] hover:text-[#2d3b25] text-xs transition-colors">
+            <div className="px-3 py-3 shrink-0 space-y-0.5" style={{ borderTop: '1px solid rgba(100,140,80,0.2)' }}>
+              <p className="text-[10px] font-semibold text-[#7a9268] uppercase tracking-widest px-2 mb-2">Admin CT</p>
+
+              <button
+                onClick={() => { router.push('/dashboard'); onClose(); }}
+                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
+                  pathname === '/dashboard'
+                    ? 'border'
+                    : 'hover:bg-[#517B3E]/10 text-[#2d3b25]'
+                }`}
+                style={pathname === '/dashboard'
+                  ? { backgroundColor: 'rgba(81,123,62,0.12)', borderColor: 'rgba(81,123,62,0.3)', color: '#517B3E', fontWeight: 600 }
+                  : undefined}
+              >
+                <span className="text-base leading-none shrink-0">🖥️</span>
+                {t.navDashboard}
+              </button>
+
+              <button
+                onClick={() => { router.push('/admin'); onClose(); }}
+                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
+                  pathname === '/admin'
+                    ? 'border'
+                    : 'hover:bg-[#517B3E]/10 text-[#7a9268] hover:text-[#2d3b25]'
+                }`}
+                style={pathname === '/admin'
+                  ? { backgroundColor: 'rgba(81,123,62,0.12)', borderColor: 'rgba(81,123,62,0.3)', color: '#517B3E', fontWeight: 600 }
+                  : undefined}
+              >
                 <IconShield className="w-4 h-4 shrink-0" />
                 {t.navAdmin}
               </button>
@@ -2650,7 +2662,7 @@ export default function Home() {
   if (!isAuthenticated) return null;
 
   return (
-    <div className="min-h-screen flex flex-col relative" style={{ backgroundColor: '#F7F5EF' }}>
+    <div className="min-h-screen flex flex-col relative" style={{ backgroundColor: '#F2F5F1' }}>
 
       {/* Rate-limit toast — fixed overlay, auto-hides after 6 s */}
       {rateLimitToast && (
@@ -2685,16 +2697,15 @@ export default function Home() {
 
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <header className="shrink-0 relative z-30" style={{
-        backgroundColor: 'rgba(157,192,139,0.97)',
-        backdropFilter: 'blur(12px)',
-        borderBottom: '1px solid rgba(80,110,60,0.25)',
+        backgroundColor: '#517B3E',
+        borderBottom: '1px solid rgba(0,0,0,0.15)',
       }}>
         <div className="max-w-full px-4 py-3 flex items-center justify-between gap-3">
 
           {/* Start: Hamburger + Logo */}
           <div className="flex items-center gap-3">
             <button onClick={() => setSidebarOpen(true)} aria-label={t.openMenu}
-              className="p-2 rounded-lg hover:bg-black/10 transition-colors text-[#2d3b25]">
+              className="p-2 rounded-lg hover:bg-white/15 transition-colors text-white">
               <IconMenu className="w-5 h-5" />
             </button>
             <LogoMark size={40} />
@@ -2702,13 +2713,13 @@ export default function Home() {
 
           {/* End: Status + Lang + Profile widget */}
           <div className="flex items-center gap-2">
-            <div className="hidden sm:flex items-center gap-2 rounded-full px-4 py-1.5 bg-white/30 border border-white/50">
-              <span className={`w-2 h-2 rounded-full transition-colors duration-500 ${hasDoc ? 'bg-[#2A3B22] animate-pulse' : 'bg-[#2A3B22]/30'}`} />
-              <span className="text-sm font-medium text-[#2A3B22]">{hasDoc ? t.docLoaded : t.waiting}</span>
+            <div className="hidden sm:flex items-center gap-2 rounded-full px-4 py-1.5 bg-white/15 border border-white/25">
+              <span className={`w-2 h-2 rounded-full transition-colors duration-500 ${hasDoc ? 'bg-white animate-pulse' : 'bg-white/30'}`} />
+              <span className="text-sm font-medium text-white">{hasDoc ? t.docLoaded : t.waiting}</span>
             </div>
             <button onClick={toggleLanguage} aria-label={`Switch to ${t.langLabel}`}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-white/30 hover:bg-white/55 border border-white/50 rounded-full text-sm text-[#2d3b25] font-semibold transition-all">
-              <IconGlobe className="w-4 h-4 text-[#2d3b25]" />
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white/15 hover:bg-white/25 border border-white/25 rounded-full text-sm text-white font-semibold transition-all">
+              <IconGlobe className="w-4 h-4 text-white" />
               {t.langLabel}
             </button>
 
@@ -2718,7 +2729,7 @@ export default function Home() {
                 onClick={() => setProfilePopoverOpen(p => !p)}
                 aria-label="Profile menu"
                 className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0 transition-all select-none"
-                style={{ backgroundColor: profilePopoverOpen ? '#3a5528' : '#2A3B22', boxShadow: profilePopoverOpen ? '0 0 0 3px rgba(255,255,255,0.35)' : 'none' }}>
+                style={{ backgroundColor: profilePopoverOpen ? 'rgba(255,255,255,0.28)' : 'rgba(255,255,255,0.15)', boxShadow: profilePopoverOpen ? '0 0 0 3px rgba(255,255,255,0.35)' : 'none' }}>
                 <AvatarContent gender={userGender} initials={userInitials} />
               </button>
 
@@ -2854,15 +2865,16 @@ export default function Home() {
 
       {/* ── Main content ─────────────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col overflow-y-auto">
-        <main className="flex-1 max-w-7xl mx-auto w-full px-4 md:px-6 py-6 md:py-8 flex flex-col md:flex-row gap-6">
+        <div className="flex-1 flex flex-col max-w-7xl mx-auto w-full px-4 py-6 md:px-8 md:py-8">
+        <main className="flex-1 bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.03)] p-5 md:p-7 flex flex-col md:flex-row gap-5 md:gap-7 min-h-0">
           <div className="w-full md:w-[38%] flex flex-col">
             {/* ── Usage indicator (Basic plan only) ────────────────────────── */}
             {usage && (
               <div className="mb-3 rounded-xl px-4 py-2.5 flex items-center justify-between gap-3 text-xs"
                 style={{
-                  background: 'rgba(253,252,249,0.80)',
-                  border: '1px solid rgba(209,213,219,0.7)',
-                  backdropFilter: 'blur(8px)',
+                  background: '#ffffff',
+                  border: '1px solid rgba(0,0,0,0.06)',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
                 }}>
                 {usage.plan_type === 'basic' ? (
                   <>
@@ -2896,19 +2908,19 @@ export default function Home() {
           <div className="flex-1 flex flex-col gap-3 min-h-0">
 
             {/* Mode tab switcher */}
-            <div className="flex gap-1 p-1 rounded-xl shrink-0" style={{ background: 'rgba(255,255,255,0.60)', border: '1px solid rgba(157,192,139,0.35)' }}>
+            <div className="flex gap-1.5 p-1.5 rounded-2xl shrink-0" style={{ background: '#ffffff', border: '1px solid rgba(0,0,0,0.07)', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
               <button onClick={() => setMode('chat')}
-                className="flex-1 py-2 text-sm font-semibold rounded-lg transition-all"
+                className="flex-1 py-2.5 text-sm font-semibold rounded-xl transition-all duration-200"
                 style={mode === 'chat'
-                  ? { background: 'rgba(81,123,62,0.15)', border: '1px solid rgba(81,123,62,0.25)', color: '#517B3E' }
-                  : { color: '#7a9268', border: '1px solid transparent' }}>
+                  ? { background: '#517B3E', color: 'white', boxShadow: '0 2px 12px rgba(81,123,62,0.30)' }
+                  : { color: '#7a9268' }}>
                 {t.tabChat}
               </button>
               <button onClick={() => setMode('paper')}
-                className="flex-1 py-2 text-sm font-semibold rounded-lg transition-all"
+                className="flex-1 py-2.5 text-sm font-semibold rounded-xl transition-all duration-200"
                 style={mode === 'paper'
-                  ? { background: 'rgba(81,123,62,0.15)', border: '1px solid rgba(81,123,62,0.25)', color: '#517B3E' }
-                  : { color: '#7a9268', border: '1px solid transparent' }}>
+                  ? { background: '#517B3E', color: 'white', boxShadow: '0 2px 12px rgba(81,123,62,0.30)' }
+                  : { color: '#7a9268' }}>
                 {t.tabPaper}
               </button>
             </div>
@@ -2930,6 +2942,7 @@ export default function Home() {
             </div>
           </div>
         </main>
+        </div>
 
         <footer className="py-3 text-center text-xs text-[#9aaf8a] shrink-0 relative z-10" style={{ borderTop: '1px solid rgba(157,192,139,0.25)' }}>
           {t.footer}

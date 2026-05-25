@@ -45,6 +45,12 @@
   to   { opacity: 1; transform: scale(1)    translateY(0); }
 }
 
+/* ── Prof-Sim AI brain glow — pulsing ring when the AI is processing ──────── */
+@keyframes brain-ring-glow {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(81,123,62,0.12); }
+  50%       { box-shadow: 0 0 0 5px rgba(81,123,62,0.28), 0 0 10px rgba(81,123,62,0.16); }
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
    TAILWIND CUSTOM UTILITIES
 ══════════════════════════════════════════════════════════════════════════ */
@@ -56,13 +62,15 @@
   .delay-fade              { animation-delay: var(--delay, 0s); }
   /* Pre-animation hidden state — toggled by IntersectionObserver */
   .reveal-hidden           { opacity: 0; transform: scale(0.95) translateY(30px); will-change: opacity, transform; }
+  /* Prof-Sim AI processing — brain icon ring glow */
+  .animate-brain-ring      { animation: brain-ring-glow 1.6s ease-in-out infinite; }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
    BASE STYLES
 ══════════════════════════════════════════════════════════════════════════ */
 body {
-  background-color: #F5F3ED;
+  background-color: #F2F5F1;
   color: #1E293B;
 }
 
