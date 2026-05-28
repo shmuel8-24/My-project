@@ -1,11 +1,12 @@
 import json
 import re
+from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, request, send_file
 
 from api.middleware import token_required
 from extensions import client, limiter
-from models import SessionLocal, UserDocument
+from models import SessionLocal, TopicMastery, UserDocument
 from services.rag import get_user_collection, hybrid_search
 from services.security import (
     SECURITY_SYSTEM_INSTRUCTION,
@@ -176,6 +177,242 @@ def generate_quiz(user_id: int):
 
     print(f"[Quiz] u{user_id}: generated {len(valid)} questions from {len(chunks)} chunks")
     return jsonify({"questions": valid, "sources": sources}), 200
+
+
+@export_bp.route("/api/mastery/generate-quiz", methods=["POST"])
+@limiter.limit("10 per minute")
+@token_required
+def mastery_generate_quiz(user_id: int):
+    """Topic-specific quiz for the שליטה בחומר (Mastery) dashboard.
+
+    Uses the same OpenAI client (OPENAI_API_KEY from .env) as every other feature.
+    Searches the user's vector store for topic-relevant chunks, then calls gpt-4o
+    to produce 3 challenging Hebrew multiple-choice questions grounded in that
+    material. Falls back to sound academic knowledge when no documents are loaded.
+    """
+    req_data = request.get_json(silent=True) or {}
+    topic    = strip_html((req_data.get("topic") or "").strip())
+    file_id  = req_data.get("file_id") or None
+    if not topic:
+        return jsonify({"error": "topic is required"}), 400
+
+    if file_id:
+        _gate = SessionLocal()
+        try:
+            _owns = _gate.query(UserDocument).filter(
+                UserDocument.user_id == user_id,
+                UserDocument.file_id == file_id,
+            ).first()
+            if not _owns:
+                return jsonify({"error": "Forbidden — document not found or not yours."}), 403
+        finally:
+            _gate.close()
+
+    # ── Retrieve relevant context from the user's vector store ──────────────
+    col       = get_user_collection(user_id)
+    doc_count = col.count()
+    sources: list[str] = []
+
+    if doc_count > 0:
+        chunks, metadatas = hybrid_search(user_id, topic, min(8, doc_count), file_id=file_id)
+        context_section = (
+            "חומר לימוד רלוונטי מהמאגר:\n---\n"
+            + "\n\n".join(chunks)
+            + "\n---\n\n"
+        ) if chunks else ""
+        if metadatas:
+            sources = sorted({m.get("source", "Unknown") for m in metadatas})
+    else:
+        context_section = ""
+
+    # ── Prompt ───────────────────────────────────────────────────────────────
+    system_prompt = (
+        SECURITY_SYSTEM_INSTRUCTION
+        + "You are an expert university professor creating a rigorous exam. "
+        "Output ONLY a valid JSON object — no markdown fences, no extra keys.\n\n"
+        "Required schema (the array must be nested under 'questions'):\n"
+        '{"questions":[{"q":"Question in Hebrew","opts":["Option 1","Option 2","Option 3","Option 4"],"correct":0}]}\n\n'
+        "Rules:\n"
+        "1. Generate exactly 3 high-quality, challenging multiple-choice questions about the given topic.\n"
+        "2. Base questions ONLY on the provided learning context. "
+        "If no context is supplied, draw on sound academic knowledge of the topic.\n"
+        "3. Each question has exactly 4 options (plain strings — no letter prefixes like 'א.' or 'A.').\n"
+        "4. 'correct' is the 0-based integer index (0–3) of the correct option.\n"
+        "5. Write all questions and options in Hebrew.\n"
+        "6. Distractors must be plausible but clearly refuted by the material.\n"
+        "7. Vary question depth: factual recall, concept definition, cause-effect, application."
+    )
+    user_message = (
+        f"{context_section}"
+        f"נושא הבחינה: {topic}\n\n"
+        "צור בדיוק 3 שאלות אמריקאיות מאתגרות כ-JSON."
+    )
+
+    # ── LLM call — shared OpenAI client, same OPENAI_API_KEY as all features ──
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": user_message},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.6,
+            max_tokens=1500,
+        )
+        raw      = response.choices[0].message.content or ""
+        quiz_obj = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        print(f"[MasteryQuiz] JSON parse error: {exc}")
+        return jsonify({"error": "AI returned malformed JSON — please try again."}), 500
+    except Exception as exc:
+        print(f"[MasteryQuiz] Error: {exc}")
+        return jsonify({"error": str(exc)}), 500
+
+    # ── Validate & normalise (q/opts/correct → question/options/correct_answer) ─
+    valid: list[dict] = []
+    for q in quiz_obj.get("questions", []):
+        opts   = q.get("opts", [])
+        ans    = q.get("correct")
+        q_text = q.get("q", "")
+        if (
+            isinstance(q_text, str) and q_text.strip()
+            and isinstance(opts, list) and len(opts) == 4
+            and all(isinstance(o, str) for o in opts)
+            and isinstance(ans, int) and 0 <= ans <= 3
+        ):
+            valid.append({
+                "question":       q_text.strip(),
+                "options":        [str(o).strip() for o in opts],
+                "correct_answer": ans,
+            })
+
+    if not valid:
+        return jsonify({"error": "AI did not produce valid questions — please try again."}), 500
+
+    print(f"[MasteryQuiz] u{user_id}: topic={topic!r} → {len(valid)} questions, {len(sources)} sources (gpt-4o)")
+    return jsonify({"questions": valid, "sources": sources, "topic": topic}), 200
+
+
+@export_bp.route("/api/mastery/submit-results", methods=["POST"])
+@limiter.limit("20 per minute")
+@token_required
+def mastery_submit_results(user_id: int):
+    req_data = request.get_json(silent=True) or {}
+    topic    = strip_html((req_data.get("topic") or "").strip())
+    file_id  = req_data.get("file_id")
+    score    = req_data.get("score")
+    total    = req_data.get("total")
+
+    if not topic:
+        return jsonify({"error": "topic is required"}), 400
+    if not isinstance(file_id, str) or len(file_id) != 32:
+        return jsonify({"error": "file_id must be a 32-char MD5 hex string"}), 400
+    if not isinstance(score, int) or not isinstance(total, int) or total <= 0:
+        return jsonify({"error": "score and total must be integers with total > 0"}), 400
+    if score < 0 or score > total:
+        return jsonify({"error": "score must be between 0 and total"}), 400
+
+    db = SessionLocal()
+    try:
+        _owns = db.query(UserDocument).filter(
+            UserDocument.user_id == user_id,
+            UserDocument.file_id == file_id,
+        ).first()
+        if not _owns:
+            return jsonify({"error": "Forbidden — document not found or not yours."}), 403
+
+        quiz_performance_pct = (score / total) * 100
+
+        record = db.query(TopicMastery).filter(
+            TopicMastery.user_id == user_id,
+            TopicMastery.file_id == file_id,
+        ).first()
+
+        if record:
+            new_mastery = round(record.mastery_pct * 0.4 + quiz_performance_pct * 0.6, 1)
+            new_mastery = min(100.0, max(0.0, new_mastery))
+            record.mastery_pct  = new_mastery
+            record.quiz_count   += 1
+            record.topic        = topic
+            record.last_updated = datetime.now(timezone.utc)
+        else:
+            new_mastery = round(50.0 * 0.4 + quiz_performance_pct * 0.6, 1)
+            new_mastery = min(100.0, max(0.0, new_mastery))
+            record = TopicMastery(
+                user_id    =user_id,
+                file_id    =file_id,
+                topic      =topic,
+                mastery_pct=new_mastery,
+                quiz_count =1,
+            )
+            db.add(record)
+
+        db.commit()
+        print(f"[Mastery] u{user_id}: file={file_id[:8]}… topic={topic!r} quiz={score}/{total} → {new_mastery:.1f}%")
+        return jsonify({"mastery_pct": new_mastery, "file_id": file_id, "topic": topic}), 200
+    finally:
+        db.close()
+
+
+@export_bp.route("/api/mastery/scores", methods=["GET"])
+@limiter.limit("30 per minute")
+@token_required
+def mastery_scores(user_id: int):
+    db = SessionLocal()
+    try:
+        records = db.query(TopicMastery).filter(TopicMastery.user_id == user_id).all()
+        return jsonify([
+            {
+                "file_id":    r.file_id,
+                "topic":      r.topic,
+                "mastery_pct": r.mastery_pct,
+                "quiz_count": r.quiz_count,
+            }
+            for r in records
+        ]), 200
+    finally:
+        db.close()
+
+
+@export_bp.route("/api/mastery/topics", methods=["GET"])
+@limiter.limit("30 per minute")
+@token_required
+def mastery_topics(user_id: int):
+    """Return all documents the user has uploaded, merged with mastery scores."""
+    db = SessionLocal()
+    try:
+        docs = db.query(UserDocument).filter(UserDocument.user_id == user_id).all()
+        if not docs:
+            return jsonify([]), 200
+
+        mastery_by_file = {
+            r.file_id: r
+            for r in db.query(TopicMastery).filter(TopicMastery.user_id == user_id).all()
+        }
+
+        _icon_map = {
+            "pdf": "📄", "pptx": "📊", "ppt": "📊",
+            "png": "🖼️", "jpg": "🖼️", "jpeg": "🖼️",
+        }
+        result = []
+        for doc in docs:
+            fname = doc.filename or ""
+            ext   = fname.rsplit(".", 1)[-1].lower() if "." in fname else ""
+            icon  = _icon_map.get(ext, "📚")
+            name  = fname.rsplit(".", 1)[0] if "." in fname else fname
+            name  = name.replace("_", " ").replace("-", " ").strip() or doc.file_id[:12]
+            rec   = mastery_by_file.get(doc.file_id)
+            result.append({
+                "file_id":    doc.file_id,
+                "topic":      name,
+                "icon":       icon,
+                "mastery_pct": rec.mastery_pct if rec else None,
+                "quiz_count": rec.quiz_count   if rec else 0,
+            })
+        return jsonify(result), 200
+    finally:
+        db.close()
 
 
 @export_bp.route("/export-pdf", methods=["POST"])

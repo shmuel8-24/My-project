@@ -1,8 +1,11 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { useLanguage } from '../providers/language';
-import { useAuth } from '../providers/auth';
+import { useLanguage }   from '../providers/language';
+import { useAuth }       from '../providers/auth';
+import { useCourse }     from '../providers/course';
+import NoCourseState     from '../../components/NoCourseState';
+import CoursePill        from '../../components/CoursePill';
 import type { KeyboardEvent, ChangeEvent } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useDropzone } from 'react-dropzone';
@@ -211,6 +214,7 @@ const translations = {
     logoutBody:      'האם אתה בטוח שברצונך להתנתק ולצאת?',
     logoutYes:       'כן, צא',
     cancel:          'ביטול',
+    navHome: 'בית',
     navNotes: 'Notes',
     navStudyLab: 'מרחב לימוד',
     navAdmin: 'Admin',
@@ -243,6 +247,7 @@ const translations = {
     quizErr:        'שגיאה ביצירת החידון. נסה שוב.',
     rateLimitMsg:   'יותר מדי בקשות — אנא המתן רגע.',
     navProfSim:     'הראש של המרצה',
+    navGapFill:     'שליטה בחומר',
   },
   en: {
     subtitle: 'Your Academic Sidekick',
@@ -327,6 +332,7 @@ const translations = {
     logoutBody:      'Are you sure you want to log out?',
     logoutYes:       'Yes, Log Out',
     cancel:          'Cancel',
+    navHome: 'Home',
     navNotes: 'Notes',
     navStudyLab: 'StudyLab',
     navAdmin: 'Admin',
@@ -359,6 +365,7 @@ const translations = {
     quizErr:        'Quiz generation failed. Please try again.',
     rateLimitMsg:   'Too many requests. Please wait a moment.',
     navProfSim:     "Professor's Brain",
+    navGapFill:     'Mastery',
   },
 };
 
@@ -851,8 +858,8 @@ function PdfUploader({ onUpload, onRemove, t }: {
   return (
     <div className="flex flex-col gap-4 h-full">
       <div className="rounded-2xl p-6 flex flex-col gap-5" style={{
-        background: '#ffffff',
-        border: '1px solid rgba(0,0,0,0.06)',
+        background: 'linear-gradient(145deg, rgba(245,251,240,0.98), rgba(241,249,236,0.96))',
+        border: '1px solid rgba(81,123,62,0.10)',
         boxShadow: '0 8px 30px rgba(0,0,0,0.04)',
       }}>
 
@@ -974,7 +981,7 @@ function PdfUploader({ onUpload, onRemove, t }: {
       </div>
 
       {/* How to use panel */}
-      <div className="flex-1 rounded-2xl p-5" style={{ background: '#ffffff', border: '1px solid rgba(0,0,0,0.06)', boxShadow: '0 4px 16px rgba(0,0,0,0.03)' }}>
+      <div className="flex-1 rounded-2xl p-5" style={{ background: 'linear-gradient(145deg, rgba(245,251,240,0.98), rgba(241,249,236,0.96))', border: '1px solid rgba(81,123,62,0.10)', boxShadow: '0 4px 16px rgba(0,0,0,0.03)' }}>
         <p className="text-sm font-semibold text-[#517B3E] mb-3">{t.howToUse}</p>
         <ul className="space-y-2.5">
           {t.tips.map((tip, i) => (
@@ -1239,8 +1246,8 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
 
   return (
     <div className="rounded-2xl flex flex-col flex-1 min-h-[520px]" style={{
-      background: '#ffffff',
-      border: '1px solid rgba(0,0,0,0.06)',
+      background: 'linear-gradient(145deg, rgba(245,251,240,0.98), rgba(241,249,236,0.96))',
+      border: '1px solid rgba(81,123,62,0.10)',
       boxShadow: '0 8px 30px rgba(0,0,0,0.04)',
     }}>
 
@@ -1681,8 +1688,8 @@ function PaperWriter({ hasDoc, t }: { hasDoc: boolean; t: T }) {
 
   return (
     <div className="rounded-2xl flex flex-col flex-1 min-h-[520px]" style={{
-      background: '#ffffff',
-      border: '1px solid rgba(0,0,0,0.06)',
+      background: 'linear-gradient(145deg, rgba(245,251,240,0.98), rgba(241,249,236,0.96))',
+      border: '1px solid rgba(81,123,62,0.10)',
       boxShadow: '0 8px 30px rgba(0,0,0,0.04)',
     }}>
 
@@ -2243,6 +2250,7 @@ interface SidebarProps {
 function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDeleteSession, onSwitchMode, isOpen, onClose, isAdmin, lang, t, userFirstName, userLastName, userEmail, userInitials, userGender, onOpenProfile, onRequestLogout }: SidebarProps) {
   const router   = useRouter();
   const pathname = usePathname();
+  const { selectedCourse, setSelectedCourse } = useCourse();
   const fmtDate = (iso: string) =>
     new Date(iso).toLocaleString(lang === 'he' ? 'he-IL' : 'en-US', {
       month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
@@ -2258,7 +2266,7 @@ function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDel
       <div
         className={['fixed inset-0 z-40 backdrop-blur-sm transition-opacity duration-300',
           isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'].join(' ')}
-        style={{ backgroundColor: 'rgba(42,59,34,0.35)' }}
+        style={{ backgroundColor: 'rgba(28,51,41,0.25)' }}
         onClick={onClose} aria-hidden="true" />
 
       {/* Panel */}
@@ -2268,14 +2276,15 @@ function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDel
         translateClass,
       ].join(' ')}
       style={{
-        backgroundColor: 'rgba(217,235,208,0.97)',
+        backgroundColor: 'rgba(255,255,255,0.94)',
         backdropFilter: 'blur(20px)',
-        borderInlineEnd: '1px solid rgba(100,140,80,0.25)',
-        boxShadow: '4px 0 32px rgba(60,90,40,0.12)',
+        WebkitBackdropFilter: 'blur(20px)',
+        borderInlineEnd: '1px solid #E2EBE5',
+        boxShadow: '4px 0 28px rgba(28,51,41,0.07)',
       }}>
 
         {/* Logo header */}
-        <div className="flex items-center justify-between px-4 py-4 shrink-0" style={{ borderBottom: '1px solid rgba(100,140,80,0.2)' }}>
+        <div className="flex items-center justify-between px-4 py-4 shrink-0" style={{ borderBottom: '1px solid #E8F0EB' }}>
           <LogoMark size={36} />
           <button onClick={onClose} aria-label={t.closeMenu}
             className="p-1.5 rounded-lg hover:bg-black/10 transition-colors shrink-0">
@@ -2284,7 +2293,7 @@ function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDel
         </div>
 
         {/* New chat button */}
-        <div className="px-3 py-3 shrink-0" style={{ borderBottom: '1px solid rgba(100,140,80,0.2)' }}>
+        <div className="px-3 py-3 shrink-0" style={{ borderBottom: '1px solid #E8F0EB' }}>
           <button onClick={() => { onNewChat(); onClose(); }}
             className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-white text-sm font-semibold transition-all hover:opacity-90 active:scale-[0.99]"
             style={{ backgroundColor: '#517B3E' }}>
@@ -2293,33 +2302,56 @@ function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDel
           </button>
         </div>
 
+        {/* Active course indicator */}
+        {selectedCourse && (
+          <div className="mx-3 mt-2 px-3 py-2.5 rounded-xl flex items-center justify-between gap-2 shrink-0"
+            style={{ background: `${selectedCourse.color}12`, border: `1px solid ${selectedCourse.color}25` }}>
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-sm leading-none shrink-0">{selectedCourse.icon}</span>
+              <div className="min-w-0">
+                <p className="text-[9px] font-bold uppercase tracking-wider" style={{ color: selectedCourse.color }}>{lang === 'he' ? 'קורס פעיל' : 'Active course'}</p>
+                <p className="text-xs font-bold text-[#1a2e14] truncate">{selectedCourse.name}</p>
+              </div>
+            </div>
+            <button onClick={() => setSelectedCourse(null)} className="shrink-0 text-[10px] px-1.5 py-0.5 rounded hover:bg-black/10 transition-colors" style={{ color: selectedCourse.color }}>✕</button>
+          </div>
+        )}
+
         {/* Nav sections */}
         <div className="flex-1 overflow-y-auto flex flex-col">
 
           {/* Quick nav */}
-          <div className="px-3 py-3 space-y-1" style={{ borderBottom: '1px solid rgba(100,140,80,0.2)' }}>
-            <p className="text-[10px] font-semibold text-[#7a9268] uppercase tracking-widest px-2 mb-2">Navigation</p>
+          <div className="px-3 py-3 space-y-1 shrink-0" style={{ borderBottom: '1px solid #E8F0EB' }}>
+            <p className="text-[10px] font-semibold text-[#527061] uppercase tracking-widest px-2 mb-2">Navigation</p>
+            <button
+              onClick={() => { router.push('/dashboard'); onClose(); }}
+              className={['w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all', pathname === '/dashboard' ? 'font-bold' : 'hover:bg-white/5'].join(' ')}
+              style={pathname === '/dashboard' ? { backgroundColor: '#D1E6D9', color: '#183025', fontWeight: 700 } : { color: '#1C3329' }}
+            >
+              <span className="text-base leading-none shrink-0">🏠</span>
+              {t.navHome}
+            </button>
             <button onClick={() => { onSwitchMode('chat'); onClose(); }}
-              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm border transition-colors"
-              style={{ backgroundColor: 'rgba(81,123,62,0.12)', borderColor: 'rgba(81,123,62,0.3)', color: '#517B3E', fontWeight: 600 }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-bold"
+              style={{ backgroundColor: '#D1E6D9', color: '#183025' }}
             >
               <span className="text-base leading-none shrink-0">🌱</span>
               {t.navStudyLab}
             </button>
             <button
               onClick={() => { router.push('/workspace/professor-simulator'); onClose(); }}
-              className={[
-                'w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors',
-                pathname === '/workspace/professor-simulator'
-                  ? 'border'
-                  : 'hover:bg-[#517B3E]/10 text-[#2d3b25]',
-              ].join(' ')}
-              style={pathname === '/workspace/professor-simulator'
-                ? { backgroundColor: 'rgba(81,123,62,0.12)', borderColor: 'rgba(81,123,62,0.3)', color: '#517B3E', fontWeight: 600 }
-                : undefined}
+              className={['w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all', pathname === '/workspace/professor-simulator' ? 'font-bold' : 'hover:bg-white/5'].join(' ')}
+              style={pathname === '/workspace/professor-simulator' ? { backgroundColor: '#D1E6D9', color: '#183025', fontWeight: 700 } : { color: '#1C3329' }}
             >
               <span className="text-base leading-none shrink-0">🧠</span>
               {t.navProfSim}
+            </button>
+            <button
+              onClick={() => { router.push('/mastery'); onClose(); }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-[#1C3329]/70 transition-all hover:bg-[#EEF5F0] hover:text-[#1C3329]"
+            >
+              <span className="text-base leading-none shrink-0">🎯</span>
+              {t.navGapFill}
             </button>
             <button disabled
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[#7a9268] text-sm cursor-not-allowed opacity-50">
@@ -2333,24 +2365,24 @@ function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDel
 
           {/* Notes (sessions) */}
           <div className="flex-1 overflow-y-auto py-2">
-            <p className="text-[10px] font-semibold text-[#7a9268] uppercase tracking-widest px-5 mb-2 mt-2">
+            <p className="text-[10px] font-semibold text-[#527061] uppercase tracking-widest px-5 mb-2 mt-2">
               {t.navNotes}
             </p>
             {sessions.length === 0 ? (
-              <p className="text-[#7a9268] text-xs text-center py-6 px-4">{t.noPrevChats}</p>
+              <p className="text-xs text-center py-6 px-4 text-[#527061]">{t.noPrevChats}</p>
             ) : (
               sessions.map(s => (
                 <div key={s.id}
                   onClick={() => { onSelectSession(s.id); onClose(); }}
-                  className={`group flex items-start gap-2 px-3 py-2.5 mx-1 rounded-lg cursor-pointer transition-colors ${
-                    currentSessionId === s.id ? 'border' : 'hover:bg-[#517B3E]/10'
+                  className={`group flex items-start gap-2 px-3 py-2.5 mx-1 rounded-lg cursor-pointer transition-all ${
+                    currentSessionId === s.id ? 'font-bold' : 'hover:bg-[#EEF5F0]'
                   }`}
-                  style={currentSessionId === s.id ? { backgroundColor: 'rgba(81,123,62,0.12)', borderColor: 'rgba(81,123,62,0.3)' } : {}}>
+                  style={currentSessionId === s.id ? { backgroundColor: '#EEF5F0', borderInlineStart: '2px solid #527061' } : {}}>
                   <div className="flex-1 min-w-0">
-                    <p className={`text-xs font-medium truncate leading-snug ${currentSessionId === s.id ? 'text-[#517B3E]' : 'text-[#2d3b25]'}`}>
+                    <p className={`text-xs font-medium truncate leading-snug ${currentSessionId === s.id ? 'text-[#1C3329]' : 'text-[#1C3329]/70'}`}>
                       {s.title}
                     </p>
-                    <p className="text-[#7a9268] text-xs mt-0.5">{fmtDate(s.updated_at)}</p>
+                    <p className="text-xs mt-0.5 text-[#527061]">{fmtDate(s.updated_at)}</p>
                   </div>
                   <button onClick={e => { e.stopPropagation(); onDeleteSession(s.id); }}
                     aria-label={t.deleteChat}
@@ -2461,9 +2493,38 @@ interface UsageInfo {
 }
 
 /* ─── Root page ──────────────────────────────────────────────────────────────── */
-export default function Home() {
+
+// ── Matcha Leaf CSS ────────────────────────────────────────────────────
+const MATCHA_LEAF_CSS = `
+  .matcha-workspace-main {
+    position: relative !important;
+    overflow: hidden !important;
+  }
+  .matcha-workspace-main::before {
+    content: '';
+    position: absolute;
+    top: -18%; right: -6%;
+    width: 280px; height: 280px;
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M 50 0 C 75 15%2C 90 35%2C 85 55 C 80 75%2C 65 90%2C 50 100 C 35 90%2C 20 75%2C 15 55 C 10 35%2C 25 15%2C 50 0 Z' fill='%234a7a32'/%3E%3C/svg%3E") no-repeat center/contain;
+    transform: rotate(-25deg);
+    opacity: 0.06; pointer-events: none; z-index: 0;
+  }
+  .matcha-workspace-main::after {
+    content: '';
+    position: absolute;
+    bottom: -10%; left: -6%;
+    width: 250px; height: 250px;
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M 50 0 C 75 15%2C 90 35%2C 85 55 C 80 75%2C 65 90%2C 50 100 C 35 90%2C 20 75%2C 15 55 C 10 35%2C 25 15%2C 50 0 Z' fill='%234a7a32'/%3E%3C/svg%3E") no-repeat center/contain;
+    transform: rotate(50deg);
+    opacity: 0.055; pointer-events: none; z-index: 0;
+  }
+  .matcha-workspace-main > * { position: relative; z-index: 1; }
+`;
+
+function Home() {
   const router = useRouter();
   const { user: authUser, isLoading: authLoading, logout: authLogout } = useAuth();
+  const { selectedCourse } = useCourse();
 
   // isAuthenticated always starts false (same on server and client) to avoid
   // the SSR/hydration mismatch where the server returns null but the client
@@ -2564,11 +2625,11 @@ export default function Home() {
       router.replace('/?login=true');  // context says no valid session
       return;
     }
-    setIsAuthenticated(true);
     authFetch(`${API}/sessions`)
       .then(r => r.ok ? r.json() : { sessions: [] })
       .then((data: { sessions?: ChatSession[] }) => setSessions(data.sessions ?? []))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setIsAuthenticated(true));
   }, [authLoading, authUser, router]);
 
   // Fetch usage stats once after auth is confirmed.
@@ -2664,6 +2725,9 @@ export default function Home() {
   return (
     <div className="min-h-screen flex flex-col relative" style={{ backgroundColor: '#F2F5F1' }}>
 
+      {/* Course gate — overlay when no course is selected */}
+      {!selectedCourse && <NoCourseState />}
+
       {/* Rate-limit toast — fixed overlay, auto-hides after 6 s */}
       {rateLimitToast && (
         <div className="fixed top-4 inset-x-0 flex justify-center z-[9999] pointer-events-none px-4">
@@ -2697,29 +2761,32 @@ export default function Home() {
 
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <header className="shrink-0 relative z-30" style={{
-        backgroundColor: '#517B3E',
-        borderBottom: '1px solid rgba(0,0,0,0.15)',
+        background: 'rgba(255,255,255,0.82)',
+        backdropFilter: 'blur(16px)',
+        WebkitBackdropFilter: 'blur(16px)',
+        borderBottom: '1px solid #E2EBE5',
       }}>
         <div className="max-w-full px-4 py-3 flex items-center justify-between gap-3">
 
           {/* Start: Hamburger + Logo */}
           <div className="flex items-center gap-3">
             <button onClick={() => setSidebarOpen(true)} aria-label={t.openMenu}
-              className="p-2 rounded-lg hover:bg-white/15 transition-colors text-white">
+              className="p-2 rounded-lg hover:bg-[#EEF5F0] transition-colors text-[#1C3329]">
               <IconMenu className="w-5 h-5" />
             </button>
             <LogoMark size={40} />
           </div>
 
-          {/* End: Status + Lang + Profile widget */}
+          {/* End: Course pill + Status + Lang + Profile widget */}
           <div className="flex items-center gap-2">
-            <div className="hidden sm:flex items-center gap-2 rounded-full px-4 py-1.5 bg-white/15 border border-white/25">
-              <span className={`w-2 h-2 rounded-full transition-colors duration-500 ${hasDoc ? 'bg-white animate-pulse' : 'bg-white/30'}`} />
-              <span className="text-sm font-medium text-white">{hasDoc ? t.docLoaded : t.waiting}</span>
+            <CoursePill />
+            <div className="hidden sm:flex items-center gap-2 rounded-full px-4 py-1.5 bg-[#EEF5F0] border border-[#D3E0D8]">
+              <span className={`w-2 h-2 rounded-full transition-colors duration-500 ${hasDoc ? 'bg-[#527061] animate-pulse' : 'bg-[#D3E0D8]'}`} />
+              <span className="text-sm font-medium text-[#527061]">{hasDoc ? t.docLoaded : t.waiting}</span>
             </div>
             <button onClick={toggleLanguage} aria-label={`Switch to ${t.langLabel}`}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-white/15 hover:bg-white/25 border border-white/25 rounded-full text-sm text-white font-semibold transition-all">
-              <IconGlobe className="w-4 h-4 text-white" />
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#EEF5F0] hover:bg-[#E8F0EB] border border-[#D3E0D8] rounded-full text-sm text-[#1C3329] font-semibold transition-all">
+              <IconGlobe className="w-4 h-4 text-[#527061]" />
               {t.langLabel}
             </button>
 
@@ -2728,8 +2795,8 @@ export default function Home() {
               <button
                 onClick={() => setProfilePopoverOpen(p => !p)}
                 aria-label="Profile menu"
-                className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0 transition-all select-none"
-                style={{ backgroundColor: profilePopoverOpen ? 'rgba(255,255,255,0.28)' : 'rgba(255,255,255,0.15)', boxShadow: profilePopoverOpen ? '0 0 0 3px rgba(255,255,255,0.35)' : 'none' }}>
+                className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-black shrink-0 transition-all select-none"
+                style={{ backgroundColor: profilePopoverOpen ? '#D1E6D9' : '#EEF5F0', boxShadow: profilePopoverOpen ? '0 0 0 2px #D1E6D9' : 'none', color: '#1C3329' }}>
                 <AvatarContent gender={userGender} initials={userInitials} />
               </button>
 
@@ -2866,14 +2933,15 @@ export default function Home() {
       {/* ── Main content ─────────────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col overflow-y-auto">
         <div className="flex-1 flex flex-col max-w-7xl mx-auto w-full px-4 py-6 md:px-8 md:py-8">
-        <main className="flex-1 bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.03)] p-5 md:p-7 flex flex-col md:flex-row gap-5 md:gap-7 min-h-0">
-          <div className="w-full md:w-[38%] flex flex-col">
+        <main className="flex-1 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.03)] p-5 md:p-7 flex flex-col md:flex-row gap-5 md:gap-7 min-h-0 matcha-workspace-main" style={{ background: 'linear-gradient(135deg, rgba(240,248,235,0.92) 0%, rgba(246,251,241,0.95) 40%, rgba(237,246,229,0.90) 100%)' }}>
+          <style dangerouslySetInnerHTML={{ __html: MATCHA_LEAF_CSS }} />
+          <div className="w-full md:w-[38%] flex flex-col relative" style={{ zIndex: 1 }}>
             {/* ── Usage indicator (Basic plan only) ────────────────────────── */}
             {usage && (
               <div className="mb-3 rounded-xl px-4 py-2.5 flex items-center justify-between gap-3 text-xs"
                 style={{
-                  background: '#ffffff',
-                  border: '1px solid rgba(0,0,0,0.06)',
+                  background: 'linear-gradient(145deg, rgba(245,251,240,0.98), rgba(241,249,236,0.96))',
+                  border: '1px solid rgba(81,123,62,0.10)',
                   boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
                 }}>
                 {usage.plan_type === 'basic' ? (
@@ -2905,10 +2973,10 @@ export default function Home() {
             )}
             <PdfUploader key={pdfKey} onUpload={handleUpload} onRemove={handleRemove} t={t} />
           </div>
-          <div className="flex-1 flex flex-col gap-3 min-h-0">
+          <div className="flex-1 flex flex-col gap-3 min-h-0" style={{ position: 'relative', zIndex: 1 }}>
 
             {/* Mode tab switcher */}
-            <div className="flex gap-1.5 p-1.5 rounded-2xl shrink-0" style={{ background: '#ffffff', border: '1px solid rgba(0,0,0,0.07)', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+            <div className="flex gap-1.5 p-1.5 rounded-2xl shrink-0" style={{ background: 'linear-gradient(145deg, rgba(245,251,240,0.98), rgba(241,249,236,0.96))', border: '1px solid rgba(81,123,62,0.10)', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
               <button onClick={() => setMode('chat')}
                 className="flex-1 py-2.5 text-sm font-semibold rounded-xl transition-all duration-200"
                 style={mode === 'chat'
@@ -2940,6 +3008,7 @@ export default function Home() {
             <div className={mode === 'paper' ? 'flex-1 flex flex-col' : 'hidden'}>
               <PaperWriter hasDoc={hasDoc} t={t} />
             </div>
+
           </div>
         </main>
         </div>
@@ -2951,3 +3020,5 @@ export default function Home() {
     </div>
   );
 }
+
+export default Home;

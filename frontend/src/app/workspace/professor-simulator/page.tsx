@@ -2,8 +2,11 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { useAuth } from '../../providers/auth';
+import { useAuth }     from '../../providers/auth';
 import { useLanguage } from '../../providers/language';
+import { useCourse }   from '../../providers/course';
+import NoCourseState   from '../../../components/NoCourseState';
+import CoursePill      from '../../../components/CoursePill';
 import { UpgradeModal } from '../UpgradeModal';
 import { useDropzone } from 'react-dropzone';
 import ReactMarkdown from 'react-markdown';
@@ -218,8 +221,14 @@ function ProfSimSidebar({ isOpen, onClose, isAdmin, lang, userFirstName, userLas
 
         {/* Nav sections */}
         <div className="flex-1 overflow-y-auto flex flex-col">
-          <div className="px-3 py-3 space-y-1" style={{ borderBottom: '1px solid rgba(100,140,80,0.2)' }}>
+          <div className="px-3 py-3 space-y-1 shrink-0" style={{ borderBottom: '1px solid rgba(100,140,80,0.2)' }}>
             <p className="text-[10px] font-semibold text-[#7a9268] uppercase tracking-widest px-2 mb-2">Navigation</p>
+
+            <button onClick={() => { router.push('/dashboard'); onClose(); }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
+              <span className="text-base leading-none shrink-0">🏠</span>
+              {lang === 'he' ? 'בית' : 'Home'}
+            </button>
 
             <button onClick={() => { router.push('/workspace'); onClose(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
@@ -245,24 +254,17 @@ function ProfSimSidebar({ isOpen, onClose, isAdmin, lang, userFirstName, userLas
                 fontWeight: 600,
               }}
             >
-              {/* Brain icon — gains a pulsing ring glow while AI is processing */}
+              {/* Brain icon — pulsing ring glow while AI is processing */}
               <span
                 className={[
-                  'w-6 h-6 flex items-center justify-center rounded-full shrink-0',
-                  'text-base leading-none transition-all duration-300',
+                  'text-base leading-none shrink-0 rounded-full transition-all duration-300',
                   isProcessing ? 'animate-brain-ring' : '',
                 ].join(' ')}
-                style={isProcessing
-                  ? { backgroundColor: 'rgba(81,123,62,0.12)' }
-                  : undefined}
+                style={isProcessing ? { backgroundColor: 'rgba(81,123,62,0.12)' } : undefined}
               >
                 🧠
               </span>
-
-              {/* Label */}
-              <span className="flex-1 min-w-0 truncate">
-                {lang === 'he' ? 'הראש של המרצה' : "Professor's Brain"}
-              </span>
+              {lang === 'he' ? 'הראש של המרצה' : "Professor's Brain"}
 
               {/* Processing indicator — three staggered dots */}
               {isProcessing && (
@@ -276,6 +278,12 @@ function ProfSimSidebar({ isOpen, onClose, isAdmin, lang, userFirstName, userLas
                   ))}
                 </span>
               )}
+            </button>
+
+            <button onClick={() => { router.push('/mastery'); onClose(); }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
+              <span className="text-base leading-none shrink-0">🎯</span>
+              {lang === 'he' ? 'שליטה בחומר' : 'Mastery'}
             </button>
 
             <button disabled
@@ -377,6 +385,7 @@ export default function ProfessorSimulatorPage() {
   const router   = useRouter();
   const { user: authUser, isLoading: authLoading } = useAuth();
   const { lang, toggleLanguage } = useLanguage();
+  const { selectedCourse } = useCourse();
 
   // ── Usage / plan ────────────────────────────────────────────────────────────
   const [usage, setUsage] = useState<UsageData | null>(null);
@@ -391,6 +400,13 @@ export default function ProfessorSimulatorPage() {
   const [profName,  setProfName]  = useState('');
   const [examStyle, setExamStyle] = useState('');
   const [topics,    setTopics]    = useState('');
+
+  // Pre-fill topics with selected course name when course changes
+  useEffect(() => {
+    if (!selectedCourse) return;
+    Promise.resolve(selectedCourse.name)
+      .then(name => setTopics(prev => prev || name));
+  }, [selectedCourse]);
 
   // ── Files ────────────────────────────────────────────────────────────────────
   const [files,     setFiles]     = useState<UploadedFile[]>([]);
@@ -618,10 +634,15 @@ export default function ProfessorSimulatorPage() {
   return (
     <div dir={lang === 'he' ? 'rtl' : 'ltr'} className="min-h-screen flex flex-col" style={{ background: '#F2F5F1' }}>
 
+      {/* Course gate */}
+      {!selectedCourse && <NoCourseState />}
+
       {/* ── Header ── */}
       <header className="shrink-0 relative z-30" style={{
-        backgroundColor: '#517B3E',
-        borderBottom: '1px solid rgba(0,0,0,0.15)',
+        background: 'rgba(255,255,255,0.82)',
+        backdropFilter: 'blur(16px)',
+        WebkitBackdropFilter: 'blur(16px)',
+        borderBottom: '1px solid #E2EBE5',
       }}>
         <div className="max-w-full px-4 py-3 flex items-center justify-between gap-3">
 
@@ -630,7 +651,7 @@ export default function ProfessorSimulatorPage() {
             <button
               onClick={() => setSidebarOpen(true)}
               aria-label={lang === 'he' ? 'פתח תפריט' : 'Open menu'}
-              className="p-2 rounded-lg hover:bg-white/15 transition-colors text-white"
+              className="p-2 rounded-lg hover:bg-[#EEF5F0] transition-colors text-[#1C3329]"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
@@ -639,13 +660,14 @@ export default function ProfessorSimulatorPage() {
             <LogoMark size={40} />
           </div>
 
-          {/* End: Lang toggle + avatar */}
+          {/* End: Course pill + Lang toggle + avatar */}
           <div className="flex items-center gap-2">
+            <CoursePill />
 
             {/* Language toggle */}
             <button
               onClick={toggleLanguage}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-white/15 hover:bg-white/25 border border-white/25 rounded-full text-sm text-white font-semibold transition-all"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#EEF5F0] hover:bg-[#E8F0EB] border border-[#D3E0D8] rounded-full text-sm text-[#1C3329] font-semibold transition-all"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round"
@@ -661,8 +683,9 @@ export default function ProfessorSimulatorPage() {
                 aria-label="Profile menu"
                 className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0 transition-all select-none"
                 style={{
-                  backgroundColor: profilePopoverOpen ? 'rgba(255,255,255,0.28)' : 'rgba(255,255,255,0.15)',
-                  boxShadow: profilePopoverOpen ? '0 0 0 3px rgba(255,255,255,0.35)' : 'none',
+                  backgroundColor: profilePopoverOpen ? '#D1E6D9' : '#EEF5F0',
+                  boxShadow: profilePopoverOpen ? '0 0 0 2px #D1E6D9' : 'none',
+                  color: '#1C3329',
                 }}
               >
                 <AvatarContent gender={userGender} initials={userInitials} />

@@ -125,6 +125,20 @@ class Payment(_Base):
     user         = relationship("User", backref="payments")
 
 
+class TopicMastery(_Base):
+    """Per-user, per-document mastery percentage updated after every quiz attempt."""
+    __tablename__ = "topic_mastery"
+    id           = Column(Integer, primary_key=True, index=True)
+    user_id      = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"),
+                          nullable=False, index=True)
+    file_id      = Column(String(32), nullable=False)   # MD5 hex from UserDocument
+    topic        = Column(String(200), nullable=False)
+    mastery_pct  = Column(Float,   nullable=False, server_default="50.0")
+    quiz_count   = Column(Integer, nullable=False, server_default="0")
+    last_updated = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    __table_args__ = (UniqueConstraint("user_id", "file_id", name="uq_user_file_mastery"),)
+
+
 # ── DB engine ─────────────────────────────────────────────────────────────────
 os.makedirs("./data", exist_ok=True)  # ensure data/ exists before SQLite opens it
 _db_engine  = create_engine("sqlite:///./data/chat.db", connect_args={"check_same_thread": False})

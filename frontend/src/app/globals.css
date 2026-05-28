@@ -11,6 +11,19 @@
 
 @theme inline {
   --font-sans: var(--font-heebo);
+
+  /* ── Matcha design-system palette ──────────────────────────────────────── */
+  --color-matcha-50:  #f1fdf0;
+  --color-matcha-100: #e4fbe2;
+  --color-matcha-200: #c8f5c5;
+  --color-matcha-300: #9de899;
+  --color-matcha-400: #6dd369;
+  --color-matcha-500: #4ab846;
+  --color-matcha-600: #517B3E;
+  --color-matcha-700: #3d6030;
+  --color-matcha-800: #2A3B22;
+  --color-matcha-900: #1a2e14;
+  --color-matcha-950: #0d1a0b;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -51,6 +64,24 @@
   50%       { box-shadow: 0 0 0 5px rgba(81,123,62,0.28), 0 0 10px rgba(81,123,62,0.16); }
 }
 
+/* ── Matcha Oasis shared animations ─────────────────────────────────────── */
+@keyframes masteryPulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.74; }
+}
+@keyframes oasisGlow {
+  0%, 100% { box-shadow: 0 0 18px rgba(81,123,62,.22); }
+  50%       { box-shadow: 0 0 36px rgba(81,123,62,.52); }
+}
+@keyframes subtleDrift {
+  0%   { transform: translate(0, 0) rotate(0deg); }
+  100% { transform: translate(30px, 30px) rotate(10deg); }
+}
+@keyframes jewelGlow {
+  0%, 100% { filter: drop-shadow(0 2px 6px rgba(81,123,62,0.28)); }
+  50%       { filter: drop-shadow(0 4px 18px rgba(81,123,62,0.65)); }
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
    TAILWIND CUSTOM UTILITIES
 ══════════════════════════════════════════════════════════════════════════ */
@@ -64,14 +95,21 @@
   .reveal-hidden           { opacity: 0; transform: scale(0.95) translateY(30px); will-change: opacity, transform; }
   /* Prof-Sim AI processing — brain icon ring glow */
   .animate-brain-ring      { animation: brain-ring-glow 1.6s ease-in-out infinite; }
+
+  /* ── Matcha Oasis utility animations ────────────────────────────────────── */
+  .animate-mastery-pulse   { animation: masteryPulse 3.5s ease-in-out infinite; }
+  .animate-oasis-glow      { animation: oasisGlow 2.5s ease-in-out infinite; }
+  .animate-subtle-drift    { animation: subtleDrift 20s linear infinite alternate; }
+  .animate-jewel-glow      { animation: jewelGlow 2.2s ease-in-out infinite; }
+  .floating-leaf           { position: absolute; opacity: 0.12; pointer-events: none; animation: subtleDrift 20s linear infinite alternate; }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
    BASE STYLES
 ══════════════════════════════════════════════════════════════════════════ */
 body {
-  background-color: #F2F5F1;
-  color: #1E293B;
+  background-color: #F9FCFA;
+  color: #1C3329;
 }
 
 /* ── Subtle paper/grain texture overlay ────────────────────────────────── */

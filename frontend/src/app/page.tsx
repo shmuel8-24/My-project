@@ -9,7 +9,7 @@ import { landing } from './locales/landing';
 
 type Mode = 'magic' | 'password';
 type ForgotView = 'email' | 'sent' | null;
-const WORKSPACE_ROUTE = '/workspace';
+const WORKSPACE_ROUTE = '/dashboard';
 
 /* ─── Shared input focus/blur handlers ───────────────────────────────────── */
 const focusInput = (e: React.FocusEvent<HTMLInputElement>) => {
