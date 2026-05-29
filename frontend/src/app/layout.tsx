@@ -8,7 +8,7 @@ import { CourseProvider }          from "./providers/course";
 import { CommandPaletteProvider }  from "./providers/command-palette";
 import CommandPalette              from "../components/CommandPalette";
 import FloatingZenTimer            from "../components/FloatingZenTimer";
-import CharleyMascot               from "../components/CharleyMascot";
+import CharleyLottieMascot         from "../components/CharleyLottieMascot";
 
 const heebo = Heebo({
   subsets: ["hebrew", "latin"],
@@ -73,7 +73,7 @@ export default function RootLayout({
                 {children}
                 <CommandPalette />
                 <FloatingZenTimer />
-                <CharleyMascot />
+                <CharleyLottieMascot />
               </CommandPaletteProvider>
             </AuthProvider>
           </CourseProvider>
