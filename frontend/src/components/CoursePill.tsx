@@ -7,8 +7,8 @@
  * self-contained — no props needed.
  *
  * Behaviours:
- *  • No course selected  → shows "📚 בחר קורס ▾" → click routes to /dashboard
- *  • Course selected     → shows "🎯 [name] ▾"   → click routes to /dashboard
+ *  • No course selected  → shows "📚 בחר קורס ▾" → click routes to /course-picker
+ *  • Course selected     → shows icon + name ▾   → click routes to /course-picker
  *  • × button            → clears the selected course (user stays on current page)
  */
 
@@ -31,7 +31,7 @@ export default function CoursePill() {
   if (!selectedCourse) {
     return (
       <button
-        onClick={() => router.push('/dashboard')}
+        onClick={() => router.push('/course-picker')}
         className={pillBase}
       >
         <span className="text-base leading-none">📚</span>
@@ -47,7 +47,7 @@ export default function CoursePill() {
     <div className="flex items-center gap-1.5">
       {/* Main pill — routes to dashboard to view / re-select */}
       <button
-        onClick={() => router.push('/dashboard')}
+        onClick={() => router.push('/course-picker')}
         className={pillBase}
       >
         <span className="text-base leading-none">{selectedCourse.icon}</span>

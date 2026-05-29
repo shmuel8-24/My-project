@@ -6,6 +6,7 @@ import { useAuth }     from '../providers/auth';
 import { useLanguage } from '../providers/language';
 import { useCourse, COURSES, type Course } from '../providers/course';
 import CoursePill from '../../components/CoursePill';
+import Skeleton   from '../../components/ui/Skeleton';
 
 const API = 'http://127.0.0.1:5003';
 
@@ -102,12 +103,21 @@ function HeroCard({ icon, value, label, bg, fg }: {
   icon: string; value: number; label: string; bg: string; fg: string;
 }) {
   return (
-    <div className="rounded-2xl p-5 flex flex-col gap-2.5" style={{ background: bg }}>
-      <span style={{ fontSize: '1.625rem', lineHeight: 1 }}>{icon}</span>
-      <p style={{ color: fg, fontWeight: 800, fontSize: '2rem', lineHeight: 1 }}>
+    <div
+      className="rounded-3xl p-5 flex flex-col gap-2 transition-all duration-200 hover:-translate-y-0.5"
+      style={{
+        background: bg,
+        border: '1px solid rgba(255,255,255,0.72)',
+        boxShadow: '0 4px 6px -1px rgba(28,51,41,0.04), 0 2px 4px -2px rgba(28,51,41,0.03)',
+      }}
+      onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 12px 32px rgba(28,51,41,0.08)'; }}
+      onMouseLeave={e => { e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(28,51,41,0.04), 0 2px 4px -2px rgba(28,51,41,0.03)'; }}
+    >
+      <span style={{ fontSize: '1.5rem', lineHeight: 1 }}>{icon}</span>
+      <p style={{ color: fg, fontWeight: 800, fontSize: '1.875rem', lineHeight: 1, letterSpacing: '-0.02em' }}>
         {value.toLocaleString()}
       </p>
-      <p style={{ color: fg, opacity: 0.72, fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+      <p style={{ color: fg, opacity: 0.65, fontSize: '0.6875rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
         {label}
       </p>
     </div>
@@ -152,15 +162,17 @@ function CourseOptionCard({ course, he, onSelect }: { course: Course; he: boolea
 function CrystalCard({ icon, title, subtitle, onClick }: { icon: string; title: string; subtitle: string; onClick: () => void }) {
   return (
     <button onClick={onClick}
-      className="flex flex-col items-center gap-3 p-6 rounded-2xl text-center w-full"
+      className="flex flex-col items-center gap-3 p-7 rounded-2xl text-center w-full active:scale-95"
       style={{
-        background: D.crystalBg, backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)',
-        border: '1px solid rgba(255,255,255,0.16)',
-        boxShadow: '0 4px 20px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.08)',
-        transition: 'transform 0.18s ease, box-shadow 0.18s ease',
+        background:           'rgba(255,255,255,0.72)',
+        backdropFilter:       'blur(20px)',
+        WebkitBackdropFilter: 'blur(20px)',
+        border:               '1px solid rgba(255,255,255,0.85)',
+        boxShadow:            '0 4px 6px -1px rgba(28,51,41,0.04), 0 2px 4px -2px rgba(28,51,41,0.03)',
+        transition:           'transform 0.22s cubic-bezier(0.34,1.28,0.64,1), box-shadow 0.22s ease',
       }}
-      onMouseEnter={e => { e.currentTarget.style.transform='translateY(-5px)'; e.currentTarget.style.boxShadow='0 20px 48px rgba(0,0,0,0.40), inset 0 1px 0 rgba(255,255,255,0.12)'; }}
-      onMouseLeave={e => { e.currentTarget.style.transform='translateY(0)'; e.currentTarget.style.boxShadow='0 4px 20px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.08)'; }}
+      onMouseEnter={e => { e.currentTarget.style.transform='translateY(-4px)'; e.currentTarget.style.boxShadow='0 20px 48px rgba(28,51,41,0.10), 0 8px 16px rgba(28,51,41,0.06)'; }}
+      onMouseLeave={e => { e.currentTarget.style.transform='translateY(0)'; e.currentTarget.style.boxShadow='0 4px 6px -1px rgba(28,51,41,0.04), 0 2px 4px -2px rgba(28,51,41,0.03)'; }}
     >
       <span style={{ fontSize: '2rem', lineHeight: 1 }}>{icon}</span>
       <div>
@@ -263,23 +275,23 @@ function DashboardSidebar({ isOpen, onClose, isAdmin, lang, userFirstName, userL
         <div className="flex-1 overflow-y-auto flex flex-col">
           <div className="px-3 py-3 space-y-1 shrink-0" style={{ borderBottom: '1px solid #E8F0EB' }}>
             <p className="text-[10px] font-semibold text-[#527061] uppercase tracking-widest px-2 mb-2">Navigation</p>
-            <button className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-bold"
-              style={{ backgroundColor: '#D1E6D9', color: '#183025' }}>
+            <button className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold"
+              style={{ backgroundColor: '#D1E6D9', color: '#183025', boxShadow: '0 2px 4px rgba(28,51,41,0.06)' }}>
               <span className="text-base leading-none shrink-0">🏠</span>{he ? 'בית' : 'Home'}
             </button>
             <button onClick={() => { router.push('/workspace'); onClose(); }}
-              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-[#1C3329]/70 transition-all hover:bg-[#EEF5F0] hover:text-[#1C3329]">
+              className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-[#527061] transition-all duration-150 hover:bg-[#EEF5F0] hover:text-[#1C3329]">
               <span className="text-base leading-none shrink-0">🌱</span>{he ? 'מרחב לימוד' : 'StudyLab'}
             </button>
             <button onClick={() => { router.push('/workspace/professor-simulator'); onClose(); }}
-              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-[#1C3329]/70 transition-all hover:bg-[#EEF5F0] hover:text-[#1C3329]">
+              className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-[#527061] transition-all duration-150 hover:bg-[#EEF5F0] hover:text-[#1C3329]">
               <span className="text-base leading-none shrink-0">🧠</span>{he ? 'הראש של המרצה' : "Professor's Brain"}
             </button>
             <button onClick={() => { router.push('/mastery'); onClose(); }}
-              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-[#1C3329]/70 transition-all hover:bg-[#EEF5F0] hover:text-[#1C3329]">
+              className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-[#527061] transition-all duration-150 hover:bg-[#EEF5F0] hover:text-[#1C3329]">
               <span className="text-base leading-none shrink-0">🎯</span>{he ? 'שליטה בחומר' : 'Mastery'}
             </button>
-            <button disabled className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-[#527061] cursor-not-allowed opacity-50">
+            <button disabled className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-[#527061] cursor-not-allowed opacity-40">
               <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 0 1 6 18.719m12 0a5.971 5.971 0 0 0-.941-3.197m0 0A5.995 5.995 0 0 0 12 12.75a5.995 5.995 0 0 0-5.058 2.772m0 0a3 3 0 0 0-4.681 2.72 8.986 8.986 0 0 0 3.74.477m.94-3.197a5.971 5.971 0 0 0-.94 3.197M15 6.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm6 3a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm-13.5 0a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Z" />
               </svg>
@@ -329,12 +341,13 @@ export default function DashboardPage() {
   const router = useRouter();
   const { user: authUser, isLoading: authLoading } = useAuth();
   const { lang, toggleLanguage } = useLanguage();
-  const { selectedCourse, setSelectedCourse } = useCourse();
+  const { selectedCourse, setSelectedCourse, courseHydrated } = useCourse();
   const he = lang === 'he';
 
   const [sidebarOpen,        setSidebarOpen]        = useState(false);
   const [showLogoutModal,    setShowLogoutModal]    = useState(false);
   const [profilePopoverOpen, setProfilePopoverOpen] = useState(false);
+  const [headerScrolled,     setHeaderScrolled]     = useState(false);
   const profilePopoverRef = useRef<HTMLDivElement>(null);
   const [materials,        setMaterials]        = useState<Material[]>([]);
   const [materialsLoading, setMaterialsLoading] = useState(true);
@@ -356,6 +369,18 @@ export default function DashboardPage() {
     if (authLoading) return;
     if (!authUser) router.replace('/?login=true');
   }, [authLoading, authUser, router]);
+
+  useEffect(() => {
+    function onScroll() { setHeaderScrolled(window.scrollY > 4); }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  useEffect(() => {
+    if (authLoading || !authUser) return;
+    if (!courseHydrated) return;
+    if (!selectedCourse) router.replace('/course-picker');
+  }, [authLoading, authUser, courseHydrated, selectedCourse, router]);
 
   useEffect(() => {
     const h = (e: MouseEvent) => { if (profilePopoverRef.current && !profilePopoverRef.current.contains(e.target as Node)) setProfilePopoverOpen(false); };
@@ -397,10 +422,28 @@ export default function DashboardPage() {
     window.location.href = '/';
   }, []);
 
-  if (authLoading || !authUser) {
+  if (authLoading || !authUser || !courseHydrated || !selectedCourse) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: D.pageBg }}>
-        <Spinner />
+      <div dir={he ? 'rtl' : 'ltr'} className="min-h-screen flex flex-col" style={{ background: D.pageBg }}>
+        {/* Header skeleton */}
+        <div className="h-[60px] shrink-0 flex items-center justify-between px-4 border-b border-[#E2EBE5]"
+          style={{ background: D.headerBg, backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' }}>
+          <div className="flex items-center gap-3">
+            <Skeleton className="w-8 h-8 rounded-lg" />
+            <Skeleton className="w-24 h-8 rounded-xl" />
+          </div>
+          <Skeleton className="w-28 h-8 rounded-full" />
+          <Skeleton className="w-20 h-8 rounded-full" />
+        </div>
+        {/* Body skeleton */}
+        <div className="flex-1 px-4 py-8 max-w-3xl mx-auto w-full flex flex-col gap-6">
+          <Skeleton className="w-52 h-7 rounded-xl" />
+          <div className="grid grid-cols-3 gap-4">
+            {[0, 1, 2].map(i => <Skeleton key={i} className="h-28 rounded-2xl" />)}
+          </div>
+          <Skeleton className="w-36 h-5 rounded-xl" />
+          {[0, 1, 2].map(i => <Skeleton key={i} className="h-16 rounded-2xl" />)}
+        </div>
       </div>
     );
   }
@@ -427,7 +470,14 @@ export default function DashboardPage() {
 
       {/* Dark glass header */}
       <header className="shrink-0 relative z-30"
-        style={{ background: D.headerBg, backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', borderBottom: '1px solid #E2EBE5' }}>
+        style={{
+          background:           D.headerBg,
+          backdropFilter:       'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)',
+          borderBottom:         '1px solid #E2EBE5',
+          boxShadow:            headerScrolled ? '0 4px 16px rgba(28,51,41,0.07)' : 'none',
+          transition:           'box-shadow 0.3s ease',
+        }}>
         <div className="max-w-full px-4 py-3 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <button onClick={() => setSidebarOpen(true)} className="p-2 rounded-lg text-[#1C3329] hover:bg-[#EEF5F0] transition-all">
@@ -485,9 +535,16 @@ export default function DashboardPage() {
       <main className="flex-1 flex flex-col py-8 px-4 md:px-8 relative" style={{ zIndex: 1 }}>
         <div className="w-full max-w-2xl mx-auto flex flex-col gap-8">
 
-          {/* Greeting hero */}
-          <div className="rounded-3xl px-8 py-8 flex flex-col items-center gap-3 text-center"
-            style={{ background:'rgba(255,255,255,0.50)', backdropFilter:'blur(28px)', WebkitBackdropFilter:'blur(28px)', border:'1px solid rgba(255,255,255,0.82)', boxShadow:'0 8px 40px rgba(60,90,40,0.09), inset 0 1px 0 rgba(255,255,255,0.95)' }}>
+          {/* Greeting hero — premium glassmorphic banner */}
+          <div className="rounded-3xl px-8 py-8 flex flex-col items-center gap-3 text-center relative overflow-hidden"
+            style={{ background:'rgba(255,255,255,0.62)', backdropFilter:'blur(28px)', WebkitBackdropFilter:'blur(28px)', border:'1px solid rgba(255,255,255,0.88)', boxShadow:'0 4px 6px -1px rgba(28,51,41,0.04), 0 2px 4px -2px rgba(28,51,41,0.03)' }}>
+            {/* Background gradient watermarks */}
+            <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-3xl" aria-hidden="true">
+              <div style={{ position:'absolute', top:'-40%', insetInlineEnd:'-8%', width:'55%', height:'220%', background:'radial-gradient(ellipse at center, rgba(81,123,62,0.07) 0%, transparent 68%)', transform:'rotate(12deg)' }} />
+              <div style={{ position:'absolute', bottom:'-30%', insetInlineStart:'-6%', width:'48%', height:'180%', background:'radial-gradient(ellipse at center, rgba(74,222,128,0.05) 0%, transparent 68%)' }} />
+              <div style={{ position:'absolute', top:'20%', left:'50%', width:'30%', height:'60%', background:'radial-gradient(ellipse at center, rgba(249,220,139,0.04) 0%, transparent 70%)' }} />
+            </div>
+            <div className="relative z-10 flex flex-col items-center gap-3 w-full">
             <h1 style={{ color:D.textPrimary, fontSize:'1.5rem', fontWeight:800, letterSpacing:'-0.02em' }}>
               {he ? `שלום, ${userFirstName || 'סטודנט'}! 👋` : `Hello, ${userFirstName || 'Student'}! 👋`}
             </h1>
@@ -504,6 +561,7 @@ export default function DashboardPage() {
                 ))}
               </div>
             )}
+            </div>{/* /relative z-10 */}
           </div>
 
           {/* ── Hero stat cards ─────────────────────────────────────────── */}

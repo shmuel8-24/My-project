@@ -7,6 +7,8 @@ import { useLanguage }   from '../providers/language';
 import { useCourse }     from '../providers/course';
 import NoCourseState     from '../../components/NoCourseState';
 import CoursePill        from '../../components/CoursePill';
+import Skeleton          from '../../components/ui/Skeleton';
+import { playSuccess }   from '../../utils/audio';
 
 const API = 'http://127.0.0.1:5003';
 
@@ -499,7 +501,7 @@ function GapCardUI({ card, he, onTest }: {
       <div className="flex flex-col items-start gap-1.5 mt-1">
         <button
           onClick={() => onTest(card.topic, card.id)}
-          className="animate-jewel-glow flex items-center gap-2.5 px-5 py-3 rounded-2xl text-sm font-bold text-white"
+          className="animate-jewel-glow flex items-center gap-2.5 px-5 py-3 rounded-2xl text-sm font-bold text-white active:scale-95 transition-transform duration-150"
           style={{
             background: 'linear-gradient(135deg, #517B3E 0%, #2A3B22 100%)',
             boxShadow: '0 4px 20px rgba(81,123,62,0.38)',
@@ -706,6 +708,7 @@ export default function MasteryPage() {
   const [showLogoutModal,    setShowLogoutModal]    = useState(false);
   const [profilePopoverOpen, setProfilePopoverOpen] = useState(false);
   const profilePopoverRef = useRef<HTMLDivElement>(null);
+  const [headerScrolled, setHeaderScrolled] = useState(false);
 
   // ── Topics state (dynamic, from backend) ──────────────────────────────────
   const [topics,        setTopics]        = useState<GapCard[]>([]);
@@ -744,6 +747,13 @@ export default function MasteryPage() {
     if (authLoading) return;
     if (!authUser) router.replace('/?login=true');
   }, [authLoading, authUser, router]);
+
+  // ── Header scroll depth ────────────────────────────────────────────────────
+  useEffect(() => {
+    function onScroll() { setHeaderScrolled(window.scrollY > 4); }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
 
   // ── Click-outside profile popover ─────────────────────────────────────────
   useEffect(() => {
@@ -821,6 +831,32 @@ export default function MasteryPage() {
       const data = await res.json() as { mastery_pct: number; file_id: string };
       setNewMasteryPct(data.mastery_pct);
       setSubmitState('success');
+      if (score / total >= 0.9) {
+        playSuccess();
+        void import('canvas-confetti').then(({ default: confetti }) => {
+          void confetti({
+            particleCount: 80, spread: 65, startVelocity: 28,
+            gravity: 0.70, decay: 0.93, ticks: 350,
+            colors: ['#4ADE80', '#D1E6D9', '#1C3329', '#F9DE8B'],
+            shapes: ['circle', 'square'],
+            origin: { y: 0.65 },
+          });
+          setTimeout(() => void confetti({
+            particleCount: 40, spread: 90, startVelocity: 18,
+            gravity: 0.50, decay: 0.95, ticks: 300,
+            colors: ['#4ADE80', '#F9DE8B', '#D1E6D9'],
+            shapes: ['circle'],
+            origin: { x: 0.20, y: 0.75 },
+          }), 350);
+          setTimeout(() => void confetti({
+            particleCount: 35, spread: 85, startVelocity: 16,
+            gravity: 0.45, decay: 0.95, ticks: 300,
+            colors: ['#4ADE80', '#F9DE8B'],
+            shapes: ['circle'],
+            origin: { x: 0.80, y: 0.75 },
+          }), 500);
+        });
+      }
       setTopics(prev => prev.map(t =>
         t.id === data.file_id
           ? { ...t, mastery: Math.round(data.mastery_pct), quiz_count: t.quiz_count + 1 }
@@ -911,8 +947,29 @@ export default function MasteryPage() {
 
   if (authLoading || !authUser) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: '#F2F5F1' }}>
-        <Spinner />
+      <div dir={he ? 'rtl' : 'ltr'} className="min-h-screen flex flex-col" style={{ background: '#F2F5F1' }}>
+        {/* Header */}
+        <div className="h-[60px] shrink-0 flex items-center justify-between px-4 border-b border-[#E2EBE5]"
+          style={{ background: 'rgba(255,255,255,0.82)', backdropFilter: 'blur(16px)' }}>
+          <Skeleton className="w-8 h-8 rounded-lg" />
+          <Skeleton className="w-28 h-6 rounded-xl" />
+          <Skeleton className="w-20 h-8 rounded-full" />
+        </div>
+        {/* Body — mimics the topic card grid */}
+        <div className="flex-1 max-w-3xl mx-auto w-full px-4 py-8 flex flex-col gap-5">
+          <Skeleton className="w-44 h-7 rounded-xl" />
+          <Skeleton className="w-full h-24 rounded-2xl" />
+          {[0, 1, 2, 3].map(i => (
+            <div key={i} className="flex items-center gap-4 p-5 rounded-2xl bg-white/50">
+              <Skeleton className="w-12 h-12 rounded-xl shrink-0" />
+              <div className="flex-1 flex flex-col gap-2.5">
+                <Skeleton className="w-36 h-4 rounded-lg" />
+                <Skeleton className="w-full h-2.5 rounded-full" />
+              </div>
+              <Skeleton className="w-24 h-9 rounded-xl shrink-0" />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -988,7 +1045,14 @@ export default function MasteryPage() {
 
       {/* ── Header ── */}
       <header className="shrink-0 relative z-30"
-        style={{ background: 'rgba(255,255,255,0.82)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', borderBottom: '1px solid #E2EBE5' }}>
+        style={{
+          background:           'rgba(255,255,255,0.82)',
+          backdropFilter:       'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)',
+          borderBottom:         '1px solid #E2EBE5',
+          boxShadow:            headerScrolled ? '0 4px 16px rgba(28,51,41,0.07)' : 'none',
+          transition:           'box-shadow 0.3s ease',
+        }}>
         <div className="max-w-full px-4 py-3 flex items-center justify-between gap-3">
 
           <div className="flex items-center gap-3">
@@ -1116,20 +1180,19 @@ export default function MasteryPage() {
 
           {/* Topics section — loading / empty / populated */}
           {topicsLoading ? (
-            <div
-              className="rounded-3xl px-8 py-16 flex flex-col items-center gap-5 text-center"
-              style={{
-                background: 'rgba(255,255,255,0.42)',
-                backdropFilter: 'blur(22px)',
-                WebkitBackdropFilter: 'blur(22px)',
-                border: '1px solid rgba(255,255,255,0.48)',
-                boxShadow: '0 4px 24px rgba(60,90,40,0.07)',
-              }}
-            >
-              <Spinner large />
-              <p className="text-sm font-medium text-[#7a9268]">
-                {he ? 'הבינה המלאכותית טוענת את הנושאים שלך...' : 'The AI is loading your topics…'}
-              </p>
+            <div className="flex flex-col gap-4">
+              {[0, 1, 2, 3].map(i => (
+                <div key={i} className="flex items-center gap-4 p-5 rounded-3xl"
+                  style={{ background: 'rgba(255,255,255,0.42)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.52)' }}>
+                  <Skeleton className="w-12 h-12 rounded-xl shrink-0" />
+                  <div className="flex-1 flex flex-col gap-2.5">
+                    <Skeleton className="w-40 h-4 rounded-lg" />
+                    <Skeleton className="w-full h-2.5 rounded-full" />
+                    <Skeleton className="w-24 h-3 rounded-md" />
+                  </div>
+                  <Skeleton className="w-24 h-10 rounded-2xl shrink-0" />
+                </div>
+              ))}
             </div>
           ) : topics.length === 0 ? (
             <div

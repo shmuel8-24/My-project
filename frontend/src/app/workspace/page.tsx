@@ -6,6 +6,11 @@ import { useAuth }       from '../providers/auth';
 import { useCourse }     from '../providers/course';
 import NoCourseState     from '../../components/NoCourseState';
 import CoursePill        from '../../components/CoursePill';
+import SelectionPopover  from '../../components/SelectionPopover';
+import { CodeBlockPre, InlineCode }  from '../../components/CodeBlock';
+import AIThinkingIndicator           from '../../components/AIThinkingIndicator';
+import { useHaptics }                from '../../hooks/useHaptics';
+import { playPop, getSoundEnabled, toggleSound } from '../../utils/audio';
 import type { KeyboardEvent, ChangeEvent } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useDropzone } from 'react-dropzone';
@@ -166,7 +171,7 @@ const translations = {
     docReady: 'מסמך מוכן – ניתן לשאול שאלות',
     waitingPdf: 'ממתין לקובץ PDF',
     askQ: 'שאל שאלה על המסמך',
-    uploadToStart: 'העלה מסמך PDF כדי להתחיל',
+    uploadToStart: 'עדיין קצת ריק פה 🌱 בוא נעלה את הסיכום הראשון',
     askHint: 'ניתן לשאול בעברית, אנגלית, או שילוב של שתיהן',
     uploadSideHint: 'לחץ על אזור ההעלאה מצד ימין',
     suggestions: ['סכם את המסמך בקצרה', 'מה הנקודות העיקריות?', 'הסבר את הנושא הראשון', 'תן לי שאלות לתרגול'],
@@ -179,7 +184,7 @@ const translations = {
     seeCode: 'הצג קוד',
     hideCode: 'הסתר קוד',
     codeOutputLabel: 'פלט',
-    chatPlaceholder: 'שאל שאלה על המסמך...',
+    chatPlaceholder: 'מה לא היה ברור היום בשיעור? אפשר לשאול הכל...',
     chatPlaceholderNoDoc: 'יש להעלות קובץ תחילה',
     send: 'שלח',
     enterHint: 'Enter לשליחה · Shift+Enter לשורה חדשה',
@@ -1017,7 +1022,18 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
   const [availableDocs, setAvailableDocs] = useState<DocumentInfo[]>([]);
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
   const bottomRef   = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaRef          = useRef<HTMLTextAreaElement>(null);
+  const messagesContainerRef  = useRef<HTMLDivElement>(null);
+  const [chatScrolled, setChatScrolled] = useState(false);
+  const { triggerHaptic } = useHaptics();
+
+  function handleSelectionAction(action: 'explain' | 'summarize' | 'quiz', text: string) {
+    const q = lang === 'he'
+      ? { explain: `הסבר לי את הקטע הבא:\n"${text}"`, summarize: `תמצת לי:\n"${text}"`, quiz: `צור שאלת מבחן על:\n"${text}"` }
+      : { explain: `Explain this:\n"${text}"`, summarize: `Summarize:\n"${text}"`, quiz: `Create a quiz question about:\n"${text}"` };
+    setInput(q[action]);
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  }
 
   /* ── Voice recording ── */
   const [isRecording,    setIsRecording]    = useState(false);
@@ -1034,6 +1050,14 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
   const [quizKey,       setQuizKey]       = useState(0);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading]);
+
+  useEffect(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    function onScroll() { setChatScrolled((messagesContainerRef.current?.scrollTop ?? 0) > 4); }
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
 
   // Fetch document list whenever docs become available (for the filter chip bar).
   useEffect(() => {
@@ -1251,8 +1275,16 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
       boxShadow: '0 8px 30px rgba(0,0,0,0.04)',
     }}>
 
-      {/* Header */}
-      <div className="px-5 py-4 flex items-center gap-3 shrink-0" style={{ borderBottom: '1px solid rgba(157,192,139,0.3)' }}>
+      {/* Header — glassmorphic depth when messages are scrolled */}
+      <div className="px-5 py-4 flex items-center gap-3 shrink-0"
+        style={{
+          borderBottom:         '1px solid rgba(157,192,139,0.3)',
+          boxShadow:            chatScrolled ? '0 4px 12px rgba(28,51,41,0.06)' : 'none',
+          background:           chatScrolled ? 'rgba(255,255,255,0.88)' : 'transparent',
+          backdropFilter:       chatScrolled ? 'blur(8px)' : 'none',
+          WebkitBackdropFilter: chatScrolled ? 'blur(8px)' : 'none',
+          transition:           'box-shadow 0.25s ease, background 0.25s ease',
+        }}>
         <span className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'rgba(81,123,62,0.12)', border: '1px solid rgba(81,123,62,0.2)' }}>
           <IconSparkles className="w-5 h-5 text-[#517B3E]" />
         </span>
@@ -1267,7 +1299,7 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
           <button
             onClick={() => { setQuizOpen(true); void fetchQuiz(); }}
             disabled={quizLoading}
-            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
+            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all active:scale-95 hover:shadow-[0_6px_20px_rgba(209,230,217,0.5)]"
             style={{
               background: 'rgba(81,123,62,0.1)',
               border:     '1.5px solid rgba(81,123,62,0.3)',
@@ -1317,7 +1349,7 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
       )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-3 min-h-0">
+      <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-3 min-h-0">
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-5 py-12 flex-1 text-center">
             <div className="w-20 h-20 rounded-3xl flex items-center justify-center" style={{ background: 'rgba(81,123,62,0.08)', border: '1px solid rgba(81,123,62,0.15)' }}>
@@ -1343,7 +1375,7 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
           </div>
         ) : (
           <>
-            {messages.map(msg => (
+            {messages.map((msg, idx) => (
               <div key={msg.id} className={`flex ${msg.role === 'user' ? userAlign : aiAlign}`}>
                 <div className="flex flex-col gap-1.5 max-w-[78%]">
                   <div dir="auto"
@@ -1355,7 +1387,17 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
                     ].join(' ')}
                     style={msg.role === 'user'
                       ? { background: '#9DC08B', color: '#1a2e14', boxShadow: '0 2px 8px rgba(81,123,62,0.18)' }
-                      : { background: 'rgba(255,255,255,0.90)', color: '#2A3B22', border: '1px solid rgba(157,192,139,0.3)', boxShadow: '0 2px 8px rgba(60,90,40,0.07)' }}>
+                      : {
+                          background: 'rgba(255,255,255,0.90)',
+                          color:      '#2A3B22',
+                          border:     loading && idx === messages.length - 1
+                            ? '1px solid rgba(74,222,128,0.35)'
+                            : '1px solid rgba(157,192,139,0.3)',
+                          boxShadow:  loading && idx === messages.length - 1
+                            ? '0 2px 8px rgba(60,90,40,0.07), 0 0 18px rgba(74,222,128,0.12)'
+                            : '0 2px 8px rgba(60,90,40,0.07)',
+                          transition: 'border-color 0.3s ease, box-shadow 0.3s ease',
+                        }}>
                     {msg.role === 'user' ? msg.content : (
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm, remarkMath]}
@@ -1373,23 +1415,15 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
                               {children}
                             </blockquote>
                           ),
-                          pre: ({ children }) => (
-                            <div className="my-2" style={{ background: '#1a2e14', borderRadius: 10, border: '1px solid rgba(81,123,62,0.18)', overflow: 'hidden' }}>
-                              <pre dir="ltr" style={{ direction: 'ltr', textAlign: 'left', unicodeBidi: 'embed', margin: 0 }}
-                                className="p-4 overflow-x-auto text-left">
-                                {children}
-                              </pre>
-                            </div>
-                          ),
+                          pre: CodeBlockPre,
                           code: ({ className, children }) => {
-                            const isBlock = !!className || String(children).includes('\n');
-                            if (isBlock) return (
+                            if (className) return (
                               <code dir="ltr" style={{ direction: 'ltr', textAlign: 'left', unicodeBidi: 'embed' }}
-                                className={`${className ?? ''} text-[#9DC08B] text-[11px] font-mono leading-relaxed`}>
+                                className={`${className} text-[#9DC08B] text-[11px] font-mono leading-relaxed`}>
                                 {children}
                               </code>
                             );
-                            return <code className="px-1.5 py-0.5 rounded text-[11px] font-mono" style={{ background: 'rgba(81,123,62,0.1)', color: '#517B3E' }}>{children}</code>;
+                            return <InlineCode>{children}</InlineCode>;
                           },
                           ul: ({ children }) => <ul className="list-disc ps-4 my-1.5 space-y-0.5">{children}</ul>,
                           ol: ({ children }) => <ol className="list-decimal ps-4 my-1.5 space-y-0.5">{children}</ol>,
@@ -1501,30 +1535,14 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
               </div>
             ))}
 
-            {/* Loading indicator */}
+            {/* AI thinking indicator */}
             {loading && (
               <div className={`flex ${aiAlign}`}>
-                <div className="rounded-2xl rounded-tl-sm px-5 py-3.5" style={{ background: 'rgba(255,255,255,0.90)', border: '1px solid rgba(157,192,139,0.3)', boxShadow: '0 2px 8px rgba(60,90,40,0.07)' }}>
-                  {searchPhase === 'searching_web' ? (
-                    <div className="flex items-center gap-2">
-                      <div className="w-3.5 h-3.5 rounded-full border-2 border-[#9DC08B]/30 border-t-[#517B3E] animate-spin shrink-0" />
-                      <span className="text-xs text-[#517B3E] font-medium">{t.searchingWeb}</span>
-                    </div>
-                  ) : searchPhase === 'running_code' ? (
-                    <div className="flex items-center gap-2">
-                      <div className="w-3.5 h-3.5 rounded-full border-2 border-[#9DC08B]/30 border-t-[#517B3E] animate-spin shrink-0" />
-                      <IconCode className="w-3 h-3 text-[#517B3E] shrink-0" />
-                      <span className="text-xs text-[#517B3E] font-medium">{t.runningCode}</span>
-                    </div>
-                  ) : (
-                    <div className="flex gap-1.5 items-center">
-                      {[0, 150, 300].map(d => (
-                        <span key={d} className="w-2 h-2 rounded-full bg-[#9DC08B] animate-pulse"
-                          style={{ animationDelay: `${d}ms` }} />
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <AIThinkingIndicator
+                  phase={searchPhase}
+                  searchingText={t.searchingWeb}
+                  runningCodeText={t.runningCode}
+                />
               </div>
             )}
             <div ref={bottomRef} />
@@ -1532,8 +1550,11 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
         )}
       </div>
 
-      {/* Input area */}
-      <div className={`px-4 pb-4 pt-3 shrink-0 transition-opacity ${!hasDoc ? 'opacity-40' : ''}`} style={{ borderTop: '1px solid rgba(157,192,139,0.3)' }}>
+      {/* Input area — pb uses safe-area-inset-bottom so the iOS keyboard doesn't cover it */}
+      <div
+        className={`px-4 pt-3 shrink-0 transition-opacity ${!hasDoc ? 'opacity-40' : ''}`}
+        style={{ borderTop: '1px solid rgba(157,192,139,0.3)', paddingBottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}
+      >
         <div className={[
           'flex items-end gap-2 rounded-2xl px-4 py-2.5 transition-all duration-150',
           !hasDoc ? 'pointer-events-none' : '',
@@ -1584,10 +1605,10 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
 
           {/* ── Send button ── */}
           <button
-            onClick={() => send()}
+            onClick={() => { playPop(); triggerHaptic('light'); send(); }}
             disabled={!hasDoc || !input.trim() || loading || isRecording || isTranscribing}
             aria-label={t.send}
-            className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-all active:scale-95 disabled:cursor-not-allowed"
+            className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-all active:scale-95 disabled:cursor-not-allowed hover:shadow-[0_8px_30px_rgba(209,230,217,0.5)]"
             style={{ backgroundColor: (!hasDoc || !input.trim() || loading || isRecording || isTranscribing) ? 'rgba(157,192,139,0.3)' : '#517B3E' }}>
             <IconSend className="w-4 h-4 text-white" />
           </button>
@@ -1599,6 +1620,13 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
         )}
         <p className="text-center text-xs text-[#9aaf8a] mt-1 select-none">{t.enterHint}</p>
       </div>
+
+      {/* Selection action popover — fixed; responds to text highlighted inside the messages area */}
+      <SelectionPopover
+        containerRef={messagesContainerRef}
+        onAction={handleSelectionAction}
+        lang={lang}
+      />
 
       {/* Quiz overlay — fixed positioning covers the full viewport regardless of DOM parent */}
       {quizOpen && (
@@ -1779,6 +1807,11 @@ function PaperWriter({ hasDoc, t }: { hasDoc: boolean; t: T }) {
                 remarkPlugins={[remarkGfm, remarkMath]}
                 rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: '#cc0000', strict: false }]]}
                 components={{
+                  pre: CodeBlockPre,
+                  code: ({ className, children }) => {
+                    if (className) return <code dir="ltr" className={`${className} text-[#9DC08B] text-[11px] font-mono leading-relaxed`} style={{ direction: 'ltr', textAlign: 'left', unicodeBidi: 'embed' }}>{children}</code>;
+                    return <InlineCode>{children}</InlineCode>;
+                  },
                   h1: ({ children }) => <h1 className="text-2xl font-bold mb-4 pb-2 text-center" style={{ color: '#2A3B22', borderBottom: '1px solid rgba(157,192,139,0.4)' }}>{children}</h1>,
                   h2: ({ children }) => <h2 className="text-lg font-bold mt-7 mb-3" style={{ color: '#2A3B22' }}>{children}</h2>,
                   h3: ({ children }) => <h3 className="text-base font-semibold mt-5 mb-2" style={{ color: '#2d3b25' }}>{children}</h3>,
@@ -2571,7 +2604,10 @@ function Home() {
   const [showPricingModal, setShowPricingModal] = useState(false);
   const [rateLimitToast, setRateLimitToast]     = useState(false);
   const [profilePopoverOpen, setProfilePopoverOpen] = useState(false);
-  const profilePopoverRef = useRef<HTMLDivElement>(null);
+  const profilePopoverRef   = useRef<HTMLDivElement>(null);
+  const mainScrollRef       = useRef<HTMLDivElement>(null);
+  const [headerScrolled, setHeaderScrolled] = useState(false);
+  const [soundOn,         setSoundOn]        = useState(true);
 
   const t = translations[lang];
 
@@ -2605,6 +2641,23 @@ function Home() {
     };
     window.addEventListener('u-note-rate-limit', handle);
     return () => window.removeEventListener('u-note-rate-limit', handle);
+  }, []);
+
+  useEffect(() => {
+    const el = mainScrollRef.current;
+    if (!el) return;
+    function onScroll() { setHeaderScrolled((mainScrollRef.current?.scrollTop ?? 0) > 4); }
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
+
+  useEffect(() => {
+    Promise.resolve(null).then(() => setSoundOn(getSoundEnabled()));
+  }, []);
+
+  const handleSoundToggle = useCallback(() => {
+    const next = toggleSound();
+    setSoundOn(next);
   }, []);
 
   const fetchSessions = useCallback(async () => {
@@ -2761,10 +2814,12 @@ function Home() {
 
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <header className="shrink-0 relative z-30" style={{
-        background: 'rgba(255,255,255,0.82)',
-        backdropFilter: 'blur(16px)',
+        background:           'rgba(255,255,255,0.82)',
+        backdropFilter:       'blur(16px)',
         WebkitBackdropFilter: 'blur(16px)',
-        borderBottom: '1px solid #E2EBE5',
+        borderBottom:         '1px solid #E2EBE5',
+        boxShadow:            headerScrolled ? '0 4px 16px rgba(28,51,41,0.07)' : 'none',
+        transition:           'box-shadow 0.3s ease',
       }}>
         <div className="max-w-full px-4 py-3 flex items-center justify-between gap-3">
 
@@ -2784,6 +2839,25 @@ function Home() {
               <span className={`w-2 h-2 rounded-full transition-colors duration-500 ${hasDoc ? 'bg-[#527061] animate-pulse' : 'bg-[#D3E0D8]'}`} />
               <span className="text-sm font-medium text-[#527061]">{hasDoc ? t.docLoaded : t.waiting}</span>
             </div>
+            {/* Sound mute toggle */}
+            <button
+              onClick={handleSoundToggle}
+              aria-label={soundOn ? 'Mute sounds' : 'Unmute sounds'}
+              title={soundOn ? 'Mute sounds' : 'Unmute sounds'}
+              className="w-8 h-8 flex items-center justify-center rounded-full transition-all hover:bg-[#EEF5F0] border border-transparent hover:border-[#D3E0D8] active:scale-90"
+              style={{ color: soundOn ? '#527061' : '#A8C4B4' }}
+            >
+              {soundOn ? (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 0 1 0 12.728M16.463 8.288a5.25 5.25 0 0 1 0 7.424M6.75 8.25l4.72-4.72a.75.75 0 0 1 1.28.53v15.88a.75.75 0 0 1-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.009 9.009 0 0 1 2.25 12c0-.83.112-1.633.322-2.396C2.806 8.757 3.63 8.25 4.51 8.25H6.75Z" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 9.75 19.5 12m0 0 2.25 2.25M19.5 12l2.25-2.25M19.5 12l-2.25 2.25m-10.5-6 4.72-4.72a.75.75 0 0 1 1.28.53v15.88a.75.75 0 0 1-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 0 1 2.25 12c0-.83.112-1.633.322-2.396C2.806 8.757 3.63 8.25 4.51 8.25H6.75Z" />
+                </svg>
+              )}
+            </button>
+
             <button onClick={toggleLanguage} aria-label={`Switch to ${t.langLabel}`}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-[#EEF5F0] hover:bg-[#E8F0EB] border border-[#D3E0D8] rounded-full text-sm text-[#1C3329] font-semibold transition-all">
               <IconGlobe className="w-4 h-4 text-[#527061]" />
@@ -2931,7 +3005,7 @@ function Home() {
       )}
 
       {/* ── Main content ─────────────────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col overflow-y-auto">
+      <div ref={mainScrollRef} className="flex-1 flex flex-col overflow-y-auto">
         <div className="flex-1 flex flex-col max-w-7xl mx-auto w-full px-4 py-6 md:px-8 md:py-8">
         <main className="flex-1 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.03)] p-5 md:p-7 flex flex-col md:flex-row gap-5 md:gap-7 min-h-0 matcha-workspace-main" style={{ background: 'linear-gradient(135deg, rgba(240,248,235,0.92) 0%, rgba(246,251,241,0.95) 40%, rgba(237,246,229,0.90) 100%)' }}>
           <style dangerouslySetInnerHTML={{ __html: MATCHA_LEAF_CSS }} />

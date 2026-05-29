@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 
 export interface Course {
   id:    string;
@@ -11,30 +11,50 @@ export interface Course {
 
 export const COURSES: Course[] = [
   { id: 'infi1', name: 'אינפי 1',      icon: '📐', color: '#517B3E' },
-  { id: 'ds',    name: 'מבני נתונים', icon: '🔢', color: '#3b7bbf' },
+  { id: 'ds',    name: 'מבני נתונים', icon: '💻', color: '#3b7bbf' },
   { id: 'phys',  name: 'פיזיקה',       icon: '⚡', color: '#b45309' },
 ];
 
 interface CourseContextValue {
-  selectedCourse: Course | null;
+  selectedCourse:    Course | null;
   setSelectedCourse: (course: Course | null) => void;
+  courseHydrated:    boolean;
+  customCourses:     Course[];
+  addCustomCourse:   (course: Course) => void;
 }
 
 const CourseContext = createContext<CourseContextValue>({
   selectedCourse:    null,
   setSelectedCourse: () => {},
+  courseHydrated:    false,
+  customCourses:     [],
+  addCustomCourse:   () => {},
 });
 
 export function CourseProvider({ children }: { children: ReactNode }) {
-  const [selectedCourse, setSelectedCourseState] = useState<Course | null>(null);
+  const [selectedCourse,  setSelectedCourseState] = useState<Course | null>(null);
+  const [courseHydrated,  setCourseHydrated]      = useState(false);
+  const [customCourses,   setCustomCoursesState]  = useState<Course[]>([]);
 
   useEffect(() => {
-    const stored = localStorage.getItem('levy_ai_course');
-    if (!stored) return;
-    Promise.resolve(stored)
-      .then(s => JSON.parse(s) as Course)
-      .then(course => setSelectedCourseState(course))
-      .catch(() => localStorage.removeItem('levy_ai_course'));
+    const stored       = localStorage.getItem('levy_ai_course');
+    const storedCustom = localStorage.getItem('levy_ai_custom_courses');
+
+    const selectedP = Promise.resolve(stored)
+      .then(s => { if (!s) return null; return JSON.parse(s) as Course; })
+      .catch(() => null);
+
+    const customP = Promise.resolve(storedCustom)
+      .then(s => { if (!s) return [] as Course[]; return JSON.parse(s) as Course[]; })
+      .catch(() => [] as Course[]);
+
+    Promise.all([selectedP, customP])
+      .then(([course, courses]) => {
+        if (course) setSelectedCourseState(course);
+        if (courses.length) setCustomCoursesState(courses);
+        setCourseHydrated(true);
+      })
+      .catch(() => setCourseHydrated(true));
   }, []);
 
   const setSelectedCourse = (course: Course | null) => {
@@ -43,8 +63,16 @@ export function CourseProvider({ children }: { children: ReactNode }) {
     else localStorage.removeItem('levy_ai_course');
   };
 
+  const addCustomCourse = useCallback((course: Course) => {
+    setCustomCoursesState(prev => {
+      const updated = [...prev, course];
+      localStorage.setItem('levy_ai_custom_courses', JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
+
   return (
-    <CourseContext.Provider value={{ selectedCourse, setSelectedCourse }}>
+    <CourseContext.Provider value={{ selectedCourse, setSelectedCourse, courseHydrated, customCourses, addCustomCourse }}>
       {children}
     </CourseContext.Provider>
   );

@@ -52,7 +52,7 @@ export default function NoCourseState() {
         </div>
 
         <button
-          onClick={() => router.push('/dashboard')}
+          onClick={() => router.push('/course-picker')}
           style={{
             background: 'linear-gradient(135deg, #517B3E, #2A3B22)',
             color: 'white',

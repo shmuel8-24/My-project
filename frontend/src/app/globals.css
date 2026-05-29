@@ -82,6 +82,60 @@
   50%       { filter: drop-shadow(0 4px 18px rgba(81,123,62,0.65)); }
 }
 
+/* ── Skeleton shimmer sweep ──────────────────────────────────────────────── */
+@keyframes shimmer {
+  100% { transform: translateX(100%); }
+}
+
+/* ── Selection popover entrance ──────────────────────────────────────────── */
+@keyframes popoverIn {
+  from { opacity: 0; transform: translate(-50%, calc(-100% + 6px)) scale(0.95); }
+  to   { opacity: 1; transform: translate(-50%, -100%) scale(1); }
+}
+
+/* ── Charley the Owl mascot animations ──────────────────────────────────── */
+@keyframes charleyWave {
+  0%, 100% { transform: rotate(0deg) translateY(0); }
+  25%       { transform: rotate(-42deg) translateY(-5px); }
+  75%       { transform: rotate(14deg) translateY(-2px); }
+}
+@keyframes charleySip {
+  0%, 55%, 100% { transform: translateY(0) rotate(0deg); }
+  30%            { transform: translateY(-7px) rotate(-10deg); }
+}
+@keyframes charleySteam {
+  0%, 100% { opacity: 0.55; transform: translateY(0); }
+  50%       { opacity: 0;    transform: translateY(-7px); }
+}
+@keyframes charleyGlow {
+  0%, 100% { opacity: 0.06; }
+  50%       { opacity: 0.24; }
+}
+@keyframes charleyCursor {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+@keyframes charleyBob {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-4px); }
+}
+@keyframes charleyBreath {
+  0%, 100% { transform: scaleY(1); }
+  50%       { transform: scaleY(1.02); }
+}
+
+/* ── Course picker card entrance ─────────────────────────────────────────── */
+@keyframes courseCardEnter {
+  from { opacity: 0; transform: translateY(22px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+
+/* ── AI-recommended course pulsing glow ──────────────────────────────────── */
+@keyframes recommendedGlow {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(74,222,128,0.18), 0 0 14px rgba(74,222,128,0.10); }
+  50%       { box-shadow: 0 0 0 5px rgba(74,222,128,0.36), 0 0 28px rgba(74,222,128,0.24); }
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
    TAILWIND CUSTOM UTILITIES
 ══════════════════════════════════════════════════════════════════════════ */
@@ -102,14 +156,65 @@
   .animate-subtle-drift    { animation: subtleDrift 20s linear infinite alternate; }
   .animate-jewel-glow      { animation: jewelGlow 2.2s ease-in-out infinite; }
   .floating-leaf           { position: absolute; opacity: 0.12; pointer-events: none; animation: subtleDrift 20s linear infinite alternate; }
+  /* Course picker Netflix-style card entrance (delay set via inline animationDelay style) */
+  .animate-course-card     { animation: courseCardEnter 0.55s cubic-bezier(0.34, 1.28, 0.64, 1) 0s both; }
+  /* Alias requested by spec */
+  .animate-fade-in-up      { animation: courseCardEnter 0.6s ease-out 0s both; }
+  /* Mobile scrollable carousel — hide native scrollbar */
+  .hide-scrollbar                  { scrollbar-width: none; -ms-overflow-style: none; }
+  .hide-scrollbar::-webkit-scrollbar { display: none; }
+  /* Charley mascot utilities */
+  .animate-charley-wave    { animation: charleyWave 0.75s ease-in-out infinite; transform-box: fill-box; transform-origin: 30% 25%; }
+  .animate-charley-sip     { animation: charleySip 2.8s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+  .animate-charley-steam   { animation: charleySteam 1.6s ease-in-out infinite; }
+  .animate-charley-glow    { animation: charleyGlow 1.8s ease-in-out infinite; }
+  .animate-charley-cursor  { animation: charleyCursor 1s step-end infinite; }
+  .animate-charley-bob     { animation: charleyBob 0.55s ease-in-out infinite; }
+  .animate-charley-breath  { animation: charleyBreath 3s ease-in-out infinite; }
+  /* Backdrop / overlay fade-in */
+  .animate-fade-in         { animation: overlay-enter 0.25s ease-out both; }
+  /* Selection popover entrance */
+  .animate-popover-in      { animation: popoverIn 0.18s cubic-bezier(0.16,1,0.3,1) both; }
+  /* Liquid button — hover shadow; pair with active:scale-95 Tailwind class */
+  .btn-liquid:not(:disabled):hover  { box-shadow: 0 8px 30px rgba(209,230,217,0.50); }
+  .btn-liquid:not(:disabled):active { transform: scale(0.95); }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   KATEX PREMIUM STYLING
+   rehype-katex emits span.math.math-inline and span.math.math-display
+══════════════════════════════════════════════════════════════════════════ */
+
+span.math.math-inline {
+  display:          inline-block;
+  background-color: rgba(209, 230, 217, 0.38);
+  padding:          0.04em 0.28em;
+  border-radius:    3px;
+  font-size:        1.02em;
+  vertical-align:   middle;
+}
+
+span.math.math-display {
+  display:    block;
+  text-align: center;
+  overflow-x: auto;
+  padding:    0.6em 0;
+  margin:     0.8em 0;
+  font-size:  1.08em;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
    BASE STYLES
 ══════════════════════════════════════════════════════════════════════════ */
+
+html {
+  scroll-behavior: smooth;
+}
+
 body {
   background-color: #F9FCFA;
   color: #1C3329;
+  line-height: 1.625; /* leading-relaxed */
 }
 
 /* ── Subtle paper/grain texture overlay ────────────────────────────────── */
@@ -125,8 +230,12 @@ body::before {
   background-size: 180px 180px;
 }
 
-/* ── Warm scrollbar ─────────────────────────────────────────────────── */
-::-webkit-scrollbar       { width: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #C8BFB0; border-radius: 99px; }
-::-webkit-scrollbar-thumb:hover { background: #527C40; }
+/* ── Refined matcha scrollbar ───────────────────────────────────────── */
+::-webkit-scrollbar              { width: 3px; height: 3px; }
+::-webkit-scrollbar-track        { background: transparent; }
+::-webkit-scrollbar-thumb        { background: rgba(81,123,62,0.22); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover  { background: rgba(81,123,62,0.45); }
+::-webkit-scrollbar-corner       { background: transparent; }
+
+/* Firefox */
+* { scrollbar-width: thin; scrollbar-color: rgba(81,123,62,0.22) transparent; }
