@@ -1,28 +1,98 @@
+"""
+Background startup tasks.
+
+Runs once per process:
+  1. _migrate_chromadb_to_faiss   – one-time migration if ChromaDB data exists
+  2. _backfill_user_documents     – populate user_documents from FAISS metadata
+  3. _migrate_orphaned_sessions   – assign orphaned sessions to admin (idempotent)
+"""
 import threading
 
-from extensions import chroma_client
 from models import ChatSession, SessionLocal, User, UserDocument
+from services.faiss_store import get_user_store, list_indexed_user_ids
 from sqlalchemy import func as sql_func
 
 
-def _backfill_user_documents() -> None:
-    """Populate user_documents from existing ChromaDB collections (idempotent)."""
-    count = 0
-    db = SessionLocal()
+def _migrate_chromadb_to_faiss() -> None:
+    """
+    One-time migration: reads every ChromaDB collection and writes it to FAISS.
+    Skips users that already have FAISS data.
+    Silently no-ops if chromadb is not installed or ./data/db doesn't exist.
+    """
     try:
-        for col_info in chroma_client.list_collections():
-            name = col_info.name if hasattr(col_info, "name") else str(col_info)
-            if not name.startswith("documents_u"):
+        import chromadb as _chroma
+        from pathlib import Path
+        chroma_path = Path("./data/db")
+        if not chroma_path.exists():
+            return
+        chroma = _chroma.PersistentClient(path=str(chroma_path))
+        collections = chroma.list_collections()
+    except Exception:
+        return   # chromadb not installed or no data — skip
+
+    already_migrated = set(list_indexed_user_ids())
+    migrated_users = 0
+
+    for col_info in collections:
+        name = col_info.name if hasattr(col_info, "name") else str(col_info)
+        if not name.startswith("documents_u"):
+            continue
+        uid_str = name[len("documents_u"):]
+        if not uid_str.isdigit():
+            continue
+        uid = int(uid_str)
+        if uid in already_migrated:
+            continue
+
+        try:
+            col = chroma.get_collection(name)
+            if col.count() == 0:
                 continue
-            uid_str = name[len("documents_u"):]
-            if not uid_str.isdigit():
-                continue
-            uid = int(uid_str)
+            result = col.get(include=["embeddings", "documents", "metadatas", "ids"])
+        except Exception as exc:
+            print(f"[Migration] WARNING: could not read ChromaDB collection {name}: {exc}")
+            continue
+
+        ids        = result.get("ids")        or []
+        embeddings = result.get("embeddings") or []
+        documents  = result.get("documents")  or []
+        metadatas  = result.get("metadatas")  or []
+
+        if not ids or not embeddings:
+            continue
+
+        try:
+            faiss_col = get_user_store(uid)
+            faiss_col.upsert(
+                ids=ids,
+                embeddings=embeddings,
+                documents=documents,
+                metadatas=[m or {} for m in metadatas],
+            )
+            print(f"[Migration] u{uid}: migrated {len(ids)} chunks from ChromaDB → FAISS")
+            migrated_users += 1
+        except Exception as exc:
+            print(f"[Migration] WARNING: FAISS write failed for u{uid}: {exc}")
+
+    if migrated_users:
+        print(f"[Migration] ✓ Migrated {migrated_users} user(s) from ChromaDB to FAISS")
+
+
+def _backfill_user_documents() -> None:
+    """
+    Populate user_documents from FAISS metadata for users whose docs
+    are not yet registered in SQLite. Idempotent.
+    """
+    count = 0
+    db    = SessionLocal()
+    try:
+        for uid in list_indexed_user_ids():
             try:
-                col    = chroma_client.get_collection(name)
-                result = col.get(include=["metadatas"])
+                store  = get_user_store(uid)
+                result = store.get(include=["metadatas"])
             except Exception:
                 continue
+
             seen: set[tuple] = set()
             for meta in (result.get("metadatas") or []):
                 fid   = meta.get("file_id")
@@ -40,9 +110,9 @@ def _backfill_user_documents() -> None:
                     count += 1
         db.commit()
         if count:
-            print(f"[Backfill] Registered {count} pre-existing document(s) in user_documents")
+            print(f"[Backfill] Registered {count} document(s) from FAISS into user_documents")
     except Exception as exc:
-        print(f"[Backfill] WARNING: could not backfill user_documents: {exc}")
+        print(f"[Backfill] WARNING: backfill failed: {exc}")
         db.rollback()
     finally:
         db.close()
@@ -78,43 +148,11 @@ def _migrate_orphaned_sessions() -> None:
         db.close()
 
 
-def _backfill_chroma_user_id() -> None:
-    """Stamp user_id metadata on chunks that predate per-chunk user_id."""
-    total_updated = 0
-    for col_info in chroma_client.list_collections():
-        name = col_info.name if hasattr(col_info, "name") else str(col_info)
-        if not name.startswith("documents_u"):
-            continue
-        uid_str = name[len("documents_u"):]
-        if not uid_str.isdigit():
-            continue
-        uid = int(uid_str)
-        try:
-            col    = chroma_client.get_collection(name)
-            result = col.get(include=["metadatas", "ids"])
-        except Exception as exc:
-            print(f"[Backfill-meta] Could not open {name}: {exc}")
-            continue
-        ids_to_update:   list[str]  = []
-        metas_to_update: list[dict] = []
-        for chunk_id, meta in zip(result.get("ids") or [], result.get("metadatas") or []):
-            if meta is None:
-                meta = {}
-            if meta.get("user_id") is None:
-                ids_to_update.append(chunk_id)
-                metas_to_update.append({**meta, "user_id": uid})
-        if ids_to_update:
-            try:
-                col.update(ids=ids_to_update, metadatas=metas_to_update)
-                total_updated += len(ids_to_update)
-                print(f"[Backfill-meta] {name}: stamped user_id={uid} on {len(ids_to_update)} chunk(s)")
-            except Exception as exc:
-                print(f"[Backfill-meta] WARNING: could not update {name}: {exc}")
-    if total_updated:
-        print(f"[Backfill-meta] Done — {total_updated} chunk(s) updated across all collections")
-
-
 def start_background_threads() -> None:
-    threading.Thread(target=_backfill_user_documents, daemon=True, name="doc-backfill").start()
-    _migrate_orphaned_sessions()  # runs synchronously (fast, idempotent)
-    threading.Thread(target=_backfill_chroma_user_id, daemon=True, name="meta-backfill").start()
+    _migrate_orphaned_sessions()   # fast + synchronous
+    threading.Thread(
+        target=_migrate_chromadb_to_faiss, daemon=True, name="chroma-migration"
+    ).start()
+    threading.Thread(
+        target=_backfill_user_documents, daemon=True, name="doc-backfill"
+    ).start()

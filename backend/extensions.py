@@ -1,7 +1,6 @@
 import os
 import re
 
-import chromadb
 import jwt as pyjwt
 from dotenv import load_dotenv
 from flask import request
@@ -39,9 +38,7 @@ except ImportError:
     _resend_mod = None  # type: ignore[assignment]
     _RESEND_OK  = False
 
-# ── ChromaDB + embeddings ─────────────────────────────────────────────────────
-chroma_client = chromadb.PersistentClient(path="./data/db")
-
+# ── Embeddings ────────────────────────────────────────────────────────────────
 embeddings_model = OpenAIEmbeddings(
     model="text-embedding-3-small",
     api_key=os.getenv("OPENAI_API_KEY"),
@@ -57,9 +54,8 @@ TOP_K = 8
 RRF_K = 60
 
 # ── Per-user in-memory caches (shared across all requests) ────────────────────
-_collection_map: dict[int, object] = {}
-_bm25_map:       dict[int, dict]   = {}
-_images_map:     dict[int, dict]   = {}
+_bm25_map:   dict[int, dict] = {}
+_images_map: dict[int, dict] = {}
 
 # ── LLM tool definitions ──────────────────────────────────────────────────────
 SEARCH_TOOL = {

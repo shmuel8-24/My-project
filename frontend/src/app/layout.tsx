@@ -1,14 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import { Heebo } from "next/font/google";
 import "./globals.css";
-import "katex/dist/katex.min.css";
+import "@uiw/react-md-editor/markdown-editor.css";
 import { LanguageProvider }        from "./providers/language";
 import { AuthProvider }            from "./providers/auth";
 import { CourseProvider }          from "./providers/course";
-import { CommandPaletteProvider }  from "./providers/command-palette";
-import CommandPalette              from "../components/CommandPalette";
-import FloatingZenTimer            from "../components/FloatingZenTimer";
-import CharleyLottieMascot         from "../components/CharleyLottieMascot";
+
 
 const heebo = Heebo({
   subsets: ["hebrew", "latin"],
@@ -34,7 +31,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="he" dir="rtl" className={`${heebo.variable} h-full`} suppressHydrationWarning>
-      <body className="font-sans antialiased min-h-full flex flex-col">
+      <body className="font-sans antialiased min-h-full flex flex-col" style={{ backgroundColor: '#97AB92' }}>
         {/* ── Ambient mesh background orbs ──────────────────────────── */}
         <div
           className="fixed inset-0 pointer-events-none overflow-hidden"
@@ -69,12 +66,7 @@ export default function RootLayout({
         <LanguageProvider>
           <CourseProvider>
             <AuthProvider>
-              <CommandPaletteProvider>
-                {children}
-                <CommandPalette />
-                <FloatingZenTimer />
-                <CharleyLottieMascot />
-              </CommandPaletteProvider>
+              {children}
             </AuthProvider>
           </CourseProvider>
         </LanguageProvider>

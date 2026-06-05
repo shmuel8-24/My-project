@@ -15,6 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 │   ├── api/
 │   │   ├── middleware.py   # token_required, admin_required, _get_user_refreshed
 │   │   ├── auth.py         # Auth blueprint (login, OTP, register, profile, onboarding, etc.)
+│   │   ├── courses.py      # Courses blueprint: parse-syllabus, save, update, delete, update-syllabus
 │   │   ├── documents.py    # Documents/RAG blueprint (upload, ask, sessions)
 │   │   ├── admin.py        # Admin blueprint + CFO agent + proactive scheduler
 │   │   ├── professor.py    # Professor Brain Simulator blueprint
@@ -40,8 +41,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     ├── src/
     │   ├── components/
     │   │   ├── CoursePill.tsx    # Global course selector pill — self-contained (calls useCourse + useLanguage)
-    │   │   ├── NoCourseState.tsx # Fixed-overlay empty state shown when no course is selected
-    │   │   └── TopBar.tsx        # Persistent top bar component (currently unused in layout)
+    │   │   └── NoCourseState.tsx # Fixed-overlay empty state shown when no course is selected
     │   ├── context/
     │   │   └── CourseContext.tsx  # Re-export shim for providers/course.tsx
     │   └── app/
@@ -54,7 +54,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     │       ├── onboarding/page.tsx             # Post-registration onboarding form
     │       ├── dashboard/page.tsx              # Course Hub Home — greeting + hero stat cards + course selector/focus view
     │       ├── profile/page.tsx                # Profile page
+    │       ├── settings/page.tsx               # Settings page
+    │       ├── academic-writing/page.tsx       # AI co-writing feature (paragraph-by-paragraph)
     │       ├── mastery/page.tsx                # Skill mastery — dynamic topics from RAG + quiz modal + score tracking
+    │       ├── course-picker/
+    │       │   ├── page.tsx                    # Course list — shows only customCourses; 3-dots menu per card
+    │       │   ├── add/page.tsx                # Add Course wizard (3 steps + optional Step 0 syllabus upload)
+    │       │   └── edit/[id]/page.tsx          # Edit Course wizard (pre-filled; optional syllabus re-upload)
     │       ├── workspace/
     │       │   ├── page.tsx                    # Main RAG workspace (~2500 lines; Sidebar + Home component inline)
     │       │   ├── UserProfileModal.tsx        # User profile modal (extracted component)
@@ -64,7 +70,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     │       ├── admin/
     │       │   ├── page.tsx                    # Admin dashboard
     │       │   └── AiAccountantChat.tsx        # CFO AI accountant chat component
-    │       ├── api/flask/[...path]/route.ts    # Server-side Flask proxy
+    │       ├── api/flask/[...path]/route.ts    # Server-side Flask proxy (exports GET/POST/PATCH/PUT/DELETE)
     │       └── providers/
     │           ├── auth.tsx                    # Global AuthProvider + useAuth hook
     │           ├── language.tsx               # Lang context (he/en)
@@ -101,6 +107,8 @@ cd backend && source .venv/bin/activate && python app.py
 cd frontend && npm run dev
 # → http://localhost:3000
 ```
+
+**Python runtime note:** `fitz` (PyMuPDF) is not installed in the `.venv` — it lives in `/opt/anaconda3/envs/New_env_conda/`. When testing backend imports that use `fitz`, run via `/opt/anaconda3/envs/New_env_conda/bin/python`. `start.py` uses `.venv/bin/python` for Flask.
 
 Node.js lives at `/usr/local/bin/node` (v24). If `npm`/`npx` are not found, prefix commands with `PATH="/usr/local/bin:$PATH"`.
 
@@ -140,7 +148,7 @@ Frontend env lives in `frontend/.env.local`:
 
 ## Architecture
 
-Full-stack RAG app branded **U-Note** for Hebrew-speaking university students. Students upload study materials and ask questions in Hebrew or English, or generate full academic papers. The app also has a skill-mastery system and a professor brain simulator.
+Full-stack RAG app branded **U-Note** for Hebrew-speaking university students. Students upload study materials and ask questions in Hebrew or English, or generate full academic papers. The app also has a skill-mastery system, a professor brain simulator, and a course management system with AI-powered syllabus parsing.
 
 ### Backend — layered module structure
 
@@ -168,9 +176,10 @@ Usage counters: `uploads_this_month`, `upload_month_key`, `questions_this_month`
 Onboarding: `country`, `institution`, `degree_type`, `primary_major`, `secondary_major`, `gender`, `study_year`, `ai_style`.
 
 **Additional models** (`models/__init__.py`):
-- `Payment` — financial transactions (ILS). Fields: `user_id`, `amount`, `currency`, `plan_type` (`'monthly'`|`'semester'`), `status` (`'completed'`|`'failed'`|`'refunded'`|`'pending'`), `payment_date`, `description`. Populated via `backend/scripts/seed_payments.py` for testing.
-- `CfoNotification` — proactive CFO alerts. Fields: `title`, `message`, `type` (`'info'`|`'warning'`|`'critical'`), `is_read`, `created_at`. Written daily by `analyze_financial_health()` in `api/admin.py`.
-- `TopicMastery` — per-user mastery score per uploaded document. Fields: `user_id`, `file_id` (MD5 hex from `UserDocument`), `topic` (display name), `mastery_pct` (0–100 float), `quiz_count`, `last_updated`. Unique constraint on `(user_id, file_id)`. All mastery routes live in `api/export.py`.
+- `Payment` — financial transactions (ILS). Fields: `user_id`, `amount`, `currency`, `plan_type` (`'monthly'`|`'semester'`), `status` (`'completed'`|`'failed'`|`'refunded'`|`'pending'`), `payment_date`, `description`.
+- `CfoNotification` — proactive CFO alerts. Fields: `title`, `message`, `type` (`'info'`|`'warning'`|`'critical'`), `is_read`, `created_at`.
+- `TopicMastery` — per-user mastery score per uploaded document. Fields: `user_id`, `file_id` (MD5 hex from `UserDocument`), `topic`, `mastery_pct` (0–100 float), `quiz_count`, `last_updated`. Unique on `(user_id, file_id)`. All mastery routes live in `api/export.py`.
+- `CustomCourse` — user-created course with optional syllabus for RAG. Fields: `user_id`, `course_name`, `lecturer_name`, `has_tirgul` (bool), `ta_name`, `semester` (`'a'`|`'b'`|`'summer'`), `color`, `full_syllabus_text` (Text), `syllabus_file_id` (16-char MD5 linking to `UserDocument` + ChromaDB). Course name is the identity key used in all backend operations — do not rename it without also renaming the ChromaDB chunks.
 
 **Schema migrations** are idempotent `ALTER TABLE` statements at the bottom of `models/__init__.py`. Every new column added to the `User` class must also get a corresponding migration statement there — the `try/except` silently skips columns that already exist. New tables are created automatically by `_Base.metadata.create_all()`.
 
@@ -181,10 +190,15 @@ Each user owns a separate ChromaDB collection (`documents_u{user_id}`). File IDs
 JWT HS256, 24 h TTL, `SECRET_KEY` from env. Two decorators inject `user_id` as the first function argument. Dual login modes: 6-digit OTP magic link and password. Rate limiting via Flask-Limiter (bucketed by `user_id` for auth'd requests, IP otherwise; `storage_uri="memory://"` — not distributed).
 
 **User / plan system:**
-`role`: `'user'` | `'admin'`. `plan_type`: `'basic'` | `'pro'` | `'semester'`. Monthly counters (`uploads_this_month`, `questions_this_month`) reset automatically when the month key changes. `ADMIN_EMAIL` env var auto-promotes that account on every login.
+`role`: `'user'` | `'admin'`. `plan_type`: `'basic'` | `'pro'` | `'semester'`. Monthly counters reset automatically when the month key changes. `ADMIN_EMAIL` env var auto-promotes that account on every login.
 
 **File upload pipeline (`/upload-pdf`):**
 Accepts PDF, PPTX, PNG/JPG/JPEG. PDFs → PyMuPDF (`fitz`) in-memory (preserves Hebrew logical order). PPTX → `extract_pptx_text()`, slides prefixed `[שקופית N]`. Images → base64 in `_user_images_map` (not indexed). Text chunks → embedded → upserted into ChromaDB; old chunks for the same file purged first.
+
+**Syllabus indexing (`api/courses.py`):**
+`_reindex_syllabus_for_course(user_id, course_name, full_text)` is the shared helper used by both `save_course` and `update_course_syllabus`. It: deletes existing ChromaDB chunks by `file_id`, re-embeds and upserts, rebuilds BM25, upserts the `UserDocument` ownership record, and updates `full_syllabus_text` + `syllabus_file_id` on the `CustomCourse` row. The `syllabus_file_id` is always `md5(f"syllabus_{user_id}_{course_name}").hexdigest()[:16]`.
+
+The `update_course_syllabus` endpoint additionally runs LLM extraction on the new PDF (same `_EXTRACTION_SYSTEM` prompt as `parse_syllabus`), diffs old vs new fields (lecturer, has_tirgul, ta, semester), updates those fields in the DB, and returns `{ success, changes: [Hebrew diff strings] }`. `course_name` is never auto-renamed by syllabus update.
 
 **Retrieval (`hybrid_search`):**
 Combines ChromaDB cosine similarity and BM25 via Reciprocal Rank Fusion (RRF constant 60). `tokenize_hebrew()` strips niqqud/cantillation before BM25. Returns `TOP_K=8` chunks. Accepts optional `file_id` to restrict to a single document.
@@ -194,7 +208,7 @@ Combines ChromaDB cosine similarity and BM25 via Reciprocal Rank Fusion (RRF con
 2. Short queries (< 5 words) enriched with prior user question before embedding.
 3. `hybrid_search` retrieves chunks.
 4. LLM call with two OpenAI tools: `code_interpreter` and `search_web` (Tavily).
-5. `code_interpreter` → `execute_python_code()` in daemon thread (25 s timeout); captures stdout + matplotlib figures as base64 PNG. Safety net: extracts and runs bare ` ```python ` blocks if the LLM forgets to call the tool.
+5. `code_interpreter` → `execute_python_code()` in daemon thread (25 s timeout); captures stdout + matplotlib figures as base64 PNG.
 6. Non-empty `_user_images_map` → message sent as OpenAI multi-part array (text + image_url), activating vision.
 7. Events: `{type:"status", phase}` → `{type:"result", ...}` | `{type:"error"}`.
 
@@ -203,24 +217,17 @@ Combines ChromaDB cosine similarity and BM25 via Reciprocal Rank Fusion (RRF con
 - `/export-docx` — custom Markdown+LaTeX → python-docx. `$$...$$` blocks pre-processed to sentinel markers. Inline math in Cambria Math (blue), block equations centred. `w:bidi` on all paragraphs for RTL.
 
 **Mastery system (`api/export.py`):**
-All four mastery routes live in the `export_bp` blueprint:
-- `GET /api/mastery/topics` — joins `UserDocument` + `TopicMastery` for the user; returns `[{file_id, topic, icon, mastery_pct|null, quiz_count}]`. Returns `[]` when no uploads.
-- `POST /api/mastery/generate-quiz` — accepts `topic` + optional `file_id`. Validates file ownership, runs `hybrid_search` scoped to that file, calls `gpt-4o` with `response_format: json_object`. Returns 3 `{question, options[4], correct_answer}` objects.
-- `POST /api/mastery/submit-results` — accepts `topic`, `file_id` (32-char MD5), `score`, `total`. Validates file ownership. Weighted update formula: `new = existing * 0.4 + (score/total*100) * 0.6`. First quiz seeds from neutral 50%. Returns `{mastery_pct, file_id, topic}`.
-- `GET /api/mastery/scores` — returns all `TopicMastery` records for the user.
+- `GET /api/mastery/topics` — joins `UserDocument` + `TopicMastery`; returns `[{file_id, topic, icon, mastery_pct|null, quiz_count}]`.
+- `POST /api/mastery/generate-quiz` — accepts `topic` + optional `file_id`. Calls `gpt-4o`. Returns 3 `{question, options[4], correct_answer}` objects.
+- `POST /api/mastery/submit-results` — weighted update formula: `new = existing * 0.4 + (score/total*100) * 0.6`. First quiz seeds from neutral 50%.
+- `GET /api/mastery/scores` — raw `TopicMastery` records for the user.
 
 **Professor Brain Simulator (`api/professor.py`):**
-`POST /api/professor-simulator/ask` — simulates a named professor as an academic examiner.
-- Accepts `professor_name`, `exam_style`, `trap_types[]`, `topics`, `question`, `history[]`, `file_ids[]`.
-- Uses `gpt-4o` (not `gpt-4o-mini`). Retrieves RAG context per file via `hybrid_search`.
-- Rate limited to 2 simulations/month for basic plan (`prof_sims_this_month` + `prof_sim_month_key` counters).
-- File ownership validated before RAG retrieval (defence-in-depth — same pattern as `/ask`).
-- Responds in Hebrew unless the user questions in English. Returns `{reply, context_chunks_used, professor_name, status}`.
+`POST /api/professor-simulator/ask` — uses `gpt-4o` (not `gpt-4o-mini`). Rate limited to 2 simulations/month for basic plan. File ownership validated before RAG retrieval.
 
 **Admin / CFO features (`api/admin.py`):**
-- `POST /api/admin/ai-accountant` — simple CFO chat (stateless, injects `context` JSON blob).
-- `POST /api/admin/ai-accountant/chat` — **agentic CFO** using native OpenAI function calling (no LangChain). Four tools: `calculate_monthly_revenue`, `get_new_subscriptions_count`, `get_platform_financial_summary`, `calculate_tax_obligation` (Israeli 2024 brackets + Bituach Leumi). Also returns a `chartData` field for inline chart rendering (`bar`/`area`).
-- CFO alert scheduler (`start_cfo_scheduler()`) — APScheduler daily cron at 09:00 UTC + one 30 s startup run. Checks: Osek Patur threshold (warns at 90%, critical at 95%), churn (≥20% weekly drop), revenue growth milestone (≥20% MoM). Deduplicates alerts by title within a sliding window. Called in `app.py` after `start_background_threads()`.
+- Agentic CFO (`/api/admin/ai-accountant/chat`) uses native OpenAI function calling with four financial tools; returns `chartData` for inline chart rendering.
+- CFO alert scheduler runs daily at 09:00 UTC + 30 s startup run via APScheduler.
 
 ### Backend API surface
 
@@ -235,8 +242,8 @@ All four mastery routes live in the `export_bp` blueprint:
 | `/api/forgot-password` | POST | — | Send password-reset email |
 | `/api/reset-password` | POST | — | Complete password reset |
 | `/api/refresh-token` | GET | user | Issue fresh JWT |
-| `/api/profile` | GET, PATCH | user | Get/update profile (returns onboarding fields) |
-| `/api/user/onboarding` | POST | user | Save country, institution, degree_type, primary_major, secondary_major |
+| `/api/profile` | GET, PATCH | user | Get/update profile |
+| `/api/user/onboarding` | POST | user | Save onboarding fields |
 | `/api/usage` | GET | user | Monthly upload/question counters |
 | `/api/stats` | GET | user | Aggregate usage stats |
 | `/api/transcribe` | POST | user | Audio → text (Whisper) |
@@ -245,16 +252,21 @@ All four mastery routes live in the `export_bp` blueprint:
 | `/documents/<file_id>` | DELETE | user | Delete a document |
 | `/ask` | POST | user | RAG Q&A, SSE stream |
 | `/sessions` | GET | user | List chat sessions |
-| `/sessions/<id>` | GET | user | Fetch session messages |
-| `/sessions/<id>` | DELETE | user | Delete session |
+| `/sessions/<id>` | GET, DELETE | user | Fetch / delete session |
 | `/generate-paper` | POST | user | Write academic paper from docs |
 | `/api/generate-quiz` | POST | user | Generate quiz from docs |
 | `/export-pdf` | POST | user | Markdown → PDF |
 | `/export-docx` | POST | user | Markdown+LaTeX → DOCX |
-| `/api/mastery/topics` | GET | user | List all user's uploaded docs with mastery scores |
-| `/api/mastery/generate-quiz` | POST | user | Generate 3-question quiz via gpt-4o + RAG (accepts `topic`, `file_id`) |
+| `/api/mastery/topics` | GET | user | List docs with mastery scores |
+| `/api/mastery/generate-quiz` | POST | user | Generate 3-question quiz via gpt-4o + RAG |
 | `/api/mastery/submit-results` | POST | user | Save quiz score; weighted mastery update |
-| `/api/mastery/scores` | GET | user | Raw mastery records for the user |
+| `/api/mastery/scores` | GET | user | Raw mastery records |
+| `/api/courses/parse-syllabus` | POST | user | Parse PDF → LLM metadata + full text (multipart) |
+| `/api/courses` | POST | user | Save CustomCourse + index syllabus to ChromaDB |
+| `/api/courses/details` | GET | user | Fetch course metadata by `?name=` |
+| `/api/courses/update` | PATCH | user | Update course fields; re-indexes if `full_syllabus_text` supplied |
+| `/api/courses/delete` | POST | user | Delete course + purge ChromaDB chunks + UserDocument |
+| `/api/courses/update-syllabus` | POST | user | Re-parse PDF, diff fields, return Hebrew change log |
 | `/api/admin/users` | GET | admin | List all users |
 | `/api/admin/users/<id>/gift-pro` | PATCH | admin | Grant pro plan |
 | `/api/admin/users/<id>/gift-semester` | PATCH | admin | Grant semester plan |
@@ -268,7 +280,7 @@ All four mastery routes live in the `export_bp` blueprint:
 
 ### Frontend — `frontend/`
 
-Next.js 16 · React 19 · TypeScript · Tailwind CSS v4 · `react-dropzone` v15
+Next.js 16 · React 19 · TypeScript · Tailwind CSS v4 · `react-dropzone` v15 · `framer-motion` v12
 
 > **Warning:** This Next.js version has breaking changes from older releases. Read `node_modules/next/dist/docs/` before writing Next.js-specific code.
 
@@ -278,124 +290,105 @@ Next.js 16 · React 19 · TypeScript · Tailwind CSS v4 · `react-dropzone` v15
 ```
 LanguageProvider → CourseProvider → AuthProvider → {children}
 ```
-All three providers must remain in this order. The `CourseProvider` wraps `AuthProvider` so the course context is available to every authenticated page.
+All three providers must remain in this order.
 
 **API call patterns — two distinct approaches exist:**
 
-1. **Server-side proxy** (`app/api/flask/[...path]/route.ts`): catches `GET/POST/PATCH/PUT/DELETE /api/flask/*` and forwards to Flask using the server-only `API_URL` env var. Zero browser CORS. Currently used by some pages.
+1. **Server-side proxy** (`app/api/flask/[...path]/route.ts`): catches all methods on `/api/flask/*` and forwards to Flask. Exports `GET`, `POST`, `PATCH`, `PUT`, `DELETE`. Uses server-only `API_URL` env var. Logs every request to the `npm run dev` terminal.
 
-2. **Direct browser calls**: `app/workspace/page.tsx` calls Flask directly at the hardcoded `const API = 'http://127.0.0.1:5003'`. `app/admin/page.tsx` uses `NEXT_PUBLIC_API_URL`. Both attach `Authorization: Bearer <token>` from localStorage.
+2. **Direct browser calls**: Most pages call Flask directly at `const API = 'http://127.0.0.1:5003'` with `Authorization: Bearer <token>`. The proxy is an alternative — both patterns coexist in the codebase.
+
+**Critical note on DELETE vs POST for destructive actions:** Use `POST /api/courses/delete` (not `DELETE /api/courses`) to avoid HTTP method routing ambiguity in Flask and CORS preflight issues. This pattern is established in `courses.py`.
 
 **Auth (client-side):**
-JWT stored in `localStorage` key `levy_ai_token`. New pages should use the global `AuthProvider` (`app/providers/auth.tsx`) and the `useAuth()` hook rather than reading localStorage directly. The provider exposes `user`, `isLoading`, `updateToken`, and `logout`.
-
-The canonical list of localStorage keys is `AUTH_KEYS` exported from `providers/auth.tsx`. **Keep this list in sync** with every `localStorage.setItem` call in the app — if you add a new key anywhere, add it here too:
-
-```typescript
-// providers/auth.tsx
-export const AUTH_KEYS = [
-  'levy_ai_token', 'levy_ai_email', 'levy_ai_first_name', 'levy_ai_last_name',
-  'levy_ai_institution', 'levy_ai_primary_major', 'levy_ai_degree_type',
-  'levy_ai_country', 'levy_ai_secondary_major', 'levy_ai_gender',
-] as const;
-```
-
-`workspace/page.tsx` still has its own local `_AUTH_KEYS` constant — **that array must mirror `AUTH_KEYS` above exactly**. Prefer `useAuth()` in new code.
+JWT stored in `localStorage` key `levy_ai_token`. Use the global `AuthProvider` (`app/providers/auth.tsx`) and `useAuth()` hook. The `AUTH_KEYS` export lists every localStorage key the app touches — keep it in sync.
 
 **Course context (`providers/course.tsx`):**
-`CourseProvider` / `useCourse()` / `COURSES` array. Persists `selectedCourse: { id, name, icon, color } | null` to `localStorage('levy_ai_course')`. Three fixed course definitions: `infi1`, `ds`, `phys`. Reading from localStorage is done via `Promise.resolve().then(setState)` to satisfy the `react-hooks/set-state-in-effect` ESLint rule. When a course is selected, `workspace/page.tsx`, `mastery/page.tsx`, and `professor-simulator/page.tsx` show a `NoCourseState` overlay (fixed z-80) if no course is active. The backend currently ignores `?course=` query params — filtering is frontend-only.
+Exports `CourseProvider` / `useCourse()` / `COURSES` (three built-in courses: `infi1`, `ds`, `phys`). The context exposes:
+- `customCourses: Course[]` — user-added courses, persisted to `localStorage('levy_ai_custom_courses')`
+- `addCustomCourse(course)` — appends + persists
+- `removeCustomCourse(id)` — removes by ID + persists
+- `updateCustomCourse(id, updates)` — merges `Partial<Omit<Course, 'id'>>` + persists
+- `selectedCourse` / `setSelectedCourse` — active course, persisted to `localStorage('levy_ai_course')`
+
+**Course picker (`course-picker/page.tsx`):**
+Shows ONLY `customCourses` — the three built-in `COURSES` are no longer displayed here (they remain exported from `providers/course.tsx` for use on the dashboard's course-selector view). Each card has a 3-dots `MoreVertical` menu with: Edit (navigates to `edit/[id]`), Update Syllabus (triggers hidden file input → `POST /api/courses/update-syllabus` → shows Hebrew change log), Delete (opens confirmation modal). The `syllabusTargetRef` (not state) stores which course the file input targets to avoid stale closure.
+
+**Add Course wizard (`course-picker/add/page.tsx`):**
+Steps: 0 (PDF upload zone using `react-dropzone`) → 1 (Name + Lecturer) → 2 (Tirgul toggle + conditional TA input) → 3 (Semester + Color). Step 0 calls `POST /api/courses/parse-syllabus` and auto-fills form fields. All step transitions use `framer-motion` `AnimatePresence mode="wait"` + directional slide variants. The card itself uses `motion.div layout` to smoothly resize between steps.
+
+Exit protection: `isDirty = step >= 1 && !hasSaved` controls both a `beforeunload` listener and a `popstate` trap (phantom history entry on mount). Both trigger the "לצאת ללא שמירה?" modal.
+
+**Edit Course wizard (`course-picker/edit/[id]/page.tsx`):**
+URL param `[id]` is the localStorage Course ID (string like `custom_${Date.now()}`). On mount: finds course in `customCourses` by ID → pre-fills name+color from localStorage, then fetches remaining fields from `GET /api/courses/details?name=`. Has an optional syllabus re-upload zone at the top of the form card (using `react-dropzone`) that calls `parse-syllabus` and auto-fills all fields. On save: calls `PATCH /api/courses/update`; if `syllabusText` was re-uploaded, includes it in the body to trigger re-indexing.
 
 **Onboarding flow:**
-After registration, users land on `/onboarding` where they set country, institution (async combobox fetching from `https://universities.hipolabs.com`), degree type, and majors. Onboarding data is saved to the backend via `POST /api/user/onboarding` and mirrored into localStorage. The workspace reads onboarding fields from localStorage on mount; fresh data from `GET /api/stats` updates them on load.
+After registration, users land on `/onboarding`. Onboarding data saved via `POST /api/user/onboarding` and mirrored into localStorage.
 
 **Key conventions:**
-- **Tailwind v4** — CSS-first config only. No `tailwind.config.ts`. All config in `app/globals.css` via `@import "tailwindcss"` and `@theme inline`. Always write complete class strings (no dynamic construction).
-- **RTL Hebrew** — `LanguageProvider` toggles `document.documentElement.dir` between `rtl`/`ltr` and saves to `localStorage('levy_ai_lang')`. **Always use `dir={lang === 'he' ? 'rtl' : 'ltr'}` — never hardcode `dir="rtl"` or use `flex-row-reverse` to simulate RTL.** Setting `dir` on an element makes CSS logical properties (`insetInlineEnd`, etc.) resolve relative to that element's own direction — this causes positioning bugs in the other language.
-- **Creamy Matcha design tokens** — the active design system uses these values:
+- **Tailwind v4** — CSS-first config only. No `tailwind.config.ts`. All config in `app/globals.css`.
+- **RTL Hebrew** — Always use `dir={lang === 'he' ? 'rtl' : 'ltr'}`. Never hardcode `dir="rtl"` or use `flex-row-reverse`.
+- **Creamy Matcha design tokens** — Active design system:
   - Global body background: `#F9FCFA`; primary text: `#1C3329`; secondary text: `#527061`
-  - Page headers: creamy glass `rgba(255,255,255,0.82)` + `backdropFilter: blur(16px)` + `border-b #E2EBE5` — **no solid green headers**
-  - Sidebar panels: `rgba(255,255,255,0.94)` with `backdropFilter: blur(20px)` + `border-inline-end #E2EBE5`
-  - Active nav items: `background: #D1E6D9; color: #183025` — a soft matcha pill
-  - Inactive nav items: `text-[#1C3329]/70 hover:bg-[#EEF5F0]`
-  - Accent green (legacy, still used in buttons/progress): `#517B3E` / `#2A3B22`
-  - `CoursePill` component: `bg-white border-[#D3E0D8] text-[#1C3329] hover:bg-[#EEF5F0]`
-  - `globals.css` defines custom `@theme inline` tokens `--color-matcha-50` through `--color-matcha-950`, `@keyframes masteryPulse`, `oasisGlow`, `subtleDrift`, `jewelGlow`, and utility classes `.animate-mastery-pulse`, `.animate-jewel-glow`, etc.
-- **KaTeX** — `katex/dist/katex.min.css` imported in `layout.tsx`. Workspace uses `remark-math` + `rehype-katex` to render `$...$` / `$$...$$`.
-- **Workspace tab persistence** — both `ChatInterface` and `PaperWriter` are always mounted; inactive tab hidden with `hidden`. `key={chatKey}` on `ChatInterface` is intentional — changing it forces a full remount.
-- **File upload caution** — `handleRemoveFile` must NOT call `onRemove` inside the `setUploadedFiles` updater (causes "Cannot update a component while rendering"). Image previews from `URL.createObjectURL()` must be revoked in `handleRemoveFile`.
-- **i18n** — `app/locales/landing.ts` holds the bilingual string table for the landing page. Workspace strings are inline in `workspace/page.tsx` in a `translations` object keyed by `'he' | 'en'`. All components that need bilingual text call `useLanguage()` directly — they do not receive `lang` as a prop. The idiomatic pattern is `const he = lang === 'he'` then `he ? 'hebrew text' : 'english text'`. Never hardcode Hebrew strings in JSX outside the translations object.
+  - Page headers: `rgba(255,255,255,0.82)` + `backdropFilter: blur(16px)` + `border-b #E2EBE5` — **no solid green headers**
+  - Sidebar panels: `rgba(255,255,255,0.94)` + `backdropFilter: blur(20px)` + `border-inline-end #E2EBE5`
+  - Active nav items: `background: #D1E6D9; color: #183025`
+  - Accent green: `#517B3E` / `#2A3B22`
+  - `globals.css` defines `@theme inline` tokens `--color-matcha-50` through `--color-matcha-950` and utility classes `.animate-mastery-pulse`, `.animate-jewel-glow`, etc.
+- **framer-motion** — installed (`v12`). Use `AnimatePresence mode="popLayout"` for list items, `mode="wait"` for step transitions. The `layout` prop on containers animates height changes. Use `position: fixed` dropdowns to escape `overflow` constraints.
+- **KaTeX** — `katex/dist/katex.min.css` imported in `layout.tsx`. Workspace uses `remark-math` + `rehype-katex`.
+- **Workspace tab persistence** — both `ChatInterface` and `PaperWriter` are always mounted; inactive tab hidden with `hidden`.
+- **i18n** — The idiomatic pattern is `const he = lang === 'he'` then `he ? 'hebrew' : 'english'`. Never hardcode Hebrew strings in JSX outside translation objects. RAG, ChromaDB, and other technical terms must NEVER appear in user-facing UI strings.
 
 **Dashboard (`dashboard/page.tsx`):**
-The Course Hub Home — the primary entry point after login. Contains:
-- `DashboardSidebar` inline component (same pattern as other pages' sidebars)
-- Hero stat cards (3 coloured panels: pale matcha `#EAF3ED`, warm cream `#F4F1EA`, soft sage `#E3EBE6`) showing documents / sessions / messages from `/api/stats`
-- **Course Selector view** (when `selectedCourse === null`): grid of `CourseOptionCard` buttons using `COURSES` from `providers/course.tsx`
-- **Course Focus view** (when course selected): `CrystalCard` quick actions + `MaterialRow` list from `/api/mastery/topics`
-- `CoursePill` in the header right section (next to the language toggle)
-- All color logic centralised in a `D` design-token object at the top of the file
-
-**Mastery page (`mastery/page.tsx`, ~1100 lines):**
-- On mount fetches `/api/mastery/topics?course=${selectedCourse?.id}` → `topics: GapCard[]` state
-- `GapCard` interface: `{ id: string (file_id), icon, topic, mastery: number|null, quiz_count }`
-- Quiz modal has states: `closed → loading → active → done`; `submitState: idle → loading → success → error`
-- On last question answered, calls `submitResults(quizTopic, quizFileId, score, total)` which POSTs to `/api/mastery/submit-results` and mutates the `topics` array live
-- Gradient progress bar: `linear-gradient(90deg,#ef4444,#f97316,#eab308,#84cc16,#517B3E)` with `animate-mastery-pulse` CSS class
-- Shows `NoCourseState` overlay when `selectedCourse === null`
+- Owl mascot (`/assets/mascot/charley.PNG`) displayed beside the greeting header
+- `CrystalCard` component shows text-only (no emoji icon) — do not add an `icon` prop back
+- `D` design-token object at the top centralises all colours
+- **Course Selector view** (when `selectedCourse === null`): uses `COURSES` + `customCourses` from the provider
+- **Course Focus view** (when course selected): `CrystalCard` quick actions + `MaterialRow` list
 
 **`workspace/page.tsx` structure:**
-The file is very large (~2500 lines). All modal components except `UserProfileModal` are defined inline in this file in this order: `CodeExecutionBlock` → `QuizModal` → `LogoutConfirmModal` → `Sidebar` → `Home` (root page). Modals are extracted to separate files only when their props surface is large and they need their own routing context (e.g., `UserProfileModal.tsx`). The `Sidebar` component calls `useCourse()` directly to show/clear the active course indicator. The `Home` component also calls `useCourse()` and renders `<NoCourseState />` as a z-80 fixed overlay when no course is selected.
+Very large (~2500 lines). Inline components in order: `CodeExecutionBlock` → `QuizModal` → `LogoutConfirmModal` → `Sidebar` → `Home`. Every logout entry point must call `setShowLogoutModal(true)` — never `handleLogout()` directly.
 
-**z-index layering (workspace):**
+**z-index layering (wizard exit modals / dropdowns):**
 
 | Layer | Value | What |
 |---|---|---|
 | Sidebar backdrop | `z-40` | Dim overlay when sidebar is open |
 | Sidebar panel | `z-50` | Slide-in drawer |
-| Quiz / profile modals | `z-50` / `z-[60]` | Content modals |
-| Logout confirm modal | `z-[70]` | Appears above all other modals |
-| NoCourseState overlay | `z-[80]` | Blocks page interaction until course selected |
-| Rate-limit toast | `z-[9999]` | Always on top |
+| Course picker context dropdown | `z-[10000]` | Fixed-position 3-dots menu (escapes overflow) |
+| Delete / exit-warning modals | `z-[80]`–`z-[90]` | Confirmation overlays |
+| Syllabus upload overlay | `z-[9998]` | Loading modal during quick upload |
+| Toast / change-log notification | `z-[9999]` | Always on top |
 
-**Back-button interception:**
-The workspace intercepts the browser Back button to show a logout confirmation instead of navigating away. The pattern: on mount push an extra history entry (`window.history.pushState(null, '', window.location.href)`), then listen for `popstate` — when fired, re-push to stay on the page and open `LogoutConfirmModal`. Logout itself uses `window.location.href = '/'` (hard redirect) to ensure all React state is flushed after `_clearAuth()`.
-
-**Logout routing rule:**
-Every logout entry point (avatar dropdown, sidebar button, `UserProfileModal`, Back button) MUST call `setShowLogoutModal(true)` — never call `handleLogout()` directly from a button. `handleLogout` is bound only to `LogoutConfirmModal.onConfirm`. This is enforced; verify with `grep "handleLogout" workspace/page.tsx` which should show only the function definition and the `onConfirm` prop assignment.
+**Back-button interception (wizards):**
+Add/Edit course wizards push a phantom history entry on mount (`window.history.pushState(null, '', window.location.href)`) and listen for `popstate` — re-push + open exit warning modal. Also has a `beforeunload` listener while `isDirty`. Both are cleaned up on unmount.
 
 **Language hydration:**
-`LanguageProvider` always initializes `lang` to `'he'` (matching `layout.tsx`'s `<html lang="he" dir="rtl">`). It reads `localStorage` only in a `useEffect` after mount and guards `document.documentElement` mutations behind a `mounted` flag. The `<html>` element has `suppressHydrationWarning` because the mounted effect later mutates its `lang`/`dir` attributes directly. Never reintroduce a `useState` lazy initializer that reads `localStorage` — this breaks SSR hydration because `window` is available during client hydration but not on the server.
-
-**Combobox pattern (onboarding):**
-`onboarding/page.tsx` implements accessible comboboxes without a library:
-- Use `onMouseDown + e.preventDefault()` on dropdown items (not `onClick`) to prevent input blur from closing the dropdown before the selection registers.
-- Move any `setState` calls that clear options out of `useEffect` bodies and into `onChange` handlers to satisfy the `react-hooks/set-state-in-effect` ESLint rule — no synchronous `setState` in effect bodies is permitted.
-- Click-outside via a `mousedown` listener on `document`; refs on wrapper `<div>` elements.
+`LanguageProvider` always initializes to `'he'`. Never use a `useState` lazy initializer that reads `localStorage` — this breaks SSR.
 
 **ESLint critical rule:**
-The rule `react-hooks/set-state-in-effect` is active. Any `setState()` call that appears synchronously in a `useEffect` body will error. The correct pattern for async-equivalent calls is:
+`react-hooks/set-state-in-effect` is active. Any synchronous `setState()` in a `useEffect` body errors. Pattern:
 ```typescript
-// Reading localStorage in an effect (e.g. providers/course.tsx):
 Promise.resolve(localStorage.getItem('key'))
   .then(val => { if (val) setState(parse(val)); });
-
-// Waiting for a fetch to complete:
-fetch(url).then(...).finally(() => setLoading(false));
 ```
 
 ### Data persistence
 
 | Store | Location | Contents | Cleared by |
 |---|---|---|---|
-| ChromaDB | `backend/data/db/` | Per-user text chunks + embeddings | Manual deletion or re-upload |
-| SQLite | `backend/data/chat.db` | Users, sessions, messages, OTP codes, reset tokens, document ownership, payments, CFO notifications, mastery scores | Manual deletion or `RESET_DB=1` |
+| ChromaDB | `backend/data/db/` | Per-user text chunks + embeddings (including syllabus chunks) | Manual deletion or re-upload |
+| SQLite | `backend/data/chat.db` | Users, sessions, messages, OTP codes, reset tokens, document ownership, payments, CFO notifications, mastery scores, custom courses | Manual deletion or `RESET_DB=1` |
 | BM25 index | Memory | Per-user; rebuilt from ChromaDB on first access | Server restart |
 | Images | Memory | Per-user base64 uploads | Server restart |
-| Active course | `localStorage('levy_ai_course')` | `{id, name, icon, color}` JSON | User clicks ✕ on CoursePill or clears localStorage |
+| Active course | `localStorage('levy_ai_course')` | `{id, name, icon, color}` JSON | User clears or `setSelectedCourse(null)` |
+| Custom courses | `localStorage('levy_ai_custom_courses')` | `Course[]` JSON | `removeCustomCourse` or manual clear |
 
-To fully wipe all data and start fresh: delete `backend/data/` then recreate `backend/data/db/` (empty). The app recreates `chat.db` on next startup.
+To fully wipe all data: delete `backend/data/` then recreate `backend/data/db/` (empty). The app recreates `chat.db` on next startup.
 
 ### Utility scripts
 
 - `backend/export_users.py` — dumps all users from `chat.db` to `users_export.csv`
-- `backend/scripts/make_admin.py <email>` — promotes a user to `role='admin'` directly in SQLite (run once; user must re-login for new JWT)
-- `backend/scripts/seed_payments.py` — inserts synthetic `Payment` rows for testing the CFO dashboard charts and financial calculations
+- `backend/scripts/make_admin.py <email>` — promotes a user to `role='admin'` (user must re-login for new JWT)
+- `backend/scripts/seed_payments.py` — inserts synthetic `Payment` rows for testing the CFO dashboard

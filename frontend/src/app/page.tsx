@@ -5,11 +5,12 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { X, MessagesSquare, PenTool, TrendingUp, GraduationCap, ChevronUp, Check } from 'lucide-react';
 import { useLanguage } from './providers/language';
+import { useCourse }   from './providers/course';
 import { landing } from './locales/landing';
 
 type Mode = 'magic' | 'password';
 type ForgotView = 'email' | 'sent' | null;
-const WORKSPACE_ROUTE = '/dashboard';
+const WORKSPACE_ROUTE = '/course-picker';
 
 /* ─── Shared input focus/blur handlers ───────────────────────────────────── */
 const focusInput = (e: React.FocusEvent<HTMLInputElement>) => {
@@ -148,6 +149,12 @@ export default function HomePage() {
 
   const { lang, toggleLanguage } = useLanguage();
   const t = landing[lang];
+  const { setSelectedCourse } = useCourse();
+
+  /* Clear any lingering course selection whenever the auth screen mounts. */
+  useEffect(() => {
+    Promise.resolve().then(() => setSelectedCourse(null));
+  }, [setSelectedCourse]);
 
   /* ── Register modal state ── */
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
@@ -423,9 +430,10 @@ export default function HomePage() {
       if (data.email)      localStorage.setItem('levy_ai_email',      data.email);
       if (data.first_name) localStorage.setItem('levy_ai_first_name', data.first_name);
       if (data.last_name)  localStorage.setItem('levy_ai_last_name',  data.last_name);
-      // Session indicator cookie — read by middleware to guard /admin before JS runs.
-      // Contains no sensitive data; the JWT stays in localStorage.
+      // Session presence cookie — read by middleware before JS runs.
       document.cookie = 'levy_ai_session=1; path=/; SameSite=Lax; max-age=86400';
+      // Token cookie — allows middleware to decode the is_admin claim server-side.
+      if (data.token) document.cookie = `levy_ai_token=${data.token}; path=/; SameSite=Lax; max-age=86400`;
       setIsTransitioning(true);
       setTimeout(() => router.push(WORKSPACE_ROUTE), 1800);
     } catch { setNetError(true); }
@@ -451,6 +459,7 @@ export default function HomePage() {
       if (data.first_name) localStorage.setItem('levy_ai_first_name', data.first_name);
       if (data.last_name)  localStorage.setItem('levy_ai_last_name',  data.last_name);
       document.cookie = 'levy_ai_session=1; path=/; SameSite=Lax; max-age=86400';
+      if (data.token) document.cookie = `levy_ai_token=${data.token}; path=/; SameSite=Lax; max-age=86400`;
       setIsTransitioning(true);
       setTimeout(() => router.push(WORKSPACE_ROUTE), 1800);
     } catch { setNetError(true); }
@@ -552,6 +561,7 @@ export default function HomePage() {
       if (data.first_name) localStorage.setItem('levy_ai_first_name', data.first_name);
       if (data.last_name)  localStorage.setItem('levy_ai_last_name',  data.last_name);
       document.cookie = 'levy_ai_session=1; path=/; SameSite=Lax; max-age=86400';
+      if (data.token) document.cookie = `levy_ai_token=${data.token}; path=/; SameSite=Lax; max-age=86400`;
       closeRegisterModal();
       setIsTransitioning(true);
       setIsLoginModalOpen(true);

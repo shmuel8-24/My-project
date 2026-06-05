@@ -132,54 +132,61 @@ def upload_pdf(user_id: int):
                 if ocr_text:
                     ocr_file_id   = hashlib.md5(filename.encode()).hexdigest()[:16]
                     ocr_upload_dt = datetime.now(timezone.utc).isoformat()
-                    ocr_chunks    = text_splitter.split_text(ocr_text)
-                    ocr_metas     = [
-                        {
-                            "source":      filename,
-                            "file_name":   filename,
-                            "file_id":     ocr_file_id,
-                            "page_number": 1,
-                            "total_pages": 1,
-                            "upload_date": ocr_upload_dt,
-                            "chunk_index": i,
-                            "user_id":     user_id,
-                            "file_type":   "image_ocr",
-                        }
-                        for i in range(len(ocr_chunks))
-                    ]
-                    ocr_ids = [f"{filename}_chunk_{i}" for i in range(len(ocr_chunks))]
+
+                    # Persistence guard for OCR images
+                    _ocr_guard_db = SessionLocal()
                     try:
-                        col.delete(where={"source": filename})
-                    except Exception:
-                        pass
-                    try:
-                        ocr_vectors = embeddings_model.embed_documents(ocr_chunks)
-                        col.upsert(ids=ocr_ids, embeddings=ocr_vectors,
-                                   documents=ocr_chunks, metadatas=ocr_metas)
-                        chunks_from_ocr = len(ocr_chunks)
-                        print(f"[OCR] u{user_id}: {filename!r} → {chunks_from_ocr} chunks embedded")
-                        _ocr_db = SessionLocal()
+                        _ocr_already = _ocr_guard_db.query(UserDocument).filter(
+                            UserDocument.user_id == user_id,
+                            UserDocument.file_id == ocr_file_id,
+                        ).first()
+                    finally:
+                        _ocr_guard_db.close()
+
+                    if _ocr_already:
+                        print(f"[OCR] u{user_id}: {filename!r} already indexed "
+                              f"(file_id={ocr_file_id}) — skipping (persistence policy)")
+                    else:
+                        ocr_chunks = text_splitter.split_text(ocr_text)
+                        ocr_metas  = [
+                            {
+                                "source":      filename,
+                                "file_name":   filename,
+                                "file_id":     ocr_file_id,
+                                "page_number": 1,
+                                "total_pages": 1,
+                                "upload_date": ocr_upload_dt,
+                                "chunk_index": i,
+                                "user_id":     user_id,
+                                "file_type":   "image_ocr",
+                            }
+                            for i in range(len(ocr_chunks))
+                        ]
+                        ocr_ids = [f"{filename}_chunk_{i}" for i in range(len(ocr_chunks))]
                         try:
-                            existing = _ocr_db.query(UserDocument).filter(
-                                UserDocument.user_id == user_id,
-                                UserDocument.file_id == ocr_file_id,
-                            ).first()
-                            if existing:
-                                existing.filename        = filename
-                                existing.uploaded_at     = datetime.now(timezone.utc)
-                                existing.file_size_bytes = len(img_bytes)
-                            else:
-                                _ocr_db.add(UserDocument(
-                                    user_id=user_id, file_id=ocr_file_id, filename=filename,
-                                    file_size_bytes=len(img_bytes)))
-                            _ocr_db.commit()
-                        except Exception as reg_exc:
-                            print(f"[OCR] WARNING: ownership registration failed: {reg_exc}")
-                            _ocr_db.rollback()
-                        finally:
-                            _ocr_db.close()
-                    except Exception as embed_exc:
-                        print(f"[OCR] u{user_id}: {filename!r} — embedding failed: {embed_exc}")
+                            ocr_vectors = embeddings_model.embed_documents(ocr_chunks)
+                            col.upsert(ids=ocr_ids, embeddings=ocr_vectors,
+                                       documents=ocr_chunks, metadatas=ocr_metas)
+                            chunks_from_ocr = len(ocr_chunks)
+                            print(f"[OCR] u{user_id}: {filename!r} → {chunks_from_ocr} chunks embedded")
+                            _ocr_db = SessionLocal()
+                            try:
+                                _ocr_exists = _ocr_db.query(UserDocument).filter(
+                                    UserDocument.user_id == user_id,
+                                    UserDocument.file_id == ocr_file_id,
+                                ).first()
+                                if not _ocr_exists:
+                                    _ocr_db.add(UserDocument(
+                                        user_id=user_id, file_id=ocr_file_id, filename=filename,
+                                        file_size_bytes=len(img_bytes)))
+                                    _ocr_db.commit()
+                            except Exception as reg_exc:
+                                print(f"[OCR] WARNING: ownership registration failed: {reg_exc}")
+                                _ocr_db.rollback()
+                            finally:
+                                _ocr_db.close()
+                        except Exception as embed_exc:
+                            print(f"[OCR] u{user_id}: {filename!r} — embedding failed: {embed_exc}")
             else:
                 print(f"[OCR] u{user_id}: {filename!r} — pytesseract not available, vision-only mode")
 
@@ -193,6 +200,33 @@ def upload_pdf(user_id: int):
         page_count  = 0
         file_id     = hashlib.md5(filename.encode()).hexdigest()[:16]
         upload_date = datetime.now(timezone.utc).isoformat()
+
+        # ── Persistence guard ────────────────────────────────────────────────
+        # Policy: files are retained indefinitely.  If this file_id is already
+        # indexed for this user, skip re-processing.  To replace a file the
+        # user must first DELETE it explicitly via DELETE /documents/<file_id>.
+        _guard_db = SessionLocal()
+        try:
+            _already_indexed = _guard_db.query(UserDocument).filter(
+                UserDocument.user_id == user_id,
+                UserDocument.file_id == file_id,
+            ).first()
+        finally:
+            _guard_db.close()
+
+        if _already_indexed:
+            print(f"[upload] u{user_id}: {filename!r} already indexed "
+                  f"(file_id={file_id}) — skipping (persistence policy)")
+            text_results.append({
+                "source":          filename,
+                "file_id":         file_id,
+                "already_indexed": True,
+                "chunks_stored":   0,
+                "type":            "cached",
+                "message":         "Already indexed — delete and re-upload to refresh.",
+            })
+            continue
+        # ────────────────────────────────────────────────────────────────────
 
         slides_data: list[dict] = []
         try:
@@ -241,32 +275,29 @@ def upload_pdf(user_id: int):
             continue
 
         try:
-            col.delete(where={"source": filename})
-        except Exception as exc:
-            print(f"[upload] u{user_id}: could not purge old chunks for {filename!r}: {exc}")
-
-        try:
             vectors = embeddings_model.embed_documents(chunks)
         except Exception as exc:
             errors.append({"source": filename, "error": f"embedding failed: {exc}"})
             continue
 
-        col.upsert(ids=chunk_ids, embeddings=vectors, documents=chunks, metadatas=chunk_metas)
+        try:
+            col.upsert(ids=chunk_ids, embeddings=vectors, documents=chunks, metadatas=chunk_metas)
+        except Exception as exc:
+            import traceback
+            traceback.print_exc()
+            errors.append({"source": filename, "error": f"vector indexing failed: {exc}"})
+            continue
 
         _reg_db = SessionLocal()
         try:
-            existing = _reg_db.query(UserDocument).filter(
+            _exists = _reg_db.query(UserDocument).filter(
                 UserDocument.user_id == user_id,
                 UserDocument.file_id == file_id,
             ).first()
-            if existing:
-                existing.filename        = filename
-                existing.uploaded_at     = datetime.now(timezone.utc)
-                existing.file_size_bytes = len(raw_bytes)
-            else:
+            if not _exists:
                 _reg_db.add(UserDocument(user_id=user_id, file_id=file_id, filename=filename,
                                          file_size_bytes=len(raw_bytes)))
-            _reg_db.commit()
+                _reg_db.commit()
         except Exception as reg_exc:
             print(f"[upload] WARNING: could not register document ownership: {reg_exc}")
             _reg_db.rollback()

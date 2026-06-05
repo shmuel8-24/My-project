@@ -5,7 +5,6 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useAuth }       from '../providers/auth';
 import { useLanguage }   from '../providers/language';
 import { useCourse }     from '../providers/course';
-import NoCourseState     from '../../components/NoCourseState';
 import CoursePill        from '../../components/CoursePill';
 import Skeleton          from '../../components/ui/Skeleton';
 import { playSuccess }   from '../../utils/audio';
@@ -313,12 +312,12 @@ function MasteryQuizModal({
                     ? 'שליטה מעולה! הוכחת הבנה עמוקה בנושא זה.'
                     : quizPct >= 50
                     ? 'בדרך הנכונה! יש עוד כמה דקויות לחדד, המדד עודכן.'
-                    : 'חלק מהמושגים עדיין לא יושבים טוב. מומלץ לעבור שוב על סיכומי ה-RAG ולנסות שוב.'
+                    : 'חלק מהמושגים עדיין לא יושבים טוב. מומלץ לעבור שוב על החומר ולנסות שוב.'
                   : quizPct >= 80
                   ? 'Excellent mastery! You demonstrated deep understanding.'
                   : quizPct >= 50
                   ? 'On the right track! A few nuances left to refine — meter updated.'
-                  : 'Some concepts need more work. Review your RAG summaries and try again.'}
+                  : 'Some concepts need more work. Review your materials and try again.'}
               </p>
             </div>
 
@@ -402,23 +401,21 @@ function GapCardUI({ card, he, onTest }: {
     <div
       className="w-full flex flex-col gap-5 p-6"
       style={{
-        background: 'rgba(255,255,255,0.52)',
-        backdropFilter: 'blur(22px)',
-        WebkitBackdropFilter: 'blur(22px)',
+        background: '#DCE8D6',
         borderRadius: '20px',
-        borderTop: '1px solid rgba(255,255,255,0.58)',
-        borderBottom: '1px solid rgba(255,255,255,0.22)',
-        borderInlineEnd: '1px solid rgba(255,255,255,0.22)',
+        borderTop: '1px solid #BCCAB5',
+        borderBottom: '1px solid #BCCAB5',
+        borderInlineEnd: '1px solid #BCCAB5',
         borderInlineStart: `4px solid ${color}`,
-        boxShadow: '0 4px 24px rgba(60,90,40,0.08), inset 0 1px 0 rgba(255,255,255,0.6)',
+        boxShadow: '0 6px 24px rgba(20,42,16,0.14), 0 1px 4px rgba(20,42,16,0.06)',
         transition: 'transform 0.18s ease, box-shadow 0.18s ease, border-inline-start-color 0.7s ease',
       }}
       onMouseEnter={e => {
-        e.currentTarget.style.boxShadow = '0 12px 40px rgba(60,90,40,0.14), inset 0 1px 0 rgba(255,255,255,0.65)';
+        e.currentTarget.style.boxShadow = '0 12px 36px rgba(20,42,16,0.22)';
         e.currentTarget.style.transform = 'translateY(-2px)';
       }}
       onMouseLeave={e => {
-        e.currentTarget.style.boxShadow = '0 4px 24px rgba(60,90,40,0.08), inset 0 1px 0 rgba(255,255,255,0.6)';
+        e.currentTarget.style.boxShadow = '0 6px 24px rgba(20,42,16,0.14), 0 1px 4px rgba(20,42,16,0.06)';
         e.currentTarget.style.transform = 'translateY(0)';
       }}
     >
@@ -551,7 +548,9 @@ function MasterySidebar({
   const router   = useRouter();
   const pathname = usePathname();
   const he = lang === 'he';
+  const { selectedCourse, setSelectedCourse } = useCourse();
   const translateClass = isOpen ? 'translate-x-0' : he ? 'translate-x-full' : '-translate-x-full';
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
 
   return (
     <>
@@ -568,15 +567,15 @@ function MasterySidebar({
       <aside
         className={['fixed inset-y-0 start-0 z-50 w-72 flex flex-col transition-transform duration-300 ease-in-out', translateClass].join(' ')}
         style={{
-          backgroundColor: 'rgba(217,235,208,0.97)',
+          backgroundColor: '#EEF5EB',
           backdropFilter: 'blur(20px)',
-          borderInlineEnd: '1px solid rgba(100,140,80,0.25)',
-          boxShadow: '4px 0 32px rgba(60,90,40,0.12)',
+          borderInlineEnd: '1px solid #BCCAB5',
+          boxShadow: '4px 0 28px rgba(20,42,16,0.14)',
         }}
       >
         {/* Logo header */}
         <div className="flex items-center justify-between px-4 py-4 shrink-0"
-          style={{ borderBottom: '1px solid rgba(100,140,80,0.2)' }}>
+          style={{ borderBottom: '1px solid #BCCAB5' }}>
           <LogoMark size={36} />
           <button onClick={onClose} aria-label={he ? 'סגור תפריט' : 'Close menu'}
             className="p-1.5 rounded-lg hover:bg-black/10 transition-colors shrink-0">
@@ -587,10 +586,37 @@ function MasterySidebar({
           </button>
         </div>
 
+        {/* New chat button */}
+        <div className="px-3 py-3 shrink-0" style={{ borderBottom: '1px solid #BCCAB5' }}>
+          <button onClick={() => { router.push('/workspace'); onClose(); }}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-white text-sm font-semibold transition-all hover:opacity-90 active:scale-[0.99]"
+            style={{ backgroundColor: '#517B3E' }}>
+            <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            {he ? '+ שיחה חדשה' : '+ New Chat'}
+          </button>
+        </div>
+
+        {/* Active course indicator */}
+        {selectedCourse && (
+          <div className="mx-3 mt-2 px-3 py-2.5 rounded-xl flex items-center justify-between gap-2 shrink-0"
+            style={{ background: `${selectedCourse.color}12`, border: `1px solid ${selectedCourse.color}25` }}>
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-sm leading-none shrink-0">{selectedCourse.icon}</span>
+              <div className="min-w-0">
+                <p className="text-[9px] font-bold uppercase tracking-wider" style={{ color: selectedCourse.color }}>{he ? 'קורס פעיל' : 'Active course'}</p>
+                <p className="text-xs font-bold text-[#1a2e14] truncate">{selectedCourse.name}</p>
+              </div>
+            </div>
+            <button onClick={() => setSelectedCourse(null)} className="shrink-0 text-[10px] px-1.5 py-0.5 rounded hover:bg-black/10 transition-colors" style={{ color: selectedCourse.color }}>✕</button>
+          </div>
+        )}
+
         {/* Nav */}
         <div className="flex-1 overflow-y-auto flex flex-col">
           <div className="px-3 py-3 space-y-1 shrink-0"
-            style={{ borderBottom: '1px solid rgba(100,140,80,0.2)' }}>
+            style={{ borderBottom: '1px solid #BCCAB5' }}>
             <p className="text-[10px] font-semibold text-[#7a9268] uppercase tracking-widest px-2 mb-2">Navigation</p>
 
             <button onClick={() => { router.push('/dashboard'); onClose(); }}
@@ -603,6 +629,12 @@ function MasterySidebar({
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
               <span className="text-base leading-none shrink-0">🌱</span>
               {he ? 'מרחב לימוד' : 'StudyLab'}
+            </button>
+
+            <button onClick={() => { router.push('/academic-writing'); onClose(); }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
+              <span className="text-base leading-none shrink-0">✍️</span>
+              {he ? 'כתיבה אקדמית' : 'Academic Writing'}
             </button>
 
             <button onClick={() => { router.push('/workspace/professor-simulator'); onClose(); }}
@@ -668,27 +700,44 @@ function MasterySidebar({
             <span className="text-sm font-medium">{he ? 'יציאה' : 'Logout'}</span>
           </button>
 
-          <button
-            dir={he ? 'rtl' : 'ltr'}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all hover:bg-[#517B3E]/10 active:scale-[0.99] group"
-            style={{ textAlign: 'start' }}
-          >
-            <div
-              className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0 select-none"
-              style={{ background: 'linear-gradient(135deg, #517B3E 0%, #2A3B22 100%)' }}
+          <div className="relative">
+            {isProfileMenuOpen && (
+              <div className="absolute bottom-full left-0 mb-2 w-full bg-white rounded-xl shadow-xl border border-gray-100 p-2 z-50">
+                <button onClick={() => { setIsProfileMenuOpen(false); router.push('/settings'); onClose(); }}
+                  className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 text-gray-700 text-sm transition-colors">
+                  <span aria-hidden="true">⚙️</span>
+                  <span>{he ? 'הגדרות חשבון' : 'Account Settings'}</span>
+                </button>
+                <button onClick={() => { setIsProfileMenuOpen(false); onClose(); onRequestLogout(); }}
+                  className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-red-50 text-red-600 text-sm transition-colors">
+                  <span aria-hidden="true">🚪</span>
+                  <span>{he ? 'התנתק' : 'Logout'}</span>
+                </button>
+              </div>
+            )}
+            <button
+              dir={he ? 'rtl' : 'ltr'}
+              onClick={() => setIsProfileMenuOpen(p => !p)}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all hover:bg-[#517B3E]/10 active:scale-[0.99] cursor-pointer group"
+              style={{ textAlign: 'start' }}
             >
-              <AvatarContent gender={userGender} initials={userInitials} />
-            </div>
-            <div className="flex-1 min-w-0 text-start">
-              <p className="text-sm font-semibold text-[#2d3b25] truncate leading-snug">{userFirstName} {userLastName}</p>
-              <p className="text-[11px] text-[#7a9268] truncate">{userEmail}</p>
-            </div>
-            <svg className="w-4 h-4 text-[#7a9268] shrink-0 opacity-50 group-hover:opacity-100 transition-opacity"
-              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round"
-                d="M12 6.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 12.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 18.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z" />
-            </svg>
-          </button>
+              <div
+                className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0 select-none"
+                style={{ background: 'linear-gradient(135deg, #517B3E 0%, #2A3B22 100%)' }}
+              >
+                <AvatarContent gender={userGender} initials={userInitials} />
+              </div>
+              <div className="flex-1 min-w-0 text-start">
+                <p className="text-sm font-semibold text-[#2d3b25] truncate leading-snug">{userFirstName} {userLastName}</p>
+                <p className="text-[11px] text-[#7a9268] truncate">{userEmail}</p>
+              </div>
+              <svg className="w-4 h-4 text-[#7a9268] shrink-0 opacity-50 group-hover:opacity-100 transition-opacity"
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round"
+                  d="M12 6.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 12.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 18.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z" />
+              </svg>
+            </button>
+          </div>
         </div>
       </aside>
     </>
@@ -700,7 +749,7 @@ export default function MasteryPage() {
   const router = useRouter();
   const { user: authUser, isLoading: authLoading } = useAuth();
   const { lang, toggleLanguage } = useLanguage();
-  const { selectedCourse } = useCourse();
+  const { selectedCourse, courseHydrated } = useCourse();
   const he = lang === 'he';
 
   // ── Shell state ────────────────────────────────────────────────────────────
@@ -747,6 +796,13 @@ export default function MasteryPage() {
     if (authLoading) return;
     if (!authUser) router.replace('/?login=true');
   }, [authLoading, authUser, router]);
+
+  // ── Course guard — hard redirect if no course is active ───────────────────
+  useEffect(() => {
+    if (authLoading || !authUser) return;
+    if (!courseHydrated) return;
+    if (!selectedCourse) router.replace('/course-picker');
+  }, [authLoading, authUser, courseHydrated, selectedCourse, router]);
 
   // ── Header scroll depth ────────────────────────────────────────────────────
   useEffect(() => {
@@ -945,12 +1001,12 @@ export default function MasteryPage() {
     startQuiz(topic, quizFileId);
   }, [quizFileId, startQuiz]);
 
-  if (authLoading || !authUser) {
+  if (authLoading || !authUser || !courseHydrated || !selectedCourse) {
     return (
-      <div dir={he ? 'rtl' : 'ltr'} className="min-h-screen flex flex-col" style={{ background: '#F2F5F1' }}>
+      <div dir={he ? 'rtl' : 'ltr'} className="min-h-screen flex flex-col" style={{ background: '#97AB92' }}>
         {/* Header */}
-        <div className="h-[60px] shrink-0 flex items-center justify-between px-4 border-b border-[#E2EBE5]"
-          style={{ background: 'rgba(255,255,255,0.82)', backdropFilter: 'blur(16px)' }}>
+        <div className="h-[60px] shrink-0 flex items-center justify-between px-4"
+          style={{ background: '#8BAF84', backdropFilter: 'blur(16px)', boxShadow: '0 1px 0 rgba(28,51,41,0.10)' }}>
           <Skeleton className="w-8 h-8 rounded-lg" />
           <Skeleton className="w-28 h-6 rounded-xl" />
           <Skeleton className="w-20 h-8 rounded-full" />
@@ -976,10 +1032,7 @@ export default function MasteryPage() {
 
   return (
     <div dir={he ? 'rtl' : 'ltr'} className="min-h-screen flex flex-col overflow-x-hidden"
-      style={{ background: 'linear-gradient(160deg, #ecf2e6 0%, #f5f0e8 45%, #edf3e9 100%)' }}>
-
-      {/* Course gate */}
-      {!selectedCourse && <NoCourseState />}
+      style={{ background: '#97AB92' }}>
 
       {/* ── Organic leaf watermarks — fixed, behind all content ── */}
       <div className="fixed inset-0 pointer-events-none select-none overflow-hidden" style={{ zIndex: 0 }}>
@@ -1046,11 +1099,10 @@ export default function MasteryPage() {
       {/* ── Header ── */}
       <header className="shrink-0 relative z-30"
         style={{
-          background:           'rgba(255,255,255,0.82)',
+          background:           '#8BAF84',
           backdropFilter:       'blur(16px)',
           WebkitBackdropFilter: 'blur(16px)',
-          borderBottom:         '1px solid #E2EBE5',
-          boxShadow:            headerScrolled ? '0 4px 16px rgba(28,51,41,0.07)' : 'none',
+          boxShadow:            headerScrolled ? '0 4px 16px rgba(28,51,41,0.12)' : '0 1px 0 rgba(28,51,41,0.10)',
           transition:           'box-shadow 0.3s ease',
         }}>
         <div className="max-w-full px-4 py-3 flex items-center justify-between gap-3">
@@ -1154,11 +1206,9 @@ export default function MasteryPage() {
           <div
             className="rounded-3xl px-8 py-10 text-center flex flex-col items-center gap-4"
             style={{
-              background: 'rgba(255,255,255,0.48)',
-              backdropFilter: 'blur(28px)',
-              WebkitBackdropFilter: 'blur(28px)',
-              border: '1px solid rgba(255,255,255,0.52)',
-              boxShadow: '0 8px 40px rgba(60,90,40,0.10), inset 0 1px 0 rgba(255,255,255,0.7)',
+              background: '#DCE8D6',
+              border: '1px solid #BCCAB5',
+              boxShadow: '0 6px 24px rgba(20,42,16,0.14), 0 1px 4px rgba(20,42,16,0.06)',
             }}
           >
             {/* Emoji with glow ring */}
@@ -1183,7 +1233,7 @@ export default function MasteryPage() {
             <div className="flex flex-col gap-4">
               {[0, 1, 2, 3].map(i => (
                 <div key={i} className="flex items-center gap-4 p-5 rounded-3xl"
-                  style={{ background: 'rgba(255,255,255,0.42)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.52)' }}>
+                  style={{ background: '#DCE8D6', border: '1px solid #BCCAB5' }}>
                   <Skeleton className="w-12 h-12 rounded-xl shrink-0" />
                   <div className="flex-1 flex flex-col gap-2.5">
                     <Skeleton className="w-40 h-4 rounded-lg" />
@@ -1198,11 +1248,9 @@ export default function MasteryPage() {
             <div
               className="rounded-3xl px-8 py-14 flex flex-col items-center gap-6 text-center"
               style={{
-                background: 'rgba(255,255,255,0.48)',
-                backdropFilter: 'blur(24px)',
-                WebkitBackdropFilter: 'blur(24px)',
-                border: '1px solid rgba(255,255,255,0.52)',
-                boxShadow: '0 8px 40px rgba(60,90,40,0.09), inset 0 1px 0 rgba(255,255,255,0.65)',
+                background: '#DCE8D6',
+                border: '1px solid #BCCAB5',
+                boxShadow: '0 6px 24px rgba(20,42,16,0.14), 0 1px 4px rgba(20,42,16,0.06)',
               }}
             >
               <div className="relative flex items-center justify-center w-16 h-16">
@@ -1215,8 +1263,8 @@ export default function MasteryPage() {
                 </p>
                 <p className="text-sm text-[#5a7248] leading-relaxed">
                   {he
-                    ? 'עדיין לא הועלו חומרי לימוד בסביבת העבודה הזו. ברגע שתעלה קבצים או סיכומים ל-RAG, הבינה המלאכותית תמפה כאן את הנושאים ותעזור לך להשיג שליטה בחומר.'
-                    : 'No study materials have been uploaded yet. Once you upload files or summaries to the RAG workspace, the AI will map topics here and help you achieve mastery.'}
+                    ? 'עדיין לא הועלו חומרי לימוד. ברגע שתעלה קבצים או סיכומים, הבינה המלאכותית תמפה כאן את הנושאים ותעזור לך להשיג שליטה בחומר.'
+                    : 'No study materials have been uploaded yet. Once you upload files or summaries, the AI will map topics here and help you achieve mastery.'}
                 </p>
               </div>
               <button
@@ -1266,11 +1314,9 @@ export default function MasteryPage() {
               <div
                 className="rounded-2xl px-6 py-5 flex items-center justify-between gap-4"
                 style={{
-                  background: 'rgba(255,255,255,0.44)',
-                  backdropFilter: 'blur(18px)',
-                  WebkitBackdropFilter: 'blur(18px)',
-                  border: '1px solid rgba(255,255,255,0.46)',
-                  boxShadow: '0 4px 20px rgba(60,90,40,0.07)',
+                  background: '#DCE8D6',
+                  border: '1px solid #BCCAB5',
+                  boxShadow: '0 4px 20px rgba(20,42,16,0.12)',
                 }}
               >
                 <div>

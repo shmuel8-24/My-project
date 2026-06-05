@@ -9,7 +9,8 @@ from dateutil.relativedelta import relativedelta as _relativedelta
 from flask import Blueprint, jsonify, request
 
 from api.middleware import admin_required
-from extensions import chroma_client, client as openai_client
+from extensions import client as openai_client
+from services.rag import get_user_collection
 from models import ChatMessage, ChatSession, CfoNotification, Payment, SessionLocal, User, sql_func
 
 admin_bp = Blueprint("admin", __name__)
@@ -37,7 +38,7 @@ def admin_list_users(_user_id: int):
             user = row.User
             document_count = 0
             try:
-                col = chroma_client.get_collection(f"documents_u{user.id}")
+                col = get_user_collection(user.id)
                 if col.count() > 0:
                     metas = col.get(include=["metadatas"])["metadatas"]
                     document_count = len({m.get("source", "") for m in metas if m.get("source")})

@@ -41,11 +41,14 @@ export function CodeBlockPre({ children }: { children?: React.ReactNode }) {
 
   return (
     <div
+      dir="ltr"
       className="my-3 rounded-xl overflow-hidden text-sm"
       style={{
         background: '#1C3329',
         border:     '1px solid rgba(81,123,62,0.22)',
         boxShadow:  '0 4px 18px rgba(28,51,41,0.14)',
+        direction:  'ltr',
+        unicodeBidi: 'isolate',
       }}
     >
       {/* Header: language label + copy button */}
@@ -115,8 +118,15 @@ export function CodeBlockPre({ children }: { children?: React.ReactNode }) {
 export function InlineCode({ children }: { children?: React.ReactNode }) {
   return (
     <code
-      className="px-1.5 py-0.5 rounded text-[11px] font-mono"
-      style={{ background: 'rgba(209,230,217,0.40)', color: '#2A3B22' }}
+      dir="ltr"
+      className="px-1.5 py-0.5 rounded text-[11px] font-mono inline-block"
+      style={{
+        background:  'rgba(209,230,217,0.40)',
+        color:       '#2A3B22',
+        direction:   'ltr',
+        textAlign:   'left',
+        unicodeBidi: 'embed',
+      }}
     >
       {children}
     </code>

@@ -16,19 +16,23 @@ export const COURSES: Course[] = [
 ];
 
 interface CourseContextValue {
-  selectedCourse:    Course | null;
-  setSelectedCourse: (course: Course | null) => void;
-  courseHydrated:    boolean;
-  customCourses:     Course[];
-  addCustomCourse:   (course: Course) => void;
+  selectedCourse:     Course | null;
+  setSelectedCourse:  (course: Course | null) => void;
+  courseHydrated:     boolean;
+  customCourses:      Course[];
+  addCustomCourse:    (course: Course) => void;
+  removeCustomCourse: (id: string) => void;
+  updateCustomCourse: (id: string, updates: Partial<Omit<Course, 'id'>>) => void;
 }
 
 const CourseContext = createContext<CourseContextValue>({
-  selectedCourse:    null,
-  setSelectedCourse: () => {},
-  courseHydrated:    false,
-  customCourses:     [],
-  addCustomCourse:   () => {},
+  selectedCourse:     null,
+  setSelectedCourse:  () => {},
+  courseHydrated:     false,
+  customCourses:      [],
+  addCustomCourse:    () => {},
+  removeCustomCourse: () => {},
+  updateCustomCourse: () => {},
 });
 
 export function CourseProvider({ children }: { children: ReactNode }) {
@@ -37,31 +41,26 @@ export function CourseProvider({ children }: { children: ReactNode }) {
   const [customCourses,   setCustomCoursesState]  = useState<Course[]>([]);
 
   useEffect(() => {
-    const stored       = localStorage.getItem('levy_ai_course');
+    // selectedCourse intentionally NOT restored from localStorage — users must
+    // always pick a course explicitly on entry (see /course-picker redirect in dashboard).
     const storedCustom = localStorage.getItem('levy_ai_custom_courses');
 
-    const selectedP = Promise.resolve(stored)
-      .then(s => { if (!s) return null; return JSON.parse(s) as Course; })
-      .catch(() => null);
-
-    const customP = Promise.resolve(storedCustom)
-      .then(s => { if (!s) return [] as Course[]; return JSON.parse(s) as Course[]; })
-      .catch(() => [] as Course[]);
-
-    Promise.all([selectedP, customP])
-      .then(([course, courses]) => {
-        if (course) setSelectedCourseState(course);
-        if (courses.length) setCustomCoursesState(courses);
-        setCourseHydrated(true);
-      })
-      .catch(() => setCourseHydrated(true));
+    Promise.resolve(storedCustom)
+      .then(s => { if (s) setCustomCoursesState(JSON.parse(s) as Course[]); })
+      .catch(() => {})
+      .finally(() => setCourseHydrated(true));
   }, []);
 
-  const setSelectedCourse = (course: Course | null) => {
+  const setSelectedCourse = useCallback((course: Course | null) => {
     setSelectedCourseState(course);
-    if (course) localStorage.setItem('levy_ai_course', JSON.stringify(course));
-    else localStorage.removeItem('levy_ai_course');
-  };
+    if (course) {
+      localStorage.setItem('levy_ai_course', JSON.stringify(course));
+      document.cookie = 'levy_ai_course_active=1; path=/; SameSite=Lax; max-age=86400';
+    } else {
+      localStorage.removeItem('levy_ai_course');
+      document.cookie = 'levy_ai_course_active=; path=/; SameSite=Lax; max-age=0';
+    }
+  }, []);
 
   const addCustomCourse = useCallback((course: Course) => {
     setCustomCoursesState(prev => {
@@ -71,8 +70,24 @@ export function CourseProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const removeCustomCourse = useCallback((id: string) => {
+    setCustomCoursesState(prev => {
+      const updated = prev.filter(c => c.id !== id);
+      localStorage.setItem('levy_ai_custom_courses', JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
+
+  const updateCustomCourse = useCallback((id: string, updates: Partial<Omit<Course, 'id'>>) => {
+    setCustomCoursesState(prev => {
+      const updated = prev.map(c => c.id === id ? { ...c, ...updates } : c);
+      localStorage.setItem('levy_ai_custom_courses', JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
+
   return (
-    <CourseContext.Provider value={{ selectedCourse, setSelectedCourse, courseHydrated, customCourses, addCustomCourse }}>
+    <CourseContext.Provider value={{ selectedCourse, setSelectedCourse, courseHydrated, customCourses, addCustomCourse, removeCustomCourse, updateCustomCourse }}>
       {children}
     </CourseContext.Provider>
   );

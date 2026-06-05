@@ -84,6 +84,7 @@ interface AuthContextValue {
 function clearAuthStorage() {
   AUTH_KEYS.forEach(k => localStorage.removeItem(k));
   document.cookie = 'levy_ai_session=; path=/; SameSite=Lax; max-age=0';
+  document.cookie = 'levy_ai_token=; path=/; SameSite=Lax; max-age=0';
 }
 
 function readUserFromStorage(): AuthUser | null {

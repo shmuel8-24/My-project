@@ -2,7 +2,7 @@ import os
 import sys
 from datetime import datetime, timezone
 
-import chromadb
+import shutil
 from sqlalchemy import (
     Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text,
     UniqueConstraint, create_engine, func as sql_func, text as sql_text,
@@ -139,6 +139,23 @@ class TopicMastery(_Base):
     __table_args__ = (UniqueConstraint("user_id", "file_id", name="uq_user_file_mastery"),)
 
 
+class CustomCourse(_Base):
+    """User-created course with optional syllabus text for RAG."""
+    __tablename__ = "custom_courses"
+    id                 = Column(Integer, primary_key=True, index=True)
+    user_id            = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"),
+                                nullable=False, index=True)
+    course_name        = Column(String(200), nullable=False)
+    lecturer_name      = Column(String(200), nullable=True)
+    has_tirgul         = Column(Boolean,     nullable=False, server_default="0")
+    ta_name            = Column(String(200), nullable=True)
+    semester           = Column(String(20),  nullable=True)
+    color              = Column(String(30),  nullable=True)
+    full_syllabus_text = Column(Text,        nullable=True)
+    syllabus_file_id   = Column(String(32),  nullable=True)  # links to UserDocument in ChromaDB
+    created_at         = Column(DateTime,    default=lambda: datetime.now(timezone.utc))
+
+
 # ── DB engine ─────────────────────────────────────────────────────────────────
 os.makedirs("./data", exist_ok=True)  # ensure data/ exists before SQLite opens it
 _db_engine  = create_engine("sqlite:///./data/chat.db", connect_args={"check_same_thread": False})
@@ -153,16 +170,15 @@ if os.getenv("RESET_DB", "0").strip() == "1":
     _Base.metadata.create_all(bind=_db_engine)
     print("[RESET] SQL tables dropped and recreated.")
     try:
-        _reset_chroma = chromadb.PersistentClient(path="./data/db")
-        _deleted = 0
-        for _c in _reset_chroma.list_collections():
-            _name = _c.name if hasattr(_c, "name") else str(_c)
-            _reset_chroma.delete_collection(_name)
-            print(f"[RESET]   Deleted ChromaDB collection: {_name}")
-            _deleted += 1
-        print(f"[RESET] {_deleted} ChromaDB collection(s) deleted.")
+        from pathlib import Path as _Path
+        _faiss_dir = _Path("./data/faiss")
+        if _faiss_dir.exists():
+            shutil.rmtree(_faiss_dir)
+            print("[RESET] FAISS data directory deleted (./data/faiss).")
+        else:
+            print("[RESET] No FAISS data directory found — nothing to delete.")
     except Exception as _e:
-        print(f"[RESET] WARNING: ChromaDB reset failed: {_e}")
+        print(f"[RESET] WARNING: FAISS reset failed: {_e}")
     print("[RESET] ✓ Reset complete. Remove RESET_DB=1 from .env and restart.")
     print("=" * 62)
     sys.exit(0)

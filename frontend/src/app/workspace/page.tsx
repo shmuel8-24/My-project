@@ -4,7 +4,6 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { useLanguage }   from '../providers/language';
 import { useAuth }       from '../providers/auth';
 import { useCourse }     from '../providers/course';
-import NoCourseState     from '../../components/NoCourseState';
 import CoursePill        from '../../components/CoursePill';
 import SelectionPopover  from '../../components/SelectionPopover';
 import { CodeBlockPre, InlineCode }  from '../../components/CodeBlock';
@@ -253,6 +252,12 @@ const translations = {
     rateLimitMsg:   'יותר מדי בקשות — אנא המתן רגע.',
     navProfSim:     'הראש של המרצה',
     navGapFill:     'שליטה בחומר',
+    tabUpload:      'העלאה',
+    tabDocs:        'מסמכים שהועלו',
+    docsAvailable:  (n: number) => `${n} מסמכ${n === 1 ? '' : 'ים'} זמינ${n === 1 ? '' : 'ים'}`,
+    noDocsYet:      'עדיין אין מסמכים',
+    noDocsHint:     'עבור לכרטיסיית "העלאה" כדי להוסיף קבצים',
+    deleteDocLabel: 'מחק מסמך',
   },
   en: {
     subtitle: 'Your Academic Sidekick',
@@ -371,6 +376,12 @@ const translations = {
     rateLimitMsg:   'Too many requests. Please wait a moment.',
     navProfSim:     "Professor's Brain",
     navGapFill:     'Mastery',
+    tabUpload:      'Upload',
+    tabDocs:        'Uploaded Docs',
+    docsAvailable:  (n: number) => `${n} document${n === 1 ? '' : 's'} available`,
+    noDocsYet:      'No documents yet',
+    noDocsHint:     'Go to the "Upload" tab to add files',
+    deleteDocLabel: 'Delete document',
   },
 };
 
@@ -808,22 +819,9 @@ function PdfUploader({ onUpload, onRemove, t }: {
           setErrors([...rejectionErrors, data.error ?? t.uploadErr]); return;
         }
         if (data.files?.length) {
-          const incoming: UploadedFile[] = data.files.map(
-            (f: { source: string; size: number; chunks_stored: number; type: string }) => ({
-              name: f.source, size: f.size, chunks: f.chunks_stored,
-              fileType: (f.type ?? 'pdf') as UploadedFile['fileType'],
-              previewUrl: previewMap[f.source],
-            }),
-          );
-          setUploadedFiles(prev => {
-            const next = [...prev];
-            for (const nf of incoming) {
-              const idx = next.findIndex(f => f.name === nf.name);
-              if (idx >= 0) { if (next[idx].previewUrl) URL.revokeObjectURL(next[idx].previewUrl!); next[idx] = nf; }
-              else next.push(nf);
-            }
-            return next;
-          });
+          // Revoke preview URLs and clear dropzone — files now live in the "Uploaded Docs" tab
+          Object.values(previewMap).forEach(url => URL.revokeObjectURL(url));
+          setUploadedFiles([]);
           onUpload();
         }
         const serverErrors = (data.errors ?? []).map((e: { source: string; error: string }) => `${e.source}: ${e.error}`);
@@ -863,9 +861,9 @@ function PdfUploader({ onUpload, onRemove, t }: {
   return (
     <div className="flex flex-col gap-4 h-full">
       <div className="rounded-2xl p-6 flex flex-col gap-5" style={{
-        background: 'linear-gradient(145deg, rgba(245,251,240,0.98), rgba(241,249,236,0.96))',
-        border: '1px solid rgba(81,123,62,0.10)',
-        boxShadow: '0 8px 30px rgba(0,0,0,0.04)',
+        background: '#DCE8D6',
+        border: '1px solid #BCCAB5',
+        boxShadow: '0 6px 24px rgba(20,42,16,0.14), 0 1px 4px rgba(20,42,16,0.06)',
       }}>
 
         <div className="flex items-center gap-3">
@@ -886,7 +884,7 @@ function PdfUploader({ onUpload, onRemove, t }: {
               return (
                 <div key={file.name}
                   className="flex items-center gap-3 rounded-xl px-4 py-3"
-                  style={{ background: 'rgba(255,255,255,0.85)', border: '1px solid rgba(157,192,139,0.3)' }}>
+                  style={{ background: '#E5EFE0', border: '1px solid #BCCAB5' }}>
                   {isImage && file.previewUrl ? (
                     <img src={file.previewUrl} alt={file.name} className="w-8 h-8 rounded-lg object-cover shrink-0" style={{ border: '1px solid rgba(157,192,139,0.3)' }} />
                   ) : (
@@ -915,13 +913,13 @@ function PdfUploader({ onUpload, onRemove, t }: {
         {!hasFiles ? (
           <div {...getRootProps()}
             className={[
-              'rounded-2xl border-2 border-dashed flex flex-col items-center justify-center',
-              'gap-4 min-h-52 transition-all duration-300 ease-in-out px-6 py-10 text-center select-none',
+              'rounded-2xl border flex flex-col items-center justify-center',
+              'gap-4 min-h-52 transition-all duration-300 ease-in-out px-6 py-10 text-center select-none shadow-sm',
               uploading
-                ? 'opacity-50 cursor-not-allowed border-[#9DC08B]/40 bg-[#9DC08B]/5'
+                ? 'opacity-50 cursor-not-allowed border-[#BCCAB5]/60 bg-[#D4E1CE]'
                 : isDragActive
-                  ? 'scale-[1.01] border-[#517B3E] bg-[#517B3E]/[.08] cursor-default'
-                  : 'cursor-pointer border-[#7A9A5A]/30 bg-[#7A9A5A]/5 hover:bg-[#7A9A5A]/10 hover:border-[#517B3E]/50',
+                  ? 'scale-[1.01] border-[#517B3E]/50 bg-[#E5EFE0] cursor-default'
+                  : 'cursor-pointer border-[#BCCAB5] bg-[#DCE8D6] hover:bg-[#E5EFE0] hover:border-[#9CB896]',
             ].join(' ')}
             style={isDragActive ? { boxShadow: '0 0 20px rgba(81,123,62,0.12)' } : undefined}>
             <input {...getInputProps()} />
@@ -957,13 +955,13 @@ function PdfUploader({ onUpload, onRemove, t }: {
         ) : (
           <div {...getRootProps()}
             className={[
-              'rounded-xl border-2 border-dashed flex items-center justify-center gap-3',
+              'rounded-xl border flex items-center justify-center gap-3',
               'py-3 px-4 transition-all duration-200 ease-in-out select-none',
               uploading
-                ? 'opacity-50 cursor-not-allowed border-[#9DC08B]/30 bg-transparent'
+                ? 'opacity-50 cursor-not-allowed border-white/40 bg-white/40'
                 : isDragActive
-                  ? 'border-[#517B3E] bg-[#517B3E]/[.08] cursor-default'
-                  : 'cursor-pointer border-[#7A9A5A]/30 bg-transparent hover:bg-[#7A9A5A]/10 hover:border-[#517B3E]/50',
+                  ? 'border-[#517B3E]/50 bg-white/60 cursor-default'
+                  : 'cursor-pointer border-white/50 bg-white/40 hover:bg-white/60 hover:border-white/70',
             ].join(' ')}
             style={isDragActive ? { boxShadow: '0 0 12px rgba(81,123,62,0.10)' } : undefined}>
             <input {...getInputProps()} />
@@ -986,7 +984,7 @@ function PdfUploader({ onUpload, onRemove, t }: {
       </div>
 
       {/* How to use panel */}
-      <div className="flex-1 rounded-2xl p-5" style={{ background: 'linear-gradient(145deg, rgba(245,251,240,0.98), rgba(241,249,236,0.96))', border: '1px solid rgba(81,123,62,0.10)', boxShadow: '0 4px 16px rgba(0,0,0,0.03)' }}>
+      <div className="flex-1 rounded-2xl p-5" style={{ background: '#DCE8D6', border: '1px solid #BCCAB5', boxShadow: '0 4px 16px rgba(20,42,16,0.10)' }}>
         <p className="text-sm font-semibold text-[#517B3E] mb-3">{t.howToUse}</p>
         <ul className="space-y-2.5">
           {t.tips.map((tip, i) => (
@@ -996,6 +994,92 @@ function PdfUploader({ onUpload, onRemove, t }: {
             </li>
           ))}
         </ul>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Uploaded Documents List ──────────────────────────────────────────────── */
+function UploadedDocsList({
+  docs,
+  onDelete,
+  t,
+}: {
+  docs: DocumentInfo[];
+  onDelete: (fileId: string) => Promise<void>;
+  t: T;
+}) {
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const handleDelete = async (fileId: string) => {
+    setDeletingId(fileId);
+    await onDelete(fileId);
+    setDeletingId(null);
+  };
+
+  const getFileIcon = (name: string) => {
+    const lower = name.toLowerCase();
+    if (lower.endsWith('.pptx')) return <IconPresentation className="w-5 h-5 text-[#517B3E]" />;
+    if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return <IconPhoto className="w-5 h-5 text-[#517B3E]" />;
+    return <IconDoc className="w-5 h-5 text-[#517B3E]" />;
+  };
+
+  return (
+    <div className="flex flex-col gap-4 h-full">
+      <div className="rounded-2xl p-6 flex flex-col gap-4" style={{
+        background: '#DCE8D6',
+        border: '1px solid #BCCAB5',
+        boxShadow: '0 6px 24px rgba(20,42,16,0.14), 0 1px 4px rgba(20,42,16,0.06)',
+      }}>
+
+        <div className="flex items-center gap-3">
+          <span className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'rgba(81,123,62,0.10)', border: '1px solid rgba(81,123,62,0.2)' }}>
+            <IconDoc className="w-5 h-5 text-[#517B3E]" />
+          </span>
+          <div>
+            <p className="font-semibold text-[#2A3B22] text-sm leading-tight">{t.docsAvailable(docs.length)}</p>
+            <p className="text-xs text-[#7a9268]">{t.pdfOnly}</p>
+          </div>
+        </div>
+
+        {docs.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-3 py-10 text-center">
+            <div className="w-14 h-14 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(81,123,62,0.06)', border: '1px dashed rgba(81,123,62,0.30)' }}>
+              <IconDoc className="w-7 h-7 text-[#9DC08B]" />
+            </div>
+            <div>
+              <p className="font-medium text-[#527061] text-sm">{t.noDocsYet}</p>
+              <p className="text-xs text-[#7a9268] mt-1">{t.noDocsHint}</p>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2 max-h-80 overflow-y-auto">
+            {docs.map(doc => (
+              <div key={doc.file_id}
+                className="flex items-center gap-3 rounded-xl px-4 py-3"
+                style={{ background: '#E5EFE0', border: '1px solid #BCCAB5' }}>
+                <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'rgba(81,123,62,0.10)', border: '1px solid rgba(81,123,62,0.2)' }}>
+                  {getFileIcon(doc.name)}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-[#2d3b25] text-xs truncate">{doc.name}</p>
+                  <p className="text-xs text-[#7a9268]">{t.chunksLabel(doc.chunks)}</p>
+                </div>
+                <button
+                  onClick={() => handleDelete(doc.file_id)}
+                  disabled={deletingId === doc.file_id}
+                  aria-label={t.deleteDocLabel}
+                  className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-red-100/60 transition-colors shrink-0 disabled:opacity-40">
+                  {deletingId === doc.file_id ? (
+                    <div className="w-3.5 h-3.5 rounded-full border-2 border-[#9DC08B]/30 border-t-[#517B3E] animate-spin" />
+                  ) : (
+                    <IconX className="w-4 h-4 text-[#7a9268] hover:text-red-500" />
+                  )}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1270,9 +1354,9 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
 
   return (
     <div className="rounded-2xl flex flex-col flex-1 min-h-[520px]" style={{
-      background: 'linear-gradient(145deg, rgba(245,251,240,0.98), rgba(241,249,236,0.96))',
-      border: '1px solid rgba(81,123,62,0.10)',
-      boxShadow: '0 8px 30px rgba(0,0,0,0.04)',
+      background: '#DCE8D6',
+      border: '1px solid #BCCAB5',
+      boxShadow: '0 6px 24px rgba(20,42,16,0.14), 0 1px 4px rgba(20,42,16,0.06)',
     }}>
 
       {/* Header — glassmorphic depth when messages are scrolled */}
@@ -1280,7 +1364,7 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
         style={{
           borderBottom:         '1px solid rgba(157,192,139,0.3)',
           boxShadow:            chatScrolled ? '0 4px 12px rgba(28,51,41,0.06)' : 'none',
-          background:           chatScrolled ? 'rgba(255,255,255,0.88)' : 'transparent',
+          background:           chatScrolled ? '#E5EFE0' : 'transparent',
           backdropFilter:       chatScrolled ? 'blur(8px)' : 'none',
           WebkitBackdropFilter: chatScrolled ? 'blur(8px)' : 'none',
           transition:           'box-shadow 0.25s ease, background 0.25s ease',
@@ -1560,10 +1644,9 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
           !hasDoc ? 'pointer-events-none' : '',
         ].join(' ')}
         style={{
-          background: 'rgba(255,255,255,0.80)',
-          border: '1px solid rgba(157,192,139,0.35)',
-          backdropFilter: 'blur(8px)',
-          boxShadow: '0 2px 12px rgba(60,90,40,0.06)',
+          background: '#EAF3E6',
+          border: '1px solid #BCCAB5',
+          boxShadow: '0 2px 12px rgba(20,42,16,0.08)',
         }}>
           <textarea ref={textareaRef} value={input} onChange={onInput} onKeyDown={onKey}
             dir="auto" rows={1}
@@ -1641,234 +1724,6 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
           onRetry={() => void fetchQuiz()}
         />
       )}
-    </div>
-  );
-}
-
-/* ─── Paper Writer ───────────────────────────────────────────────────────────── */
-function PaperWriter({ hasDoc, t }: { hasDoc: boolean; t: T }) {
-  const [topic, setTopic]               = useState('');
-  const [instructions, setInstructions] = useState('');
-  const [loading, setLoading]           = useState(false);
-  const [paper, setPaper]               = useState<string | null>(null);
-  const [sources, setSources]           = useState<string[]>([]);
-  const [error, setError]               = useState<string | null>(null);
-  const [downloading, setDownloading]         = useState(false);
-  const [downloadingWord, setDownloadingWord] = useState(false);
-
-  const generate = useCallback(async (topicOverride?: string) => {
-    const top = (topicOverride ?? topic).trim();
-    if (!top || loading || !hasDoc) return;
-    setLoading(true); setError(null); setPaper(null); setSources([]);
-    try {
-      const res  = await authFetch(`${API}/generate-paper`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic: top, instructions: instructions.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) { setError(data.error ?? t.paperErr); return; }
-      setPaper(data.paper); setSources(data.sources ?? []);
-    } catch { setError(t.serverErr); }
-    finally  { setLoading(false); }
-  }, [topic, instructions, loading, hasDoc, t]);
-
-  const downloadPdf = async () => {
-    if (!paper || downloading) return;
-    setDownloading(true);
-    try {
-      const safeTitle = topic.trim().slice(0, 40).replace(/[^\w֐-׿\s-]/g, '') || 'paper';
-      const res = await authFetch(`${API}/export-pdf`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: paper, filename: `u-note-${safeTitle}.pdf` }),
-      });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? t.exportErr);
-      const blob = await res.blob();
-      const url  = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = `u-note-${safeTitle}.pdf`; a.click();
-      URL.revokeObjectURL(url);
-    } catch (err) { console.error('PDF export failed:', err); }
-    finally { setDownloading(false); }
-  };
-
-  const downloadWord = async () => {
-    if (!paper || downloadingWord) return;
-    setDownloadingWord(true);
-    try {
-      const safeTitle = topic.trim().slice(0, 40).replace(/[^\w֐-׿\s-]/g, '') || 'paper';
-      const res = await authFetch(`${API}/export-docx`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: paper, filename: `u-note-${safeTitle}.docx` }),
-      });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? t.wordErr);
-      const blob = await res.blob();
-      const url  = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = `u-note-${safeTitle}.docx`; a.click();
-      URL.revokeObjectURL(url);
-    } catch (err) { console.error('Word export failed:', err); }
-    finally { setDownloadingWord(false); }
-  };
-
-  const onInstructionsInput = (e: ChangeEvent<HTMLTextAreaElement>) => {
-    setInstructions(e.target.value);
-    const el = e.target; el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 100)}px`;
-  };
-
-  return (
-    <div className="rounded-2xl flex flex-col flex-1 min-h-[520px]" style={{
-      background: 'linear-gradient(145deg, rgba(245,251,240,0.98), rgba(241,249,236,0.96))',
-      border: '1px solid rgba(81,123,62,0.10)',
-      boxShadow: '0 8px 30px rgba(0,0,0,0.04)',
-    }}>
-
-      <div className="px-5 py-4 flex items-center gap-3 shrink-0" style={{ borderBottom: '1px solid rgba(157,192,139,0.3)' }}>
-        <span className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'linear-gradient(135deg, #9DC08B, #517B3E)' }}>
-          <IconPen className="w-5 h-5 text-white" />
-        </span>
-        <div className="flex-1 min-w-0">
-          <p className="font-semibold text-[#2A3B22] text-sm">{t.paperTitle}</p>
-          <p className="text-xs text-[#7a9268]">{hasDoc ? t.paperSubtitle : t.waitingPdf}</p>
-        </div>
-        {paper && (
-          <div className="flex items-center gap-2 shrink-0">
-            <button onClick={downloadWord} disabled={downloadingWord}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-medium rounded-lg transition-all active:scale-95"
-              style={{ backgroundColor: downloadingWord ? 'rgba(157,192,139,0.4)' : '#2d6a9f' }}>
-              <IconWord className="w-3.5 h-3.5" />
-              {downloadingWord ? t.exporting : t.downloadWord}
-            </button>
-            <button onClick={downloadPdf} disabled={downloading}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-bold rounded-lg transition-all active:scale-95"
-              style={{ backgroundColor: downloading ? 'rgba(157,192,139,0.4)' : '#517B3E' }}>
-              <IconDownload className="w-3.5 h-3.5" />
-              {downloading ? t.exporting : t.downloadPdf}
-            </button>
-          </div>
-        )}
-      </div>
-
-      <div className="flex-1 overflow-y-auto px-5 py-4 min-h-0">
-        {!paper && !loading && !error && (
-          <div className="flex flex-col items-center justify-center gap-5 py-10 text-center h-full">
-            <div className="w-20 h-20 rounded-3xl flex items-center justify-center" style={{ background: 'rgba(81,123,62,0.08)', border: '1px solid rgba(81,123,62,0.15)' }}>
-              <IconPen className="w-10 h-10 text-[#9DC08B]" />
-            </div>
-            <div>
-              <p className="font-medium text-[#2d3b25]">{hasDoc ? t.enterTopic : t.uploadFirst}</p>
-              <p className="text-sm text-[#7a9268] mt-1">{hasDoc ? t.aiWrites : t.uploadSideHint}</p>
-            </div>
-            {hasDoc && (
-              <>
-                <p className="text-xs text-[#7a9268]">{t.suggestedTopics}</p>
-                <div className="flex flex-wrap gap-2 justify-center max-w-xs">
-                  {t.topicChips.map(chip => (
-                    <button key={chip} onClick={() => { setTopic(chip); generate(chip); }}
-                      className="px-4 py-2 text-xs rounded-full transition-all hover:scale-[1.02]"
-                      style={{ background: 'rgba(81,123,62,0.08)', border: '1px solid rgba(81,123,62,0.2)', color: '#517B3E' }}>
-                      {chip}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        {loading && (
-          <div className="flex flex-col items-center justify-center gap-4 py-20 h-full">
-            <div className="w-12 h-12 rounded-full border-2 border-[#9DC08B]/30 border-t-[#517B3E] animate-spin" />
-            <div className="text-center">
-              <p className="font-medium text-[#2d3b25] text-sm">{t.writingPaper}</p>
-              <p className="text-xs text-[#7a9268] mt-1">{t.takeSecs}</p>
-            </div>
-          </div>
-        )}
-
-        {error && (
-          <div className="flex items-center gap-2 bg-red-950/50 border border-red-500/30 text-red-400 rounded-xl px-4 py-3 text-sm mt-4">
-            <IconX className="w-4 h-4 shrink-0" />{error}
-          </div>
-        )}
-
-        {paper && !loading && (
-          <div className="flex flex-col gap-3">
-            {sources.length > 0 && (
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs text-[#7a9268]">{t.sources}</span>
-                {sources.map(s => (
-                  <span key={s} className="px-2 py-0.5 text-xs rounded-full" style={{ background: 'rgba(81,123,62,0.10)', color: '#517B3E', border: '1px solid rgba(81,123,62,0.2)' }}>
-                    {s}
-                  </span>
-                ))}
-              </div>
-            )}
-            <div dir="rtl" className="rounded-xl p-8" style={{ background: 'rgba(255,255,255,0.85)', border: '1px solid rgba(157,192,139,0.3)', color: '#2A3B22' }}>
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm, remarkMath]}
-                rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: '#cc0000', strict: false }]]}
-                components={{
-                  pre: CodeBlockPre,
-                  code: ({ className, children }) => {
-                    if (className) return <code dir="ltr" className={`${className} text-[#9DC08B] text-[11px] font-mono leading-relaxed`} style={{ direction: 'ltr', textAlign: 'left', unicodeBidi: 'embed' }}>{children}</code>;
-                    return <InlineCode>{children}</InlineCode>;
-                  },
-                  h1: ({ children }) => <h1 className="text-2xl font-bold mb-4 pb-2 text-center" style={{ color: '#2A3B22', borderBottom: '1px solid rgba(157,192,139,0.4)' }}>{children}</h1>,
-                  h2: ({ children }) => <h2 className="text-lg font-bold mt-7 mb-3" style={{ color: '#2A3B22' }}>{children}</h2>,
-                  h3: ({ children }) => <h3 className="text-base font-semibold mt-5 mb-2" style={{ color: '#2d3b25' }}>{children}</h3>,
-                  p: ({ children }) => <p className="text-sm leading-8 mb-4" style={{ color: '#374151', textAlign: 'justify' }}>{children}</p>,
-                  strong: ({ children }) => <strong className="font-semibold" style={{ color: '#1a2e14' }}>{children}</strong>,
-                  em: ({ children }) => <em className="italic" style={{ color: '#4a5e3a' }}>{children}</em>,
-                  ul: ({ children }) => <ul className="list-disc mb-4 space-y-1 text-sm pe-5">{children}</ul>,
-                  ol: ({ children }) => <ol className="list-decimal mb-4 space-y-1 text-sm pe-5">{children}</ol>,
-                  li: ({ children }) => <li className="text-sm leading-7" style={{ color: '#374151' }}>{children}</li>,
-                  blockquote: ({ children }) => (
-                    <blockquote className="pr-4 my-4 italic text-sm py-2 rounded-sm" style={{ borderRight: '4px solid rgba(81,123,62,0.4)', background: 'rgba(81,123,62,0.05)', color: '#4a5e3a' }}>
-                      {children}
-                    </blockquote>
-                  ),
-                  hr: () => <hr className="my-6" style={{ borderColor: 'rgba(157,192,139,0.4)' }} />,
-                  table: ({ children }) => <div className="overflow-x-auto my-4"><table className="w-full text-sm border-collapse">{children}</table></div>,
-                  th: ({ children }) => <th className="px-3 py-2 font-semibold text-right" style={{ border: '1px solid rgba(157,192,139,0.3)', background: 'rgba(81,123,62,0.06)', color: '#2d3b25' }}>{children}</th>,
-                  td: ({ children }) => <td className="px-3 py-2 text-right" style={{ border: '1px solid rgba(157,192,139,0.3)', color: '#4a5e3a' }}>{children}</td>,
-                  a: ({ href, children }) => {
-                    const safeHref = href && /^https?:\/\//i.test(href) ? href : '#';
-                    return (
-                      <a href={safeHref} target="_blank" rel="noopener noreferrer"
-                        className="underline underline-offset-2 hover:opacity-75 transition-opacity"
-                        style={{ color: '#517B3E' }}>
-                        {children}
-                      </a>
-                    );
-                  },
-                }}>
-                {preprocessMath(paper)}
-              </ReactMarkdown>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className={`px-4 pb-4 pt-3 shrink-0 ${!hasDoc ? 'opacity-40 pointer-events-none' : ''}`} style={{ borderTop: '1px solid rgba(157,192,139,0.3)' }}>
-        <div className="flex flex-col gap-2">
-          <input type="text" value={topic} onChange={e => setTopic(e.target.value)} dir="auto"
-            disabled={!hasDoc || loading}
-            placeholder={hasDoc ? t.topicPh : t.topicPhNoDoc}
-            className="w-full rounded-xl px-4 py-2.5 text-sm outline-none transition-all disabled:cursor-not-allowed"
-            style={{ border: '1px solid rgba(157,192,139,0.4)', background: 'rgba(255,255,255,0.80)', color: '#2A3B22' }}
-            onKeyDown={e => { if (e.key === 'Enter') generate(); }} />
-          <textarea value={instructions} onChange={onInstructionsInput} dir="auto" rows={2}
-            disabled={!hasDoc || loading} placeholder={t.instructionsPh}
-            className="w-full rounded-xl px-4 py-2.5 text-sm outline-none transition-all resize-none disabled:cursor-not-allowed"
-            style={{ border: '1px solid rgba(157,192,139,0.4)', background: 'rgba(255,255,255,0.80)', color: '#2A3B22', maxHeight: 100 }} />
-          <button onClick={() => generate()} disabled={!hasDoc || !topic.trim() || loading}
-            className="w-full py-2.5 rounded-xl text-white text-sm font-bold transition-all active:scale-[0.99] disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            style={{ backgroundColor: (!hasDoc || !topic.trim() || loading) ? 'rgba(157,192,139,0.4)' : '#517B3E' }}>
-            {loading
-              ? <><div className="w-4 h-4 rounded-full border-2 border-white/20 border-t-white animate-spin" /><span>{t.writingBtn}</span></>
-              : <><IconPen className="w-4 h-4" /><span>{t.composePaper}</span></>}
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -2097,11 +1952,11 @@ function PricingModal({ onClose }: { onClose: () => void }) {
             className="flex-1 text-start rounded-2xl p-5 transition-all"
             style={{
               background: selected === 'monthly'
-                ? 'rgba(255,255,255,0.92)'
-                : 'rgba(255,255,255,0.60)',
+                ? '#EAF3E6'
+                : '#DCE8D6',
               border: selected === 'monthly'
-                ? '1.5px solid rgba(157,192,139,0.55)'
-                : '1.5px solid rgba(200,215,188,0.48)',
+                ? '1.5px solid #9CB896'
+                : '1.5px solid #BCCAB5',
               boxShadow: selected === 'monthly'
                 ? '0 4px 18px rgba(81,123,62,0.09)'
                 : 'none',
@@ -2265,7 +2120,6 @@ interface SidebarProps {
   onNewChat: () => void;
   onSelectSession: (id: number) => void;
   onDeleteSession: (id: number) => void;
-  onSwitchMode: (mode: 'chat' | 'paper') => void;
   isOpen: boolean;
   onClose: () => void;
   isAdmin: boolean;
@@ -2280,7 +2134,7 @@ interface SidebarProps {
   onRequestLogout: () => void;
 }
 
-function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDeleteSession, onSwitchMode, isOpen, onClose, isAdmin, lang, t, userFirstName, userLastName, userEmail, userInitials, userGender, onOpenProfile, onRequestLogout }: SidebarProps) {
+function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDeleteSession, isOpen, onClose, isAdmin, lang, t, userFirstName, userLastName, userEmail, userInitials, userGender, onOpenProfile, onRequestLogout }: SidebarProps) {
   const router   = useRouter();
   const pathname = usePathname();
   const { selectedCourse, setSelectedCourse } = useCourse();
@@ -2309,11 +2163,11 @@ function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDel
         translateClass,
       ].join(' ')}
       style={{
-        backgroundColor: 'rgba(255,255,255,0.94)',
+        backgroundColor: '#EEF5EB',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
-        borderInlineEnd: '1px solid #E2EBE5',
-        boxShadow: '4px 0 28px rgba(28,51,41,0.07)',
+        borderInlineEnd: '1px solid #BCCAB5',
+        boxShadow: '4px 0 28px rgba(20,42,16,0.12)',
       }}>
 
         {/* Logo header */}
@@ -2364,12 +2218,20 @@ function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDel
               <span className="text-base leading-none shrink-0">🏠</span>
               {t.navHome}
             </button>
-            <button onClick={() => { onSwitchMode('chat'); onClose(); }}
+            <button
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-bold"
               style={{ backgroundColor: '#D1E6D9', color: '#183025' }}
             >
               <span className="text-base leading-none shrink-0">🌱</span>
               {t.navStudyLab}
+            </button>
+            <button
+              onClick={() => { router.push('/academic-writing'); onClose(); }}
+              className={['w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all', pathname === '/academic-writing' ? 'font-bold' : 'hover:bg-white/5'].join(' ')}
+              style={pathname === '/academic-writing' ? { backgroundColor: '#D1E6D9', color: '#183025', fontWeight: 700 } : { color: '#1C3329' }}
+            >
+              <span className="text-base leading-none shrink-0">✍️</span>
+              {t.tabPaper}
             </button>
             <button
               onClick={() => { router.push('/workspace/professor-simulator'); onClose(); }}
@@ -2557,7 +2419,7 @@ const MATCHA_LEAF_CSS = `
 function Home() {
   const router = useRouter();
   const { user: authUser, isLoading: authLoading, logout: authLogout } = useAuth();
-  const { selectedCourse } = useCourse();
+  const { selectedCourse, setSelectedCourse, courseHydrated } = useCourse();
 
   // isAuthenticated always starts false (same on server and client) to avoid
   // the SSR/hydration mismatch where the server returns null but the client
@@ -2590,7 +2452,23 @@ function Home() {
       if (res.ok) setUsage(await res.json());
     } catch { /* backend not running */ }
   }, []);
-  const [mode, setMode]                         = useState<'chat' | 'paper'>('chat');
+
+  /* ── Left panel tabs + document list ── */
+  const [leftPanelTab, setLeftPanelTab] = useState<'upload' | 'docs'>('upload');
+  const [docList, setDocList]           = useState<DocumentInfo[]>([]);
+
+  const fetchDocs = useCallback(async (): Promise<DocumentInfo[]> => {
+    try {
+      const res = await authFetch(`${API}/documents`);
+      if (!res.ok) return [];
+      const data = await res.json() as { documents: DocumentInfo[] };
+      const docs = data.documents ?? [];
+      setDocList(docs);
+      setHasDoc(docs.length > 0);
+      return docs;
+    } catch { return []; }
+  }, []);
+
   const [sessions, setSessions]                 = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
   const [initialMessages, setInitialMessages]   = useState<Message[]>([]);
@@ -2685,12 +2563,33 @@ function Home() {
       .finally(() => setIsAuthenticated(true));
   }, [authLoading, authUser, router]);
 
+  // Course guard — hard redirect to /course-picker if no course is active.
+  useEffect(() => {
+    if (authLoading || !authUser) return;
+    if (!courseHydrated) return;
+    if (!selectedCourse) router.replace('/course-picker');
+  }, [authLoading, authUser, courseHydrated, selectedCourse, router]);
+
   // Fetch usage stats once after auth is confirmed.
   useEffect(() => {
     if (!isAuthenticated) return;
     authFetch(`${API}/api/usage`)
       .then(r => r.ok ? r.json() : null)
       .then((data: UsageInfo | null) => { if (data) setUsage(data); })
+      .catch(() => {});
+  }, [isAuthenticated]);
+
+  // Fetch existing docs on auth — auto-switch to docs tab if user already has uploads.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    authFetch(`${API}/documents`)
+      .then(r => r.ok ? r.json() : { documents: [] })
+      .then((data: { documents: DocumentInfo[] }) => {
+        const docs = data.documents ?? [];
+        setDocList(docs);
+        setHasDoc(docs.length > 0);
+        if (docs.length > 0) setLeftPanelTab('docs');
+      })
       .catch(() => {});
   }, [isAuthenticated]);
 
@@ -2761,25 +2660,33 @@ function Home() {
     if (!hasDoc) startNewChat();
     setHasDoc(true);
     fetchUsage();
-  }, [hasDoc, startNewChat, fetchUsage]);
+    fetchDocs();
+    setLeftPanelTab('docs');
+  }, [hasDoc, startNewChat, fetchUsage, fetchDocs]);
 
   const handleRemove = useCallback(() => {
     setHasDoc(false); startNewChat();
   }, [startNewChat]);
 
-  const handleLogout = () => authLogout();
+  const handleDeleteDoc = useCallback(async (fileId: string) => {
+    await authFetch(`${API}/documents/${fileId}`, { method: 'DELETE' });
+    const newDocs = await fetchDocs();
+    if (newDocs.length === 0) {
+      startNewChat();
+      setLeftPanelTab('upload');
+    }
+  }, [fetchDocs, startNewChat]);
+
+  const handleLogout = () => { setSelectedCourse(null); authLogout(); };
 
   const userInitials = [userFirstName[0], userLastName[0]]
     .filter(Boolean).join('').toUpperCase()
     || userEmail.slice(0, 2).toUpperCase();
 
-  if (!isAuthenticated) return null;
+  if (!isAuthenticated || !courseHydrated || !selectedCourse) return null;
 
   return (
-    <div className="min-h-screen flex flex-col relative" style={{ backgroundColor: '#F2F5F1' }}>
-
-      {/* Course gate — overlay when no course is selected */}
-      {!selectedCourse && <NoCourseState />}
+    <div className="min-h-screen flex flex-col relative" style={{ background: '#97AB92' }}>
 
       {/* Rate-limit toast — fixed overlay, auto-hides after 6 s */}
       {rateLimitToast && (
@@ -2798,27 +2705,20 @@ function Home() {
         </div>
       )}
 
-      {/* Organic background shapes */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
-        <div className="absolute" style={{
-          top: '-8%', right: '-6%', width: '48%', height: '55%',
-          background: 'radial-gradient(ellipse at 60% 40%, rgba(157,192,139,0.22) 0%, transparent 70%)',
-          borderRadius: '40% 60% 60% 40% / 40% 40% 60% 60%',
-        }} />
-        <div className="absolute" style={{
-          bottom: '-10%', left: '-8%', width: '50%', height: '60%',
-          background: 'radial-gradient(ellipse at 40% 60%, rgba(81,123,62,0.11) 0%, transparent 70%)',
-          borderRadius: '60% 40% 40% 60% / 60% 60% 40% 40%',
-        }} />
+      {/* Subtle leaf watermarks — matches dashboard pattern */}
+      <div className="fixed inset-0 pointer-events-none select-none overflow-hidden" style={{ zIndex: 0 }}>
+        <svg style={{ position:'absolute', top:'-70px', right:'-40px', width:'340px', opacity:.04, transform:'rotate(22deg)' }} viewBox="0 0 100 150" fill="#2A3B22" aria-hidden="true"><path d="M50 8C76 8 92 33 92 62C92 100 70 140 50 148C30 140 8 100 8 62C8 33 24 8 50 8Z"/></svg>
+        <svg style={{ position:'absolute', bottom:'-50px', left:'-25px', width:'260px', opacity:.035, transform:'rotate(-18deg) scaleX(-1)' }} viewBox="0 0 100 150" fill="#2A3B22" aria-hidden="true"><path d="M50 8C76 8 92 33 92 62C92 100 70 140 50 148C30 140 8 100 8 62C8 33 24 8 50 8Z"/></svg>
+        <svg style={{ position:'absolute', top:'40%', right:'-12px', width:'170px', opacity:.028, transform:'rotate(48deg)' }} viewBox="0 0 100 150" fill="#2A3B22" aria-hidden="true"><path d="M50 8C76 8 92 33 92 62C92 100 70 140 50 148C30 140 8 100 8 62C8 33 24 8 50 8Z"/></svg>
+        <svg style={{ position:'absolute', top:'18%', left:'-8px', width:'130px', opacity:.022, transform:'rotate(-32deg)' }} viewBox="0 0 100 150" fill="#2A3B22" aria-hidden="true"><path d="M50 8C76 8 92 33 92 62C92 100 70 140 50 148C30 140 8 100 8 62C8 33 24 8 50 8Z"/></svg>
       </div>
 
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <header className="shrink-0 relative z-30" style={{
-        background:           'rgba(255,255,255,0.82)',
+        background:           '#8BAF84',
         backdropFilter:       'blur(16px)',
         WebkitBackdropFilter: 'blur(16px)',
-        borderBottom:         '1px solid #E2EBE5',
-        boxShadow:            headerScrolled ? '0 4px 16px rgba(28,51,41,0.07)' : 'none',
+        boxShadow:            headerScrolled ? '0 4px 16px rgba(28,51,41,0.12)' : '0 1px 0 rgba(28,51,41,0.10)',
         transition:           'box-shadow 0.3s ease',
       }}>
         <div className="max-w-full px-4 py-3 flex items-center justify-between gap-3">
@@ -2958,7 +2858,7 @@ function Home() {
         onNewChat={handleNewChat}
         onSelectSession={loadSession}
         onDeleteSession={deleteSession}
-        onSwitchMode={setMode}
+
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         isAdmin={isAdmin}
@@ -3007,16 +2907,16 @@ function Home() {
       {/* ── Main content ─────────────────────────────────────────────────────── */}
       <div ref={mainScrollRef} className="flex-1 flex flex-col overflow-y-auto">
         <div className="flex-1 flex flex-col max-w-7xl mx-auto w-full px-4 py-6 md:px-8 md:py-8">
-        <main className="flex-1 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.03)] p-5 md:p-7 flex flex-col md:flex-row gap-5 md:gap-7 min-h-0 matcha-workspace-main" style={{ background: 'linear-gradient(135deg, rgba(240,248,235,0.92) 0%, rgba(246,251,241,0.95) 40%, rgba(237,246,229,0.90) 100%)' }}>
+        <main className="flex-1 flex flex-col md:flex-row gap-5 md:gap-7 min-h-0 matcha-workspace-main" style={{ background: 'transparent' }}>
           <style dangerouslySetInnerHTML={{ __html: MATCHA_LEAF_CSS }} />
           <div className="w-full md:w-[38%] flex flex-col relative" style={{ zIndex: 1 }}>
             {/* ── Usage indicator (Basic plan only) ────────────────────────── */}
             {usage && (
               <div className="mb-3 rounded-xl px-4 py-2.5 flex items-center justify-between gap-3 text-xs"
                 style={{
-                  background: 'linear-gradient(145deg, rgba(245,251,240,0.98), rgba(241,249,236,0.96))',
-                  border: '1px solid rgba(81,123,62,0.10)',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
+                  background: '#DCE8D6',
+                  border: '1px solid #BCCAB5',
+                  boxShadow: '0 2px 8px rgba(20,42,16,0.08)',
                 }}>
                 {usage.plan_type === 'basic' ? (
                   <>
@@ -3045,29 +2945,36 @@ function Home() {
                 )}
               </div>
             )}
-            <PdfUploader key={pdfKey} onUpload={handleUpload} onRemove={handleRemove} t={t} />
-          </div>
-          <div className="flex-1 flex flex-col gap-3 min-h-0" style={{ position: 'relative', zIndex: 1 }}>
-
-            {/* Mode tab switcher */}
-            <div className="flex gap-1.5 p-1.5 rounded-2xl shrink-0" style={{ background: 'linear-gradient(145deg, rgba(245,251,240,0.98), rgba(241,249,236,0.96))', border: '1px solid rgba(81,123,62,0.10)', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-              <button onClick={() => setMode('chat')}
-                className="flex-1 py-2.5 text-sm font-semibold rounded-xl transition-all duration-200"
-                style={mode === 'chat'
-                  ? { background: '#517B3E', color: 'white', boxShadow: '0 2px 12px rgba(81,123,62,0.30)' }
-                  : { color: '#7a9268' }}>
-                {t.tabChat}
+            {/* ── Left panel tab switcher ──────────────────────────────── */}
+            <div className="flex rounded-xl overflow-hidden mb-1" style={{ border: '1px solid #BCCAB5', background: '#DCE8D6' }}>
+              <button
+                onClick={() => setLeftPanelTab('upload')}
+                className="flex-1 py-2.5 text-xs font-semibold transition-all duration-200"
+                style={leftPanelTab === 'upload'
+                  ? { background: '#517B3E', color: '#fff' }
+                  : { color: '#517B3E', background: 'transparent' }}>
+                {t.tabUpload}
               </button>
-              <button onClick={() => setMode('paper')}
-                className="flex-1 py-2.5 text-sm font-semibold rounded-xl transition-all duration-200"
-                style={mode === 'paper'
-                  ? { background: '#517B3E', color: 'white', boxShadow: '0 2px 12px rgba(81,123,62,0.30)' }
-                  : { color: '#7a9268' }}>
-                {t.tabPaper}
+              <button
+                onClick={() => setLeftPanelTab('docs')}
+                className="flex-1 py-2.5 text-xs font-semibold transition-all duration-200"
+                style={leftPanelTab === 'docs'
+                  ? { background: '#517B3E', color: '#fff' }
+                  : { color: '#517B3E', background: 'transparent' }}>
+                {t.tabDocs}{docList.length > 0 ? ` (${docList.length})` : ''}
               </button>
             </div>
 
-            <div className={mode === 'chat' ? 'flex-1 flex flex-col' : 'hidden'}>
+            {leftPanelTab === 'upload' && (
+              <PdfUploader key={pdfKey} onUpload={handleUpload} onRemove={handleRemove} t={t} />
+            )}
+            {leftPanelTab === 'docs' && (
+              <UploadedDocsList docs={docList} onDelete={handleDeleteDoc} t={t} />
+            )}
+          </div>
+          <div className="flex-1 flex flex-col gap-3 min-h-0" style={{ position: 'relative', zIndex: 1 }}>
+
+            <div className="flex-1 flex flex-col">
               <ChatInterface
                 key={chatKey}
                 hasDoc={hasDoc}
@@ -3078,9 +2985,6 @@ function Home() {
                 lang={lang}
                 t={t}
               />
-            </div>
-            <div className={mode === 'paper' ? 'flex-1 flex flex-col' : 'hidden'}>
-              <PaperWriter hasDoc={hasDoc} t={t} />
             </div>
 
           </div>

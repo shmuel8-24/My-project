@@ -3,19 +3,13 @@ import re
 import numpy as np
 from rank_bm25 import BM25Okapi
 
-from extensions import (
-    RRF_K, TOP_K, _bm25_map, _collection_map, _images_map,
-    chroma_client, embeddings_model,
-)
+from extensions import RRF_K, TOP_K, _bm25_map, _images_map, embeddings_model
+from services.faiss_store import FaissCollection, get_user_store
 
 
-def get_user_collection(user_id: int):
-    if user_id not in _collection_map:
-        _collection_map[user_id] = chroma_client.get_or_create_collection(
-            f"documents_u{user_id}",
-            metadata={"hnsw:space": "cosine"},
-        )
-    return _collection_map[user_id]
+def get_user_collection(user_id: int) -> FaissCollection:
+    """Return the FaissCollection for a user (drop-in replacement for ChromaDB get_or_create)."""
+    return get_user_store(user_id)
 
 
 def get_user_images(user_id: int) -> dict:
@@ -125,8 +119,8 @@ def hybrid_search(
             bm25_ids    = [
                 bm25_st["ids"][i] for i in top_indices
                 if scores[i] > 0.0 and (
-                    not file_id or
-                    bm25_st["metadatas"][i].get("file_id") == file_id
+                    not file_id
+                    or bm25_st["metadatas"][i].get("file_id") == file_id
                 )
             ]
 

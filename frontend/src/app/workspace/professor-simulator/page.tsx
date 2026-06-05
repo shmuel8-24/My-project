@@ -5,7 +5,6 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useAuth }     from '../../providers/auth';
 import { useLanguage } from '../../providers/language';
 import { useCourse }   from '../../providers/course';
-import NoCourseState   from '../../../components/NoCourseState';
 import CoursePill      from '../../../components/CoursePill';
 import { UpgradeModal } from '../UpgradeModal';
 import { useDropzone } from 'react-dropzone';
@@ -183,9 +182,12 @@ interface ProfSimSidebarProps {
 function ProfSimSidebar({ isOpen, onClose, isAdmin, lang, userFirstName, userLastName, userEmail, userGender, userInitials, onRequestLogout, isProcessing = false }: ProfSimSidebarProps) {
   const router   = useRouter();
   const pathname = usePathname();
+  const he = lang === 'he';
+  const { selectedCourse, setSelectedCourse } = useCourse();
   const translateClass = isOpen
     ? 'translate-x-0'
-    : lang === 'he' ? 'translate-x-full' : '-translate-x-full';
+    : he ? 'translate-x-full' : '-translate-x-full';
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
 
   return (
     <>
@@ -219,6 +221,33 @@ function ProfSimSidebar({ isOpen, onClose, isAdmin, lang, userFirstName, userLas
           </button>
         </div>
 
+        {/* New chat button */}
+        <div className="px-3 py-3 shrink-0" style={{ borderBottom: '1px solid rgba(100,140,80,0.2)' }}>
+          <button onClick={() => { router.push('/workspace'); onClose(); }}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-white text-sm font-semibold transition-all hover:opacity-90 active:scale-[0.99]"
+            style={{ backgroundColor: '#517B3E' }}>
+            <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            {he ? '+ שיחה חדשה' : '+ New Chat'}
+          </button>
+        </div>
+
+        {/* Active course indicator */}
+        {selectedCourse && (
+          <div className="mx-3 mt-2 px-3 py-2.5 rounded-xl flex items-center justify-between gap-2 shrink-0"
+            style={{ background: `${selectedCourse.color}12`, border: `1px solid ${selectedCourse.color}25` }}>
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-sm leading-none shrink-0">{selectedCourse.icon}</span>
+              <div className="min-w-0">
+                <p className="text-[9px] font-bold uppercase tracking-wider" style={{ color: selectedCourse.color }}>{he ? 'קורס פעיל' : 'Active course'}</p>
+                <p className="text-xs font-bold text-[#1a2e14] truncate">{selectedCourse.name}</p>
+              </div>
+            </div>
+            <button onClick={() => setSelectedCourse(null)} className="shrink-0 text-[10px] px-1.5 py-0.5 rounded hover:bg-black/10 transition-colors" style={{ color: selectedCourse.color }}>✕</button>
+          </div>
+        )}
+
         {/* Nav sections */}
         <div className="flex-1 overflow-y-auto flex flex-col">
           <div className="px-3 py-3 space-y-1 shrink-0" style={{ borderBottom: '1px solid rgba(100,140,80,0.2)' }}>
@@ -233,7 +262,13 @@ function ProfSimSidebar({ isOpen, onClose, isAdmin, lang, userFirstName, userLas
             <button onClick={() => { router.push('/workspace'); onClose(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
               <span className="text-base leading-none shrink-0">🌱</span>
-              {lang === 'he' ? 'מרחב לימוד' : 'StudyLab'}
+              {he ? 'מרחב לימוד' : 'StudyLab'}
+            </button>
+
+            <button onClick={() => { router.push('/academic-writing'); onClose(); }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
+              <span className="text-base leading-none shrink-0">✍️</span>
+              {he ? 'כתיבה אקדמית' : 'Academic Writing'}
             </button>
 
             {/* ── Active item: הראש של המרצה ──────────────────────────────────
@@ -350,30 +385,46 @@ function ProfSimSidebar({ isOpen, onClose, isAdmin, lang, userFirstName, userLas
             <span className="text-sm font-medium">{lang === 'he' ? 'יציאה' : 'Logout'}</span>
           </button>
 
-          <button
-            dir={lang === 'he' ? 'rtl' : 'ltr'}
-            onClick={() => { onClose(); router.push('/profile'); }}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all hover:bg-[#517B3E]/10 active:scale-[0.99] group"
-            style={{ textAlign: 'start' }}
-          >
-            <div
-              className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0 select-none transition-transform group-hover:scale-105"
-              style={{ background: 'linear-gradient(135deg, #517B3E 0%, #2A3B22 100%)' }}
+          <div className="relative">
+            {isProfileMenuOpen && (
+              <div className="absolute bottom-full left-0 mb-2 w-full bg-white rounded-xl shadow-xl border border-gray-100 p-2 z-50">
+                <button onClick={() => { setIsProfileMenuOpen(false); router.push('/settings'); onClose(); }}
+                  className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 text-gray-700 text-sm transition-colors">
+                  <span aria-hidden="true">⚙️</span>
+                  <span>{he ? 'הגדרות חשבון' : 'Account Settings'}</span>
+                </button>
+                <button onClick={() => { setIsProfileMenuOpen(false); onClose(); onRequestLogout(); }}
+                  className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-red-50 text-red-600 text-sm transition-colors">
+                  <span aria-hidden="true">🚪</span>
+                  <span>{he ? 'התנתק' : 'Logout'}</span>
+                </button>
+              </div>
+            )}
+            <button
+              dir={he ? 'rtl' : 'ltr'}
+              onClick={() => setIsProfileMenuOpen(p => !p)}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all hover:bg-[#517B3E]/10 active:scale-[0.99] cursor-pointer group"
+              style={{ textAlign: 'start' }}
             >
-              <AvatarContent gender={userGender} initials={userInitials} />
-            </div>
-            <div className="flex-1 min-w-0 text-start">
-              <p className="text-sm font-semibold text-[#2d3b25] truncate leading-snug">
-                {userFirstName} {userLastName}
-              </p>
-              <p className="text-[11px] text-[#7a9268] truncate">{userEmail}</p>
-            </div>
-            <svg className="w-4 h-4 text-[#7a9268] shrink-0 opacity-50 group-hover:opacity-100 transition-opacity"
-              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round"
-                d="M12 6.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 12.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 18.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z" />
-            </svg>
-          </button>
+              <div
+                className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0 select-none transition-transform group-hover:scale-105"
+                style={{ background: 'linear-gradient(135deg, #517B3E 0%, #2A3B22 100%)' }}
+              >
+                <AvatarContent gender={userGender} initials={userInitials} />
+              </div>
+              <div className="flex-1 min-w-0 text-start">
+                <p className="text-sm font-semibold text-[#2d3b25] truncate leading-snug">
+                  {userFirstName} {userLastName}
+                </p>
+                <p className="text-[11px] text-[#7a9268] truncate">{userEmail}</p>
+              </div>
+              <svg className="w-4 h-4 text-[#7a9268] shrink-0 opacity-50 group-hover:opacity-100 transition-opacity"
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round"
+                  d="M12 6.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 12.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 18.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z" />
+              </svg>
+            </button>
+          </div>
         </div>
       </aside>
     </>
@@ -385,7 +436,7 @@ export default function ProfessorSimulatorPage() {
   const router   = useRouter();
   const { user: authUser, isLoading: authLoading } = useAuth();
   const { lang, toggleLanguage } = useLanguage();
-  const { selectedCourse } = useCourse();
+  const { selectedCourse, courseHydrated } = useCourse();
 
   // ── Usage / plan ────────────────────────────────────────────────────────────
   const [usage, setUsage] = useState<UsageData | null>(null);
@@ -450,6 +501,13 @@ export default function ProfessorSimulatorPage() {
     if (authLoading) return;
     if (!authUser) router.replace('/?login=true');
   }, [authLoading, authUser, router]);
+
+  // ── Course guard — hard redirect if no course is active ──────────────────────
+  useEffect(() => {
+    if (authLoading || !authUser) return;
+    if (!courseHydrated) return;
+    if (!selectedCourse) router.replace('/course-picker');
+  }, [authLoading, authUser, courseHydrated, selectedCourse, router]);
 
   // ── Fetch usage ───────────────────────────────────────────────────────────────
   const refreshUsage = useCallback(() => {
@@ -623,26 +681,23 @@ export default function ProfessorSimulatorPage() {
   };
 
   // ── Render ────────────────────────────────────────────────────────────────────
-  if (authLoading || !authUser) {
+  if (authLoading || !authUser || !courseHydrated || !selectedCourse) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: '#F2F5F1' }}>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: '#97AB92' }}>
         <Spinner />
       </div>
     );
   }
 
   return (
-    <div dir={lang === 'he' ? 'rtl' : 'ltr'} className="min-h-screen flex flex-col" style={{ background: '#F2F5F1' }}>
-
-      {/* Course gate */}
-      {!selectedCourse && <NoCourseState />}
+    <div dir={lang === 'he' ? 'rtl' : 'ltr'} className="min-h-screen flex flex-col" style={{ background: '#97AB92' }}>
 
       {/* ── Header ── */}
       <header className="shrink-0 relative z-30" style={{
-        background: 'rgba(255,255,255,0.82)',
+        background: '#8BAF84',
         backdropFilter: 'blur(16px)',
         WebkitBackdropFilter: 'blur(16px)',
-        borderBottom: '1px solid #E2EBE5',
+        boxShadow: '0 1px 0 rgba(28,51,41,0.10)',
       }}>
         <div className="max-w-full px-4 py-3 flex items-center justify-between gap-3">
 

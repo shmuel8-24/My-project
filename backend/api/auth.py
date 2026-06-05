@@ -436,7 +436,7 @@ def transcribe_audio(user_id: int):
 @auth_bp.route("/api/profile", methods=["GET"])
 @token_required
 def get_profile(user_id: int):
-    from extensions import chroma_client as cc
+    from services.rag import get_user_collection as _get_col
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.id == user_id).first()
@@ -453,7 +453,7 @@ def get_profile(user_id: int):
         ) or 0
         document_count = 0
         try:
-            col = cc.get_collection(f"documents_u{user_id}")
+            col = _get_col(user_id)
             if col.count() > 0:
                 metas = col.get(include=["metadatas"])["metadatas"]
                 document_count = len({m.get("source", "") for m in metas if m.get("source")})
@@ -570,7 +570,7 @@ def refresh_token(user_id: int):
 @auth_bp.route("/api/profile/documents", methods=["GET"])
 @token_required
 def get_profile_documents(user_id: int):
-    from extensions import chroma_client as cc
+    from services.rag import get_user_collection as _get_col
     db = SessionLocal()
     try:
         records = (
@@ -581,7 +581,7 @@ def get_profile_documents(user_id: int):
         )
         chunk_map: dict = {}
         try:
-            col = cc.get_collection(f"documents_u{user_id}")
+            col = _get_col(user_id)
             if col.count() > 0:
                 metas = col.get(include=["metadatas"])["metadatas"]
                 for m in metas:
