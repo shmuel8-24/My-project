@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, Suspense } from 'react';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth, AUTH_KEYS } from '../providers/auth';
 
@@ -294,8 +294,13 @@ function inputBlur(e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-export default function ProfilePage() {
+// Exported so /workspace/documents can render the same component (incl. its
+// Documents tab) directly — landing there opens straight to that tab without
+// duplicating the fetch/list/delete logic that lives here.
+export function ProfilePageInner() {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { user: authUser, isLoading: authLoading, logout: authLogout } = useAuth();
 
   const [lang, setLang] = useState<Lang>(() => {
@@ -306,7 +311,11 @@ export default function ProfilePage() {
   const dir = he ? 'rtl' : 'ltr';
   const t   = i18n[lang];
 
-  const [activeTab, setActiveTab] = useState<'profile' | 'documents'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'documents'>(() => {
+    if (searchParams.get('tab') === 'documents') return 'documents';
+    if (pathname === '/workspace/documents') return 'documents';
+    return 'profile';
+  });
   const [loading,   setLoading]   = useState(true);
 
   // ── Personal info ──────────────────────────────────────────────────────────
@@ -1151,5 +1160,13 @@ export default function ProfilePage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function ProfilePage() {
+  return (
+    <Suspense fallback={null}>
+      <ProfilePageInner />
+    </Suspense>
   );
 }

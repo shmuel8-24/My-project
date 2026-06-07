@@ -2,6 +2,7 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import { Settings as IconSettings } from 'lucide-react';
 import { useAuth }     from '../providers/auth';
 import { useLanguage } from '../providers/language';
 import { useCourse }   from '../providers/course';
@@ -426,6 +427,15 @@ function Sidebar({ isOpen, onClose, isAdmin, t, lang, userFirstName, userLastNam
                 <span className="text-base leading-none shrink-0">{emoji}</span>{label}
               </button>
             ))}
+            <button onClick={() => { router.push('/settings'); onClose(); }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all"
+              style={isActive('/settings')
+                ? { backgroundColor: '#D1E6D9', color: '#183025', fontWeight: 700 }
+                : { color: '#1C3329' }}
+              onMouseEnter={e => { if (!isActive('/settings')) (e.currentTarget as HTMLButtonElement).style.backgroundColor = '#EEF5F0'; }}
+              onMouseLeave={e => { if (!isActive('/settings')) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}>
+              <IconSettings className="w-4 h-4 shrink-0" />{he ? 'הגדרות' : 'Settings'}
+            </button>
           </div>
           <div className="flex-1" />
           {isAdmin && (
@@ -1564,9 +1574,9 @@ export default function AcademicWritingPage() {
       .finally(() => setSessionsLoading(false));
 
     authFetch(`${API}/documents`)
-      .then(r => r.ok ? r.json() : [])
-      .then((data: DocInfo[]) => {
-        const arr = Array.isArray(data) ? data : [];
+      .then(r => r.ok ? r.json() : { documents: [] })
+      .then((data: { documents: DocInfo[] }) => {
+        const arr = Array.isArray(data.documents) ? data.documents : [];
         setDocs(arr);
         // Use OR so restoring uploadedFiles from storage isn't clobbered
         // by an empty docs response arriving after the load effect runs.
@@ -1626,8 +1636,10 @@ export default function AcademicWritingPage() {
         setUploadError(null);
         // Refresh the "מסמכים שהועלו" tab so the new file appears there immediately
         authFetch(`${API}/documents`)
-          .then(r => r.ok ? r.json() : [])
-          .then((d: DocInfo[]) => { if (Array.isArray(d)) setDocs(d); })
+          .then(r => r.ok ? r.json() : { documents: [] })
+          .then((d: { documents: DocInfo[] }) => {
+            if (Array.isArray(d.documents)) setDocs(d.documents);
+          })
           .catch(() => {});
       }
     } catch (err) {

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import { Settings as IconSettings } from 'lucide-react';
 import { useAuth }       from '../providers/auth';
 import { useLanguage }   from '../providers/language';
 import { useCourse }     from '../providers/course';
@@ -650,6 +651,12 @@ function MasterySidebar({
             >
               <span className="text-base leading-none shrink-0">🎯</span>
               {he ? 'שליטה בחומר' : 'Mastery'}
+            </button>
+
+            <button onClick={() => { router.push('/settings'); onClose(); }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
+              <IconSettings className="w-4 h-4 shrink-0" />
+              {he ? 'הגדרות' : 'Settings'}
             </button>
 
             <button disabled

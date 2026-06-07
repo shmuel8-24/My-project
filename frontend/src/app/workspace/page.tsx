@@ -12,9 +12,11 @@ import { useHaptics }                from '../../hooks/useHaptics';
 import { playPop, getSoundEnabled, toggleSound } from '../../utils/audio';
 import type { KeyboardEvent, ChangeEvent } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import { Settings as IconSettings } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import type { FileRejection } from 'react-dropzone';
 import UserProfileModal from './UserProfileModal';
+import { SidebarDocumentsLink } from '../../components/Sidebar';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -1133,7 +1135,12 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
   const [quizError,     setQuizError]     = useState<string | null>(null);
   const [quizKey,       setQuizKey]       = useState(0);
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading]);
+  useEffect(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    if (nearBottom) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, loading]);
 
   useEffect(() => {
     const el = messagesContainerRef.current;
@@ -2248,6 +2255,15 @@ function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDel
               <span className="text-base leading-none shrink-0">🎯</span>
               {t.navGapFill}
             </button>
+            <SidebarDocumentsLink lang={lang} onNavigate={onClose} />
+            <button
+              onClick={() => { router.push('/settings'); onClose(); }}
+              className={['w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all', pathname === '/settings' ? 'font-bold' : 'hover:bg-white/5'].join(' ')}
+              style={pathname === '/settings' ? { backgroundColor: '#D1E6D9', color: '#183025', fontWeight: 700 } : { color: '#1C3329' }}
+            >
+              <IconSettings className="w-4 h-4 shrink-0" />
+              {lang === 'he' ? 'הגדרות' : 'Settings'}
+            </button>
             <button disabled
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[#7a9268] text-sm cursor-not-allowed opacity-50">
               <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -2393,7 +2409,6 @@ interface UsageInfo {
 const MATCHA_LEAF_CSS = `
   .matcha-workspace-main {
     position: relative !important;
-    overflow: hidden !important;
   }
   .matcha-workspace-main::before {
     content: '';
@@ -2686,7 +2701,7 @@ function Home() {
   if (!isAuthenticated || !courseHydrated || !selectedCourse) return null;
 
   return (
-    <div className="min-h-screen flex flex-col relative" style={{ background: '#97AB92' }}>
+    <div className="h-screen flex flex-col overflow-hidden relative" style={{ background: '#97AB92' }}>
 
       {/* Rate-limit toast — fixed overlay, auto-hides after 6 s */}
       {rateLimitToast && (
@@ -2974,7 +2989,7 @@ function Home() {
           </div>
           <div className="flex-1 flex flex-col gap-3 min-h-0" style={{ position: 'relative', zIndex: 1 }}>
 
-            <div className="flex-1 flex flex-col">
+            <div className="flex-1 flex flex-col min-h-0">
               <ChatInterface
                 key={chatKey}
                 hasDoc={hasDoc}

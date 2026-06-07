@@ -46,6 +46,11 @@ db/
 backend/db/
 backend/data/db/
 
+# Backend — FAISS vector store (live per-user data, not for version control —
+# tracking these caused git reset/checkout/stash to silently overwrite/wipe
+# users' persisted document indexes)
+backend/data/faiss/
+
 # Backend — SQLite chat-history DB (user data, not for version control)
 chat.db
 backend/chat.db

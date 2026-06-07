@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import { Settings as IconSettings, CheckCircle2, X as IconX } from 'lucide-react';
 import { useAuth }     from '../../providers/auth';
 import { useLanguage } from '../../providers/language';
 import { useCourse }   from '../../providers/course';
@@ -321,6 +322,12 @@ function ProfSimSidebar({ isOpen, onClose, isAdmin, lang, userFirstName, userLas
               {lang === 'he' ? 'שליטה בחומר' : 'Mastery'}
             </button>
 
+            <button onClick={() => { router.push('/settings'); onClose(); }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
+              <IconSettings className="w-4 h-4 shrink-0" />
+              {lang === 'he' ? 'הגדרות' : 'Settings'}
+            </button>
+
             <button disabled
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[#7a9268] text-sm cursor-not-allowed opacity-50">
               <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -447,17 +454,39 @@ export default function ProfessorSimulatorPage() {
   const canSim    = simLimit === null || simsUsed < simLimit;
   const fileLimit = isPro ? null : FREE_FILE_LIMIT;
 
-  // ── Professor config ─────────────────────────────────────────────────────────
-  const [profName,  setProfName]  = useState('');
+  // ── Professor config — derived from the active course's own metadata ────────
   const [examStyle, setExamStyle] = useState('');
-  const [topics,    setTopics]    = useState('');
+  const [courseDetails, setCourseDetails] = useState<{ lecturer_name: string; ta_name: string; has_tirgul: boolean } | null>(null);
+  const [examWriter, setExamWriter] = useState<'lecturer' | 'ta'>('lecturer');
 
-  // Pre-fill topics with selected course name when course changes
+  // Fetch lecturer / TA metadata for the active course — no manual entry needed
   useEffect(() => {
-    if (!selectedCourse) return;
-    Promise.resolve(selectedCourse.name)
-      .then(name => setTopics(prev => prev || name));
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      setCourseDetails(null);
+      setExamWriter('lecturer');
+    });
+    if (!selectedCourse) return () => { cancelled = true; };
+    authFetch(`${API}/api/courses/details?name=${encodeURIComponent(selectedCourse.name)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then((d: Record<string, unknown> | null) => {
+        if (cancelled || !d) return;
+        setCourseDetails({
+          lecturer_name: ((d.lecturer_name as string) || '').trim(),
+          ta_name:       ((d.ta_name as string) || '').trim(),
+          has_tirgul:    !!d.has_tirgul,
+        });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, [selectedCourse]);
+
+  const lecturerName = courseDetails?.lecturer_name ?? '';
+  const taName       = courseDetails?.ta_name ?? '';
+  const hasTaOption  = !!courseDetails?.has_tirgul && !!taName && !!lecturerName;
+  const profName     = hasTaOption && examWriter === 'ta' ? taName : lecturerName;
+  const topics       = selectedCourse?.name ?? '';
 
   // ── Files ────────────────────────────────────────────────────────────────────
   const [files,     setFiles]     = useState<UploadedFile[]>([]);
@@ -470,6 +499,7 @@ export default function ProfessorSimulatorPage() {
   const [sending,  setSending]  = useState(false);
   const [chatErr,  setChatErr]  = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   // ── Upgrade modal ─────────────────────────────────────────────────────────────
   const [upgradeOpen, setUpgradeOpen]   = useState(false);
@@ -543,7 +573,10 @@ export default function ProfessorSimulatorPage() {
 
   // ── Scroll to bottom ──────────────────────────────────────────────────────────
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    if (nearBottom) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, sending]);
 
   // ── File upload (dropzone) ───────────────────────────────────────────────────
@@ -594,6 +627,35 @@ export default function ProfessorSimulatorPage() {
     disabled: uploading || (!isPro && files.length >= FREE_FILE_LIMIT),
   });
 
+  // ── Sample exam (required — gates the simulation start) ──────────────────────
+  const [sampleExam,           setSampleExam]           = useState<UploadedFile | null>(null);
+  const [sampleExamUploading,  setSampleExamUploading]  = useState(false);
+  const [sampleExamErr,        setSampleExamErr]        = useState<string | null>(null);
+
+  const onDropSampleExam = useCallback(async (accepted: File[]) => {
+    const file = accepted[0];
+    if (!file) return;
+
+    setSampleExamUploading(true); setSampleExamErr(null);
+    try {
+      const form = new FormData();
+      form.append('files', file);
+      const res  = await authFetch(`${API}/upload-pdf`, { method: 'POST', body: form });
+      const data = await res.json();
+      if (!res.ok) { setSampleExamErr(data.error ?? 'שגיאה בהעלאת הקובץ'); return; }
+      const uploaded = (data.files ?? [])[0] as { source: string; file_id: string; size: number } | undefined;
+      if (uploaded) setSampleExam({ name: uploaded.source, file_id: uploaded.file_id, size: uploaded.size });
+    } catch { setSampleExamErr('לא ניתן להתחבר לשרת'); }
+    finally { setSampleExamUploading(false); }
+  }, []);
+
+  const { getRootProps: getSampleExamRootProps, getInputProps: getSampleExamInputProps } = useDropzone({
+    onDrop: onDropSampleExam,
+    accept: { 'application/pdf': ['.pdf'] },
+    maxFiles: 1,
+    disabled: sampleExamUploading || !!sampleExam,
+  });
+
   // ── Send / generate ───────────────────────────────────────────────────────────
   const send = useCallback(async (text: string) => {
     if (!text.trim() || sending) return;
@@ -620,7 +682,7 @@ export default function ProfessorSimulatorPage() {
           topics:         topics.trim(),
           question:       text,
           history:        messages.map(m => ({ role: m.role, content: m.content })),
-          file_ids:       files.map(f => f.file_id),
+          file_ids:       [...files.map(f => f.file_id), ...(sampleExam ? [sampleExam.file_id] : [])],
         }),
       });
       const data = await res.json();
@@ -644,10 +706,11 @@ export default function ProfessorSimulatorPage() {
       refreshUsage();
     } catch { setChatErr('לא ניתן להתחבר לשרת. בדוק שהשרת פועל.'); }
     finally { setSending(false); }
-  }, [sending, canSim, profName, examStyle, topics, messages, files, refreshUsage]);
+  }, [sending, canSim, profName, examStyle, topics, messages, files, sampleExam, refreshUsage]);
 
   const startSimulation = () => {
-    send('צור שאלת בחינה אופיינית אחת (עם ניתוח מלכודת מפורט) על בסיס חומר הלימוד שלי.');
+    if (!sampleExam) return;
+    send('צור שאלת בחינה אופיינית אחת (עם ניתוח מלכודת מפורט) על בסיס חומר הלימוד שלי ומבחן הדוגמה שהעליתי.');
   };
 
   // ── Derived counters ──────────────────────────────────────────────────────────
@@ -690,7 +753,7 @@ export default function ProfessorSimulatorPage() {
   }
 
   return (
-    <div dir={lang === 'he' ? 'rtl' : 'ltr'} className="min-h-screen flex flex-col" style={{ background: '#97AB92' }}>
+    <div dir={lang === 'he' ? 'rtl' : 'ltr'} className="h-screen flex flex-col overflow-hidden" style={{ background: '#97AB92' }}>
 
       {/* ── Header ── */}
       <header className="shrink-0 relative z-30" style={{
@@ -834,72 +897,162 @@ export default function ProfessorSimulatorPage() {
       )}
 
       {/* ── Main two-column layout ── */}
-      <main className="flex-1 flex flex-col md:flex-row gap-5 max-w-7xl mx-auto w-full p-5 md:p-6 min-h-0">
+      <main className="flex-1 flex flex-col md:flex-row gap-5 max-w-7xl mx-auto w-full p-5 md:p-6 min-h-0 overflow-y-auto">
 
         {/* ════════════ LEFT COLUMN — Config + Upload ════════════ */}
         <div className="w-full md:w-[38%] flex flex-col gap-4 shrink-0">
 
           {/* ── Professor config card ── */}
-          <div style={card} className="overflow-hidden">
+          <div style={{ ...card, borderRadius: '1.25rem' }} className="overflow-hidden">
             <div
-              className="flex items-center gap-2.5 px-5 py-3.5"
-              style={{ borderBottom: '1px solid rgba(157,192,139,0.28)', background: 'linear-gradient(135deg,rgba(81,123,62,0.07),transparent)' }}
+              className="px-6 py-4 flex flex-col gap-2.5"
+              style={{ borderBottom: '1px solid rgba(157,192,139,0.28)', background: 'linear-gradient(135deg,rgba(81,123,62,0.06),transparent)' }}
             >
-              <span className="text-lg select-none">🧠</span>
-              <p className="font-bold text-[#2A3B22] text-sm flex-1">פרטי המרצה</p>
+              <p className="font-bold text-[#2A3B22] text-sm">פרטי המרצה</p>
+
+              {/* Read-only course context badge — derived from active course, never editable */}
+              {topics && (
+                <div
+                  className="inline-flex items-center gap-1.5 self-start rounded-full px-3 py-1.5 text-xs font-medium"
+                  style={{ background: 'rgba(81,123,62,0.10)', color: '#2A3B22' }}
+                >
+                  <span className="text-[#7a9268] font-semibold">קורס:</span>
+                  <span className="truncate max-w-[180px]">{topics}</span>
+                </div>
+              )}
             </div>
 
-            <div className="px-5 py-4 flex flex-col gap-3.5">
+            <div className="px-6 py-5 flex flex-col gap-5">
 
-              {/* Professor name */}
+              {/* Who writes the exam — derived from the active course's own metadata */}
               <div>
-                <label className="block text-[10px] font-semibold text-[#7a9268] uppercase tracking-wider mb-1.5">
-                  שם המרצה
-                </label>
-                <input
-                  type="text" value={profName} onChange={e => setProfName(e.target.value)}
-                  placeholder='לדוגמה: ד"ר כהן' dir="auto"
-                  className="w-full rounded-xl px-3.5 py-2.5 text-sm outline-none transition-all"
-                  style={inputStyle} onFocus={focusGreen} onBlur={blurGreen}
-                />
+                <p className="text-[10px] font-semibold text-[#7a9268] uppercase tracking-wider mb-2">
+                  מי כותב את המבחן
+                </p>
+                {hasTaOption ? (
+                  <div
+                    className="flex rounded-xl overflow-hidden border"
+                    style={{ borderColor: 'rgba(157,192,139,0.4)' }}
+                  >
+                    {([
+                      { key: 'lecturer', label: lecturerName },
+                      { key: 'ta',       label: taName },
+                    ] as const).map((opt, i) => {
+                      const active = examWriter === opt.key;
+                      return (
+                        <button
+                          key={opt.key}
+                          type="button"
+                          onClick={() => setExamWriter(opt.key)}
+                          className="flex-1 px-3.5 py-2.5 text-sm transition-all truncate"
+                          style={{
+                            background:  active ? 'rgba(81,123,62,0.14)' : 'rgba(255,255,255,0.55)',
+                            color:       active ? '#2A3B22' : '#7a9268',
+                            fontWeight:  active ? 700 : 500,
+                            borderInlineStart: i === 1 ? '1px solid rgba(157,192,139,0.4)' : undefined,
+                          }}
+                        >
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : lecturerName ? (
+                  <div
+                    className="rounded-xl px-4 py-3 text-sm font-semibold truncate"
+                    style={{ background: 'rgba(81,123,62,0.08)', border: '1px solid rgba(81,123,62,0.22)', color: '#2A3B22' }}
+                  >
+                    מרצה כותב/ת: {lecturerName}
+                  </div>
+                ) : (
+                  <p className="text-xs text-[#7a9268]">לא הוגדר מרצה לקורס זה — ניתן להוסיף בעריכת הקורס</p>
+                )}
               </div>
 
-              {/* Exam style */}
+              {/* Exam style — segmented chip selector */}
               <div>
-                <label className="block text-[10px] font-semibold text-[#7a9268] uppercase tracking-wider mb-1.5">
+                <p className="text-[10px] font-semibold text-[#7a9268] uppercase tracking-wider mb-2">
                   סגנון בחינה
-                </label>
-                <div className="relative">
-                  <select
-                    value={examStyle} onChange={e => setExamStyle(e.target.value)}
-                    className="w-full rounded-xl px-3.5 py-2.5 text-sm outline-none transition-all appearance-none"
-                    style={{ ...inputStyle, color: examStyle ? '#2A3B22' : '#9aaf8a' }}
-                    onFocus={focusGreen} onBlur={blurGreen}
-                  >
-                    <option value="">בחר סגנון...</option>
-                    {STYLE_OPTIONS.map(o => (
-                      <option key={o.value} value={o.value}>{o.label}</option>
-                    ))}
-                  </select>
-                  <span className="pointer-events-none absolute inset-y-0 end-3 flex items-center">
-                    <svg className="w-4 h-4 text-[#9DC08B]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                    </svg>
-                  </span>
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {STYLE_OPTIONS.map(o => {
+                    const active = examStyle === o.value;
+                    return (
+                      <button
+                        key={o.value}
+                        type="button"
+                        onClick={() => setExamStyle(active ? '' : o.value)}
+                        className="px-3.5 py-2 rounded-full text-xs transition-all border"
+                        style={{
+                          background:  active ? 'rgba(81,123,62,0.14)' : 'rgba(255,255,255,0.55)',
+                          borderColor: active ? '#517B3E' : 'rgba(157,192,139,0.35)',
+                          color:       active ? '#2A3B22' : '#7a9268',
+                          fontWeight:  active ? 600 : 500,
+                        }}
+                      >
+                        {o.label}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* Topics */}
+              {/* Sample exam — required upload that gates the simulation */}
               <div>
-                <label className="block text-[10px] font-semibold text-[#7a9268] uppercase tracking-wider mb-1.5">
-                  נושאים (אופציונלי)
-                </label>
-                <input
-                  type="text" value={topics} onChange={e => setTopics(e.target.value)}
-                  placeholder="לדוגמה: גמישות, אינטגרלים, סדרות" dir="auto"
-                  className="w-full rounded-xl px-3.5 py-2.5 text-sm outline-none transition-all"
-                  style={inputStyle} onFocus={focusGreen} onBlur={blurGreen}
-                />
+                <p className="text-[10px] font-semibold text-[#7a9268] uppercase tracking-wider mb-2">
+                  מבחן לדוגמא (חובה)
+                </p>
+
+                {sampleExam ? (
+                  <div
+                    className="rounded-xl px-4 py-3 flex items-center justify-between gap-3 text-sm"
+                    style={{ background: 'rgba(81,123,62,0.08)', border: '1px solid rgba(81,123,62,0.22)' }}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: '#517B3E' }} strokeWidth={2.2} />
+                      <span className="truncate font-medium text-[#2A3B22]">{sampleExam.name}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { setSampleExam(null); setSampleExamErr(null); }}
+                      className="flex items-center gap-1 text-xs font-semibold shrink-0 px-2 py-1 rounded-lg transition-colors hover:bg-[rgba(81,123,62,0.10)]"
+                      style={{ color: '#7a9268' }}
+                    >
+                      <IconX className="w-3.5 h-3.5" strokeWidth={2.2} />
+                      <span>החלף</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div
+                    {...getSampleExamRootProps()}
+                    className="cursor-pointer rounded-xl border-2 border-dashed px-4 py-4 flex items-center justify-center gap-2 text-sm text-center transition-all"
+                    style={{
+                      borderColor: 'rgba(157,192,139,0.55)',
+                      background:  'rgba(255,255,255,0.45)',
+                      color:       '#7a9268',
+                    }}
+                  >
+                    <input {...getSampleExamInputProps()} />
+                    {sampleExamUploading ? (
+                      <>
+                        <Spinner size="sm" />
+                        <span>מעלה קובץ...</span>
+                      </>
+                    ) : (
+                      <span className="font-medium">העלה קובץ מבחן (.pdf)</span>
+                    )}
+                  </div>
+                )}
+
+                {sampleExamErr && (
+                  <p className="text-xs text-red-500 mt-1.5">{sampleExamErr}</p>
+                )}
+
+                {!sampleExam && (
+                  <p className="text-xs mt-1.5" style={{ color: '#a3855f' }}>
+                    יש להעלות מבחן לדוגמא כדי להתחיל את הסימולציה
+                  </p>
+                )}
               </div>
 
             </div>
@@ -1061,7 +1214,7 @@ export default function ProfessorSimulatorPage() {
         </div>
 
         {/* ════════════ RIGHT COLUMN — Chat ════════════ */}
-        <div className="flex-1 flex flex-col gap-0 min-h-0 min-h-[520px]">
+        <div className="flex-1 flex flex-col gap-0 min-h-[520px]">
           <div
             className="flex-1 flex flex-col overflow-hidden"
             style={{ ...card, display: 'flex', flexDirection: 'column' }}
@@ -1086,7 +1239,7 @@ export default function ProfessorSimulatorPage() {
             </div>
 
             {/* Messages area */}
-            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4 min-h-0">
+            <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-5 py-4 space-y-4 min-h-0">
 
               {messages.length === 0 && !sending && (
                 <div className="flex flex-col items-center justify-center h-full gap-5 py-10 text-center">
@@ -1103,15 +1256,21 @@ export default function ProfessorSimulatorPage() {
                     </p>
                   </div>
                   {canSim && (
-                    <button
-                      onClick={startSimulation}
-                      disabled={sending}
-                      className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-bold transition-all hover:opacity-90 active:scale-[0.98]"
-                      style={{ background: 'linear-gradient(135deg,#517B3E,#2A3B22)' }}
-                    >
-                      <span>🧠</span>
-                      <span>צור סימולציה</span>
-                    </button>
+                    <div className="flex flex-col items-center gap-2">
+                      <button
+                        onClick={startSimulation}
+                        disabled={sending || !sampleExam}
+                        className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-bold transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
+                        style={!sending && sampleExam ? { background: 'linear-gradient(135deg,#517B3E,#2A3B22)' } : undefined}
+                      >
+                        <span>צור סימולציה</span>
+                      </button>
+                      {!sampleExam && (
+                        <p className="text-xs" style={{ color: '#a3855f' }}>
+                          יש להעלות מבחן לדוגמא כדי להתחיל את הסימולציה
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
               )}
@@ -1183,17 +1342,24 @@ export default function ProfessorSimulatorPage() {
             >
               {/* Generate button (shown when chat is empty) */}
               {messages.length === 0 && !sending && (
-                <button
-                  onClick={startSimulation}
-                  disabled={sending || showSimWarn}
-                  className="w-full py-3 rounded-xl text-white text-sm font-bold flex items-center justify-center gap-2 transition-all hover:opacity-90 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ background: showSimWarn ? 'rgba(157,192,139,0.4)' : 'linear-gradient(135deg,#517B3E,#2A3B22)' }}
-                >
-                  {sending
-                    ? <><Spinner size="sm" /><span>מייצר...</span></>
-                    : <><span>🧠</span><span>צור סימולציית מבחן</span></>
-                  }
-                </button>
+                <div className="flex flex-col gap-1.5">
+                  <button
+                    onClick={startSimulation}
+                    disabled={sending || showSimWarn || !sampleExam}
+                    className="w-full py-3 rounded-xl text-white text-sm font-bold flex items-center justify-center gap-2 transition-all hover:opacity-90 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
+                    style={!showSimWarn && sampleExam ? { background: 'linear-gradient(135deg,#517B3E,#2A3B22)' } : undefined}
+                  >
+                    {sending
+                      ? <><Spinner size="sm" /><span>מייצר...</span></>
+                      : <span>צור סימולציית מבחן</span>
+                    }
+                  </button>
+                  {!sampleExam && (
+                    <p className="text-xs text-center" style={{ color: '#a3855f' }}>
+                      יש להעלות מבחן לדוגמא כדי להתחיל את הסימולציה
+                    </p>
+                  )}
+                </div>
               )}
 
               {/* Follow-up input (shown when conversation started) */}

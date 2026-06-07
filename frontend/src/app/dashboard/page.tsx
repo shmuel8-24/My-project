@@ -2,18 +2,13 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import { Settings as IconSettings } from 'lucide-react';
 import { useAuth }     from '../providers/auth';
 import { useLanguage } from '../providers/language';
 import { useCourse, COURSES, type Course } from '../providers/course';
 import CoursePill        from '../../components/CoursePill';
-import ScreenTimeChart   from '../../components/ScreenTimeChart';
-
-const API = 'http://127.0.0.1:5003';
 
 /* ── Auth helpers ─────────────────────────────────────────────────────────── */
-function getToken() {
-  return typeof window !== 'undefined' ? localStorage.getItem('levy_ai_token') : null;
-}
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
   try {
     const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
@@ -48,10 +43,6 @@ const D = {
 function LogoMark({ size = 36 }: { size?: number }) {
   // eslint-disable-next-line @next/next/no-img-element
   return <img src="/logo.PNG" alt="U-Note" style={{ height: size, width: 'auto', objectFit: 'contain' }} />;
-}
-function Spinner({ large = false }: { large?: boolean }) {
-  const s = large ? 'w-10 h-10 border-4' : 'w-5 h-5 border-2';
-  return <span className={`${s} inline-block rounded-full animate-spin border-white/20 border-t-[#9DC08B]`} />;
 }
 function AvatarContent({ gender, initials }: { gender: string; initials: string }) {
   if (gender === 'זכר') return (
@@ -90,16 +81,6 @@ function LogoutConfirmModal({ onConfirm, onCancel }: { onConfirm: () => void; on
       </div>
     </div>
   );
-}
-
-/* ── Types ────────────────────────────────────────────────────────────────── */
-interface Material { file_id: string; topic: string; icon: string; mastery_pct: number | null; quiz_count: number; }
-
-function masteryColor(m: number | null) {
-  if (m === null) return '#94a3b8';
-  if (m < 40)     return '#ef4444';
-  if (m < 65)     return '#f97316';
-  return '#527061';
 }
 
 /* ── Course Option Card ───────────────────────────────────────────────────── */
@@ -158,66 +139,6 @@ function CrystalCard({ title, subtitle, onClick }: { title: string; subtitle: st
       <p className="text-sky-950 text-xl font-bold">{title}</p>
       <p className="text-sky-700 text-sm">{subtitle}</p>
     </button>
-  );
-}
-
-/* ── Material row ─────────────────────────────────────────────────────────── */
-function MaterialRow({ mat, he, onContinue, onQuiz }: { mat: Material; he: boolean; onContinue: () => void; onQuiz: () => void }) {
-  const color = masteryColor(mat.mastery_pct);
-  return (
-    <div
-      className="flex items-center gap-4 px-5 py-4"
-      style={{
-        background:           'rgba(26,46,38,0.96)',
-        backdropFilter:       'blur(8px)',
-        WebkitBackdropFilter: 'blur(8px)',
-        borderRadius:         20,
-        borderTop:            '1px solid rgba(255,255,255,0.06)',
-        borderBottom:         '1px solid rgba(255,255,255,0.03)',
-        borderInlineEnd:      '1px solid rgba(255,255,255,0.03)',
-        borderInlineStart:    `3px solid ${color}`,
-        boxShadow:            '0 4px 20px rgba(26,46,38,0.18)',
-        transition:           'transform 0.15s ease',
-      }}
-      onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; }}
-      onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; }}
-    >
-      <div style={{ width:40, height:40, borderRadius:12, background:'rgba(74,222,128,0.10)', border:'1px solid rgba(74,222,128,0.16)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:18, flexShrink:0 }}>
-        {mat.icon}
-      </div>
-      <div style={{ flex:1, minWidth:0, display:'flex', flexDirection:'column', gap:6 }}>
-        <p style={{ color:'#DDE5DB', fontSize:'0.875rem', fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{mat.topic}</p>
-        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-          <div style={{ height:5, width:80, borderRadius:9999, overflow:'hidden', background:'rgba(255,255,255,0.09)' }}>
-            {mat.mastery_pct !== null && mat.mastery_pct > 0 && (
-              <div className="animate-mastery-pulse" style={{ width:`${mat.mastery_pct}%`, height:'100%', borderRadius:9999, background:'linear-gradient(90deg,#ef4444,#f97316 32%,#eab308 58%,#84cc16 80%,#517B3E)', transition:'width 0.7s ease' }} />
-            )}
-          </div>
-          <span style={{ color, fontSize:'0.6875rem', fontWeight:700 }}>
-            {mat.mastery_pct !== null ? `${Math.round(mat.mastery_pct)}%` : '—'}
-          </span>
-        </div>
-      </div>
-      <div style={{ display:'flex', gap:6, flexShrink:0 }}>
-        <button
-          onClick={onQuiz}
-          style={{ background:'rgba(81,123,62,0.10)', color:'#517B3E', border:'1px solid rgba(81,123,62,0.18)', fontSize:'0.6875rem', fontWeight:600, padding:'4px 8px', borderRadius:8, cursor:'pointer', transition:'background 0.12s' }}
-          onMouseEnter={e => { e.currentTarget.style.background = 'rgba(81,123,62,0.18)'; }}
-          onMouseLeave={e => { e.currentTarget.style.background = 'rgba(81,123,62,0.10)'; }}
-        >
-          🤖
-        </button>
-        <button
-          onClick={onContinue}
-          className="animate-jewel-glow"
-          style={{ background:'linear-gradient(135deg,#517B3E,#2A3B22)', color:'#fff', fontSize:'0.6875rem', fontWeight:700, padding:'4px 10px', borderRadius:8, cursor:'pointer', boxShadow:'0 2px 10px rgba(81,123,62,0.40)', transition:'box-shadow 0.15s' }}
-          onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 18px rgba(81,123,62,0.62)'; }}
-          onMouseLeave={e => { e.currentTarget.style.boxShadow = '0 2px 10px rgba(81,123,62,0.40)'; }}
-        >
-          {he ? 'המשך' : 'Go'}
-        </button>
-      </div>
-    </div>
   );
 }
 
@@ -311,7 +232,7 @@ function DashboardSidebar({ isOpen, onClose, isAdmin, lang, userFirstName, userL
             </button>
             <button onClick={() => { router.push('/settings'); onClose(); }}
               className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-[#527061] transition-all duration-150 hover:bg-[#EEF5F0] hover:text-[#1C3329]">
-              <span className="text-base leading-none shrink-0">⚙️</span>{he ? 'הגדרות' : 'Settings'}
+              <IconSettings className="w-4 h-4 shrink-0" />{he ? 'הגדרות' : 'Settings'}
             </button>
             <button disabled className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-[#527061] cursor-not-allowed opacity-40">
               <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -399,8 +320,6 @@ export default function DashboardPage() {
   const [profilePopoverOpen, setProfilePopoverOpen] = useState(false);
   const [headerScrolled,     setHeaderScrolled]     = useState(false);
   const profilePopoverRef = useRef<HTMLDivElement>(null);
-  const [materials,        setMaterials]        = useState<Material[]>([]);
-  const [materialsLoading, setMaterialsLoading] = useState(true);
 
   const [isAdmin] = useState(() => {
     if (typeof window === 'undefined') return false;
@@ -447,19 +366,6 @@ export default function DashboardPage() {
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
   }, []);
-
-  useEffect(() => {
-    if (!authUser) return;
-    const token = getToken();
-    const cp  = selectedCourse ? `?course=${selectedCourse.id}` : '';
-    const req = token
-      ? fetch(`${API}/api/mastery/topics${cp}`, { headers: { Authorization: `Bearer ${token}` } })
-      : Promise.resolve(null);
-    req
-      .then(r => (r && r.ok) ? r.json() : [])
-      .then((data: Material[]) => { setMaterials(data ?? []); setMaterialsLoading(false); })
-      .catch(() => { setMaterialsLoading(false); });
-  }, [authUser, selectedCourse]);
 
   const handleLogout = useCallback(() => {
     setSelectedCourse(null);
@@ -564,13 +470,13 @@ export default function DashboardPage() {
         <div className="w-full max-w-[1400px] mx-auto flex flex-col gap-8">
 
           {/* ── Greeting hero ─────────────────────────────────────────── */}
-          <div className="flex items-center gap-4 px-4">
+          <div className="flex items-center gap-8 md:gap-10 px-4 bg-transparent shadow-none">
             {/* Owl mascot */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/assets/mascot/charley.PNG"
               alt=""
-              style={{ width: 52, height: 52, objectFit: 'contain', flexShrink: 0 }}
+              className="w-48 h-48 md:w-64 md:h-64 object-contain mix-blend-multiply bg-transparent shadow-none shrink-0"
             />
             <div className="flex flex-col gap-1.5 flex-1 min-w-0">
               {/*
@@ -611,57 +517,6 @@ export default function DashboardPage() {
                   <CrystalCard title={he ? 'כתיבה אקדמית'    : 'Academic Writing'} subtitle={he ? 'כתיבת עבודות בסגנון האישי שלך'  : 'Write papers in your style'}   onClick={() => router.push('/academic-writing')} />
                 </div>
               </div>
-
-              {/* Materials */}
-              {materialsLoading ? (
-                <div className="rounded-3xl px-8 py-12 flex flex-col items-center gap-4"
-                  style={{ background:D.cardBg, backdropFilter:'blur(22px)', WebkitBackdropFilter:'blur(22px)', border:D.cardBorder, boxShadow:D.cardShadow }}>
-                  <Spinner large />
-                  <p style={{ color:D.textSec, fontSize:'0.875rem' }}>{he ? 'טוען חומרים...' : 'Loading materials…'}</p>
-                </div>
-              ) : materials.length === 0 ? (
-                /* ── Empty state: dashed dropzone CTA ─────────────────── */
-                <div className="border-2 border-dashed border-[#A8BCA0] rounded-2xl p-10 flex flex-col items-center gap-5 text-center">
-                  <span style={{ fontSize: '2.5rem' }}>📂</span>
-                  <div>
-                    <p style={{ color: D.textPrimary, fontWeight: 800, fontSize: '1rem' }}>
-                      {he ? 'הקורסים שלי' : 'My Courses'}
-                    </p>
-                    <p style={{ color: D.textSec, fontSize: '0.875rem', marginTop: 6, maxWidth: 280 }}>
-                      {he
-                        ? 'כאן יופיעו כל הקורסים וחומרי הלימוד שלך. הוסף קבצים כדי להתחיל.'
-                        : 'All your courses and study materials will appear here. Upload your files to get started.'}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => router.push('/workspace')}
-                    className="bg-[#1A2E26] text-white px-6 py-2 rounded-full hover:bg-[#2D4A3E] transition-all duration-300 text-sm font-bold"
-                  >
-                    {he ? 'העלה חומרי לימוד' : 'Upload Study Materials'}
-                  </button>
-                </div>
-              ) : (
-                <div>
-                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 4px', marginBottom:16 }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                      <div style={{ width:4, height:16, borderRadius:9999, background:'linear-gradient(180deg,#517B3E,#2A3B22)', flexShrink:0 }} />
-                      <p style={{ color:D.textLabel, fontSize:'0.6875rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.1em' }}>
-                        {he ? `חומרי הקורס · ${materials.length}` : `Course Materials · ${materials.length}`}
-                      </p>
-                    </div>
-                    <p style={{ color:D.textLabel, fontSize:'0.6875rem' }}>{he ? 'קבצים' : 'Files'}</p>
-                  </div>
-                  <div className="flex flex-col gap-3">
-                    {materials.map(m => (
-                      <MaterialRow
-                        key={m.file_id} mat={m} he={he}
-                        onContinue={() => router.push('/workspace')}
-                        onQuiz={() => router.push(`/mastery?course=${selectedCourse.id}`)}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
             </>
           ) : (
             /* COURSE SELECTOR */
@@ -679,10 +534,6 @@ export default function DashboardPage() {
               </div>
             </div>
           )}
-
-          {/* ── Screen Time: 7-day bar chart ─────────────────────────── */}
-          <ScreenTimeChart />
-
         </div>
       </main>
 
