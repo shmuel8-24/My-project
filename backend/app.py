@@ -40,6 +40,20 @@ def ratelimit_error(_e: Exception):
     return jsonify({"error": "Too many requests — please wait a moment before trying again."}), 429
 
 
+@app.errorhandler(404)
+def not_found_error(_e: Exception):
+    # Without this, Werkzeug returns its default HTML page — the frontend's
+    # `res.json()` then throws "Unexpected token '<' ... is not valid JSON".
+    return jsonify({"error": "Not found"}), 404
+
+
+@app.errorhandler(500)
+def internal_error(_e: Exception):
+    # Same reasoning as the 404 handler — keep every error response JSON so
+    # the frontend can always parse it and show a real message.
+    return jsonify({"error": "Internal server error"}), 500
+
+
 # Register all route blueprints
 from api import register_blueprints  # noqa: E402
 

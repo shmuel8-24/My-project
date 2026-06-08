@@ -60,6 +60,28 @@ async function authFetch(url: string, init: RequestInit = {}) {
   });
 }
 
+/**
+ * Parse a fetch Response as JSON, but guard against HTML error bodies
+ * (Flask 404/500 pages, dev-server error overlays, proxy failures) — those
+ * make `res.json()` throw "Unexpected token '<' ... is not valid JSON",
+ * which a bare catch-all then mislabels as "cannot connect to server".
+ * Logs the raw body so the real cause (which page came back, and why) is
+ * visible in devtools instead of being swallowed.
+ */
+async function safeJson(res: Response): Promise<Record<string, unknown>> {
+  const ct = res.headers.get('content-type') ?? '';
+  if (!ct.includes('application/json')) {
+    const text = await res.text();
+    console.error(
+      `[professor-simulator] Expected JSON but got "${ct || 'unknown content-type'}" ` +
+      `(HTTP ${res.status}). Raw response:`,
+      text.slice(0, 1000),
+    );
+    throw new Error(`Unexpected ${res.status} response (not JSON) — see console for the raw body`);
+  }
+  return res.json();
+}
+
 function formatBytes(b: number): string {
   if (b < 1_048_576) return `${(b / 1024).toFixed(1)} KB`;
   return `${(b / 1_048_576).toFixed(1)} MB`;
@@ -606,15 +628,16 @@ export default function ProfessorSimulatorPage() {
       const form = new FormData();
       toUpload.forEach(f => form.append('files', f));
       const res  = await authFetch(`${API}/upload-pdf`, { method: 'POST', body: form });
-      const data = await res.json();
-      if (!res.ok) { setUploadErr(data.error ?? 'שגיאה בהעלאת הקבצים'); return; }
-      const added: UploadedFile[] = (data.files ?? []).map(
-        (f: { source: string; file_id: string; size: number }) => ({
-          name: f.source, file_id: f.file_id, size: f.size,
-        })
+      const data = await safeJson(res);
+      if (!res.ok) { setUploadErr((data.error as string) ?? 'שגיאה בהעלאת הקבצים'); return; }
+      const added: UploadedFile[] = ((data.files ?? []) as { source: string; file_id: string; size: number }[]).map(
+        f => ({ name: f.source, file_id: f.file_id, size: f.size })
       );
       setFiles(prev => [...prev, ...added]);
-    } catch { setUploadErr('לא ניתן להתחבר לשרת'); }
+    } catch (err) {
+      console.error('[professor-simulator] upload-pdf failed:', err);
+      setUploadErr('לא ניתן להתחבר לשרת');
+    }
     finally { setUploading(false); }
   }, [canUploadMore, fileLimit, files.length]);
 
@@ -641,15 +664,22 @@ export default function ProfessorSimulatorPage() {
       const form = new FormData();
       form.append('files', file);
       const res  = await authFetch(`${API}/upload-pdf`, { method: 'POST', body: form });
-      const data = await res.json();
-      if (!res.ok) { setSampleExamErr(data.error ?? 'שגיאה בהעלאת הקובץ'); return; }
-      const uploaded = (data.files ?? [])[0] as { source: string; file_id: string; size: number } | undefined;
+      const data = await safeJson(res);
+      if (!res.ok) { setSampleExamErr((data.error as string) ?? 'שגיאה בהעלאת הקובץ'); return; }
+      const uploaded = ((data.files ?? []) as { source: string; file_id: string; size: number }[])[0];
       if (uploaded) setSampleExam({ name: uploaded.source, file_id: uploaded.file_id, size: uploaded.size });
-    } catch { setSampleExamErr('לא ניתן להתחבר לשרת'); }
+    } catch (err) {
+      console.error('[professor-simulator] sample-exam upload failed:', err);
+      setSampleExamErr('לא ניתן להתחבר לשרת');
+    }
     finally { setSampleExamUploading(false); }
   }, []);
 
-  const { getRootProps: getSampleExamRootProps, getInputProps: getSampleExamInputProps } = useDropzone({
+  const {
+    getRootProps:  getSampleExamRootProps,
+    getInputProps: getSampleExamInputProps,
+    isDragActive:  isSampleExamDragActive,
+  } = useDropzone({
     onDrop: onDropSampleExam,
     accept: { 'application/pdf': ['.pdf'] },
     maxFiles: 1,
@@ -685,7 +715,7 @@ export default function ProfessorSimulatorPage() {
           file_ids:       [...files.map(f => f.file_id), ...(sampleExam ? [sampleExam.file_id] : [])],
         }),
       });
-      const data = await res.json();
+      const data = await safeJson(res);
 
       if (!res.ok) {
         if (data.limit_reached) {
@@ -693,7 +723,7 @@ export default function ProfessorSimulatorPage() {
           setUpgradeOpen(true);
           setMessages(prev => prev.filter(m => m.id !== userMsg.id));
         } else {
-          setChatErr(data.error ?? 'שגיאה ביצירת הסימולציה');
+          setChatErr((data.error as string) ?? 'שגיאה ביצירת הסימולציה');
         }
         return;
       }
@@ -704,7 +734,13 @@ export default function ProfessorSimulatorPage() {
         content: data.reply as string,
       }]);
       refreshUsage();
-    } catch { setChatErr('לא ניתן להתחבר לשרת. בדוק שהשרת פועל.'); }
+    } catch (err) {
+      // Distinguish "server returned garbage" (HTML error page → safeJson threw)
+      // from a genuine network failure — both used to collapse into the same
+      // misleading "cannot connect" toast.
+      console.error('[professor-simulator] ask request failed:', err);
+      setChatErr('לא ניתן להתחבר לשרת. בדוק שהשרת פועל.');
+    }
     finally { setSending(false); }
   }, [sending, canSim, profName, examStyle, topics, messages, files, sampleExam, refreshUsage]);
 
@@ -1025,21 +1061,28 @@ export default function ProfessorSimulatorPage() {
                 ) : (
                   <div
                     {...getSampleExamRootProps()}
-                    className="cursor-pointer rounded-xl border-2 border-dashed px-4 py-4 flex items-center justify-center gap-2 text-sm text-center transition-all"
+                    className="cursor-pointer rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-1.5 py-6 text-center transition-all"
                     style={{
-                      borderColor: 'rgba(157,192,139,0.55)',
-                      background:  'rgba(255,255,255,0.45)',
-                      color:       '#7a9268',
+                      borderColor:     isSampleExamDragActive ? '#517B3E' : 'rgba(157,192,139,0.55)',
+                      backgroundColor: isSampleExamDragActive ? 'rgba(81,123,62,0.07)' : 'rgba(255,255,255,0.45)',
                     }}
                   >
                     <input {...getSampleExamInputProps()} />
                     {sampleExamUploading ? (
                       <>
                         <Spinner size="sm" />
-                        <span>מעלה קובץ...</span>
+                        <p className="text-sm text-[#517B3E] font-medium">מעלה קובץ...</p>
                       </>
+                    ) : isSampleExamDragActive ? (
+                      <p className="text-sm font-bold text-[#517B3E]">שחרר כאן!</p>
                     ) : (
-                      <span className="font-medium">העלה קובץ מבחן (.pdf)</span>
+                      <>
+                        <svg className="w-7 h-7 text-[#9DC08B]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+                        </svg>
+                        <p className="text-sm font-bold text-[#2A3B22]">העלאת קובץ מבחן</p>
+                        <p className="text-xs text-[#9aaf8a]">גרור את המבחן לכאן · PDF</p>
+                      </>
                     )}
                   </div>
                 )}

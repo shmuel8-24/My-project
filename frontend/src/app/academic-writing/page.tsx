@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { Settings as IconSettings } from 'lucide-react';
 import { useAuth }     from '../providers/auth';
@@ -544,7 +544,7 @@ function Wizard({
   selectedDocId: string | null; onSelectDoc: (id: string | null) => void;
   writingType: WritingTypeId | null; onSelectType: (id: WritingTypeId) => void;
   uploadedFiles: UploadedFile[]; uploading: boolean; uploadError: string | null; onDrop: (files: File[]) => void; onRemoveFile: (file: UploadedFile) => void;
-  hasDoc: boolean; onStart: (customInstructions: string, usePersonalStyle: boolean, includeSources: boolean) => void;
+  hasDoc: boolean; onStart: (customInstructions: string, usePersonalStyle: boolean, includeSources: boolean, pageCount: number, studentName: string) => void;
 }) {
   const router = useRouter();
   const [step,               setStep]               = useState<1 | 2 | 3>(1);
@@ -552,6 +552,8 @@ function Wizard({
   const [customInstructions, setCustomInstructions] = useState('');
   const [usePersonalStyle,   setUsePersonalStyle]   = useState(false);
   const [includeSources,     setIncludeSources]     = useState(false);
+  const [pageCount,          setPageCount]          = useState(1);
+  const [studentName,        setStudentName]        = useState('');
   const [scanningFileNames,  setScanningFileNames]  = useState<string[]>([]);
 
   // Capture file names immediately when dropped so we can show per-file
@@ -903,6 +905,90 @@ function Wizard({
               <SummaryRow emoji={wtEmoji} label={he ? 'סוג כתיבה' : 'Writing type'} value={wtLabel} />
             </div>
 
+            {/* Page count selector */}
+            <div className="flex items-center justify-between gap-3 px-1">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold" style={{ color: '#1C3329' }}>
+                  {he ? 'אורך מוערך (עמודים)' : 'Estimated length (pages)'}
+                </p>
+                <p className="text-xs mt-0.5" style={{ color: '#7BA08A' }}>
+                  {he ? 'כמה עמודים בערך תרצה שהמסמך יכיל' : 'Roughly how many pages the document should span'}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0" style={{
+                background: 'rgba(255,255,255,0.55)',
+                border: '1px solid rgba(157,192,139,0.42)',
+                borderRadius: '0.75rem',
+                padding: '6px 10px',
+              }}>
+                <button
+                  type="button"
+                  onClick={() => setPageCount(p => Math.max(1, p - 1))}
+                  disabled={pageCount <= 1}
+                  className="w-7 h-7 flex items-center justify-center rounded-lg text-base font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                  style={{ color: '#2A3B22', background: 'rgba(81,123,62,0.10)' }}
+                  aria-label={he ? 'הפחת עמוד' : 'Decrease pages'}
+                >
+                  −
+                </button>
+                <input
+                  type="number"
+                  min={1}
+                  max={15}
+                  value={pageCount}
+                  onChange={e => {
+                    const v = parseInt(e.target.value, 10);
+                    if (!Number.isNaN(v)) setPageCount(Math.min(15, Math.max(1, v)));
+                  }}
+                  className="w-10 text-center text-sm font-bold outline-none bg-transparent [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  style={{ color: '#1C3329' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setPageCount(p => Math.min(15, p + 1))}
+                  disabled={pageCount >= 15}
+                  className="w-7 h-7 flex items-center justify-center rounded-lg text-base font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                  style={{ color: '#2A3B22', background: 'rgba(81,123,62,0.10)' }}
+                  aria-label={he ? 'הוסף עמוד' : 'Increase pages'}
+                >
+                  +
+                </button>
+              </div>
+            </div>
+
+            {/* Student name — used for the document header & personal writing voice */}
+            <div className="flex flex-col gap-1.5 px-1">
+              <p className="text-sm font-semibold" style={{ color: '#1C3329' }}>
+                {he ? 'שם הסטודנט' : 'Student name'}
+              </p>
+              <p className="text-xs" style={{ color: '#7BA08A' }}>
+                {he ? 'יוצג בראש המסמך והכתיבה תותאם לקול אישי בשמך' : 'Shown at the top of the document and used to write in your personal voice'}
+              </p>
+              <input
+                type="text"
+                dir="auto"
+                value={studentName}
+                onChange={e => setStudentName(e.target.value)}
+                placeholder={he ? 'לדוגמה: ישראל ישראלי' : 'e.g. Jane Doe'}
+                className="w-full rounded-xl px-4 py-3 text-sm outline-none transition-all"
+                style={{
+                  background:  'rgba(255,255,255,0.50)',
+                  border:      '1px solid rgba(157,192,139,0.42)',
+                  color:       '#1A2E26',
+                }}
+                onFocus={e => {
+                  e.currentTarget.style.background  = 'rgba(255,255,255,0.80)';
+                  e.currentTarget.style.borderColor = 'rgba(81,123,62,0.65)';
+                  e.currentTarget.style.boxShadow   = '0 0 0 2px rgba(81,123,62,0.10)';
+                }}
+                onBlur={e => {
+                  e.currentTarget.style.background  = 'rgba(255,255,255,0.50)';
+                  e.currentTarget.style.borderColor = 'rgba(157,192,139,0.42)';
+                  e.currentTarget.style.boxShadow   = 'none';
+                }}
+              />
+            </div>
+
             {/* Custom instructions — plain textarea */}
             <textarea
               dir="auto"
@@ -954,7 +1040,7 @@ function Wizard({
               </div>
             </div>
 
-            <button onClick={() => onStart(customInstructions, usePersonalStyle, includeSources)}
+            <button onClick={() => onStart(customInstructions, usePersonalStyle, includeSources, pageCount, studentName.trim())}
               className="w-full flex items-center justify-center gap-2.5 py-4 rounded-2xl text-base font-bold text-white transition-all active:scale-[0.98] mt-2"
               style={{ background: 'linear-gradient(135deg,#517B3E,#2A3B22)', boxShadow: '0 8px 28px rgba(81,123,62,0.42)' }}>
               <IconPen className="w-5 h-5" />
@@ -997,7 +1083,8 @@ function Wizard({
 
 /* ─── Writing panel — Co-Writer mode (paragraph-by-paragraph) ───────────── */
 function WritingPanel({
-  t, he, hasDoc, writingType, onBack, wizardInstructions, usePersonalStyle, includeSources,
+  t, he, hasDoc, writingType, onBack, wizardInstructions, usePersonalStyle, includeSources, pageCount, studentName,
+  userFirstName, userLastName,
 }: {
   t: TType; he: boolean; hasDoc: boolean;
   writingType: WritingTypeId | null;
@@ -1005,9 +1092,19 @@ function WritingPanel({
   wizardInstructions: string;
   usePersonalStyle: boolean;
   includeSources: boolean;
+  pageCount: number;
+  studentName: string;
+  userFirstName: string;
+  userLastName: string;
 }) {
+  const { selectedCourse } = useCourse();
+  const formattedDate = useMemo(
+    () => new Date().toLocaleDateString(he ? 'he-IL' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+    [he],
+  );
   const [topic,              setTopic]              = useState('');
   const [loading,            setLoading]            = useState(false);
+  const [isStreamingDraft,   setIsStreamingDraft]   = useState(false);
   const [error,              setError]              = useState<string | null>(null);
   const [approvedParagraphs, setApprovedParagraphs] = useState<string[]>([]);
   const [currentDraft,       setCurrentDraft]       = useState<string | null>(null);
@@ -1062,43 +1159,129 @@ function WritingPanel({
     const styleHint = usePersonalStyle
       ? (he ? 'עצב בסגנון אישי וטבעי, לא פורמלי מדי.' : 'Use a personal, natural voice — not overly formal.')
       : '';
+    const nameHint = studentName.trim()
+      ? (he
+          ? `כתוב מסמך זה כאילו הסטודנט/ית ${studentName.trim()} כתב/ה אותו בעצמו/ה — בקול אקדמי טבעי, מגובש ואישי. הימנע מפתיחות שנשמעות כמו AI, והשתמש בחשיבה ביקורתית וזרימה לוגית כפי שסטודנט/ית היה/הייתה כותב/ת.`
+          : `Write this document as if the student ${studentName.trim()} wrote it themselves — in a natural, cohesive, personal academic voice. Avoid generic "AI-sounding" intros, and use the kind of critical thinking and logical flow a student would have.`)
+      : '';
 
     const prevContext = approved.length > 0
       ? approved.map((p, i) => `[Section ${i + 1}]:\n${p}`).join('\n\n---\n\n')
       : '';
 
+    const isFirstSection = approved.length === 0;
+
     const constraint = [
-      'IMPORTANT: Generate ONLY the next single continuous paragraph (approximately 10–15 lines).',
-      'Do NOT write the full output. Do not add a title, headers, or section labels.',
+      'IMPORTANT: Generate ONLY the next single section of the document — '
+        + 'one logical chunk of about 10–15 lines.',
+      'Do NOT write the full document in one go — only the single section described below.',
+      isFirstSection
+        ? 'CRITICAL — THIS IS THE OPENING OF THE DOCUMENT: you MUST start your output with '
+          + 'a single main document title on its own line using Markdown level-1 syntax — '
+          + '`# [Title Name]` — a polished academic title capturing the essence of the topic. '
+          + 'Do NOT start with paragraph text or skip the title. Immediately after the title, '
+          + 'add the introduction heading `## מבוא` on its own line, and only then begin the '
+          + "introduction's opening paragraph."
+        : 'Do NOT include a top-level `# Title` — the document title was already generated '
+          + 'in the first section above; never repeat or duplicate it.',
+      'STRICT MARKDOWN STRUCTURE RULE — mandatory: if this section opens a new logical '
+        + 'part of the document (e.g., a new argument/topic, a conclusion), '
+        + 'it MUST start with a real Markdown heading on its own line — '
+        + '`## גוף הדיון`, `## סיכום`, etc. (use `###` for sub-points within a section). '
+        + 'NEVER write section names as plain inline prose like "במבוא זה..." or "לסיכום, ...". '
+        + 'If this section continues the SAME part as the previous one, do not repeat its heading — '
+        + 'just continue the prose.',
+      'Do NOT force-bold or highlight keywords unless absolutely necessary for the clarity '
+        + 'of a specific technical term — write naturally, as a professional academic '
+        + 'researcher would, and prioritize readability and flow over stylistic decoration.',
       `This is section number ${paragraphNum + 1}.`,
       approved.length > 0
-        ? `The following sections have already been written and approved:\n\n${prevContext}`
-        : 'This is the very first section — begin with a strong, engaging opening.',
+        ? `The following sections have already been written and approved (do not repeat their headings, including the title):\n\n${prevContext}`
+        : '',
       feedback.trim()
         ? `The user requested this revision to the previous draft: "${feedback.trim()}". Address this feedback carefully.`
         : '',
       includeSources
         ? 'When relevant, briefly note which source file a claim comes from, e.g. (Source: filename.pdf).'
         : 'CRITICAL: DO NOT include any references, citations, or source file names anywhere in the text. Output ONLY clean prose.',
-      'Output only the paragraph text with no labels, numbers, or commentary.',
+      'Output only the section content (its heading, if any, plus its prose) — '
+        + 'no extra labels, numbers, or commentary.',
     ].filter(Boolean).join('\n');
 
+    setIsStreamingDraft(true);
     try {
       const res = await authFetch(`${API}/generate-paper`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           topic,
-          instructions: [typeHint, styleHint, wizardInstructions, constraint].filter(Boolean).join('\n\n'),
+          instructions: [typeHint, styleHint, nameHint, wizardInstructions, constraint].filter(Boolean).join('\n\n'),
+          pageCount,
+          studentName: studentName.trim() || null,
+          courseId:   selectedCourse?.id   ?? null,
+          courseName: selectedCourse?.name ?? null,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) { setError(data.error ?? t.paperErr); return; }
-      setCurrentDraft(data.paper ?? null);
-      setCurrentDraftHtml(data.paper_html ?? null);
-      setWaitingForFeedback(true);
-    } catch { setError(t.serverErr); }
-    finally  { setLoading(false); }
-  }, [topic, hasDoc, writingType, wtLabel, he, usePersonalStyle, includeSources, wizardInstructions, t]);
+
+      // Validation errors (no docs, missing topic, etc.) come back as plain JSON,
+      // not an SSE stream — handle those before attempting to read the body as a stream.
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({} as { error?: string }));
+        setError(errData.error ?? t.paperErr);
+        return;
+      }
+      if (!res.body) throw new Error('No response body');
+
+      const reader  = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '', streamedText = '', firstDelta = true, gotResult = false, done = false;
+
+      while (!done) {
+        const { done: streamDone, value } = await reader.read();
+        if (streamDone) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          let parsed: { type: string; text?: string; paper?: string; paper_html?: string; message?: string };
+          try { parsed = JSON.parse(line.slice(6)); }
+          catch { continue; }
+
+          if (parsed.type === 'delta' && parsed.text) {
+            streamedText += parsed.text;
+            if (firstDelta) {
+              firstDelta = false;
+              setLoading(false);
+              setWaitingForFeedback(true);
+            }
+            // Render the raw Markdown live as it streams in — typed-out ChatGPT-style effect.
+            // The polished `paper_html` (with KaTeX/Pygments) replaces it once the 'result' event lands.
+            setCurrentDraft(streamedText);
+            setCurrentDraftHtml(null);
+          } else if (parsed.type === 'result') {
+            gotResult = true;
+            setCurrentDraft(parsed.paper ?? streamedText);
+            setCurrentDraftHtml(parsed.paper_html ?? null);
+            setWaitingForFeedback(true);
+            done = true;
+            break;
+          } else if (parsed.type === 'error') {
+            throw new Error(parsed.message ?? t.paperErr);
+          }
+        }
+      }
+      if (!gotResult && !streamedText) throw new Error(t.paperErr);
+    } catch (err) {
+      // Surface the raw fetch error (CORS / network / DNS) — "Cannot connect"
+      // toasts alone don't distinguish a dead backend from a CORS rejection.
+      console.error('[academic-writing] generate-paper request failed:', err);
+      setError(err instanceof Error ? err.message : t.serverErr);
+      setCurrentDraft(null);
+      setCurrentDraftHtml(null);
+      setWaitingForFeedback(false);
+    }
+    finally { setLoading(false); setIsStreamingDraft(false); }
+  }, [topic, hasDoc, writingType, wtLabel, he, usePersonalStyle, includeSources, wizardInstructions, pageCount, studentName, selectedCourse, t]);
 
   const approveAndContinue = () => {
     if (!currentDraft) return;
@@ -1295,24 +1478,27 @@ function WritingPanel({
 
           {/* Approved paragraphs — assembled document so far */}
           {approvedParagraphs.length > 0 && (
-            <div dir="rtl" className="rounded-xl p-6" style={{ background: 'rgba(255,255,255,0.85)', border: '1px solid rgba(157,192,139,0.3)' }}>
-              <div className="flex items-center gap-2 mb-4 pb-3" style={{ borderBottom: '1px solid rgba(157,192,139,0.22)' }}>
-                <IconCheck className="w-4 h-4 text-[#517B3E]" />
-                <p className="text-xs font-semibold text-[#517B3E] uppercase tracking-wider">
+            <div dir="rtl" className="bg-white shadow-sm border border-slate-100 rounded-2xl p-6 sm:p-8">
+              <div className="mb-5">
+                <div className="bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-sm font-medium inline-flex items-center gap-2 border border-emerald-100">
+                  <IconCheck className="w-3.5 h-3.5" />
                   {he ? `${approvedParagraphs.length} פסקאות אושרו` : `${approvedParagraphs.length} approved paragraph${approvedParagraphs.length > 1 ? 's' : ''}`}
-                </p>
+                </div>
               </div>
               {approvedParagraphs.map((para, i) => (
                 approvedParagraphsHtml[i]
                   ? <RenderedHtml key={i} html={approvedParagraphsHtml[i]}
-                      className="text-sm leading-8 mb-3 prose-para" />
+                      className="text-base text-slate-700 leading-loose text-right mb-4 prose-para" />
                   : <ReactMarkdown key={i}
                       remarkPlugins={[remarkGfm, remarkMath]}
                       rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: '#cc0000', strict: false }]]}
                       components={{
-                        p: ({ children }) => <p className="text-sm leading-8 mb-3" style={{ color: '#374151', textAlign: 'justify' }}>{children}</p>,
-                        strong: ({ children }) => <strong className="font-semibold" style={{ color: '#1a2e14' }}>{children}</strong>,
-                        em: ({ children }) => <em className="italic" style={{ color: '#4a5e3a' }}>{children}</em>,
+                        h1: ({ children }) => <h1 className="text-3xl md:text-4xl font-extrabold text-slate-900 mb-8 mt-2 text-center underline decoration-emerald-500/30 underline-offset-8">{children}</h1>,
+                        h2: ({ children }) => <h2 className="text-2xl font-bold text-slate-800 mb-4 mt-8 border-b border-slate-200 pb-2">{children}</h2>,
+                        h3: ({ children }) => <h3 className="text-lg font-bold text-slate-800 mt-5 mb-3">{children}</h3>,
+                        p: ({ children }) => <p className="text-base leading-relaxed mb-4 text-slate-700" style={{ textAlign: 'right' }}>{children}</p>,
+                        strong: ({ children }) => <strong className="font-semibold text-slate-900">{children}</strong>,
+                        em: ({ children }) => <em className="italic text-slate-600">{children}</em>,
                       }}>
                       {preprocessMath(para)}
                     </ReactMarkdown>
@@ -1322,11 +1508,10 @@ function WritingPanel({
 
           {/* Generating spinner */}
           {loading && (
-            <div className="flex items-center justify-center gap-3 py-8 rounded-xl"
-              style={{ background: 'rgba(81,123,62,0.05)', border: '1px dashed rgba(157,192,139,0.4)' }}>
-              <div className="w-5 h-5 rounded-full border-2 border-[#9DC08B]/30 border-t-[#517B3E] animate-spin" />
-              <p className="text-sm text-[#7a9268]">
-                {he ? `כותב פסקה ${approvedParagraphs.length + 1}...` : `Writing paragraph ${approvedParagraphs.length + 1}…`}
+            <div className="flex items-center justify-center gap-3 py-8 px-6 rounded-xl animate-pulse bg-emerald-50/50">
+              <span className="text-xl leading-none">✨</span>
+              <p className="text-sm font-medium text-emerald-700">
+                {he ? 'ה-AI מנסח את הפסקה הבאה...' : 'AI is drafting the next paragraph…'}
               </p>
             </div>
           )}
@@ -1339,19 +1524,24 @@ function WritingPanel({
                 style={{ background: 'rgba(81,123,62,0.08)', borderBottom: '1px solid rgba(81,123,62,0.18)' }}>
                 <div className="w-2 h-2 rounded-full bg-[#517B3E] animate-pulse" />
                 <p className="text-xs font-bold text-[#517B3E] uppercase tracking-wider">
-                  {he ? `פסקה ${approvedParagraphs.length + 1} — ממתינה לאישורך` : `Paragraph ${approvedParagraphs.length + 1} — Awaiting your review`}
+                  {isStreamingDraft
+                    ? (he ? `✨ פסקה ${approvedParagraphs.length + 1} — ה-AI מקליד...` : `✨ Paragraph ${approvedParagraphs.length + 1} — AI is typing…`)
+                    : (he ? `פסקה ${approvedParagraphs.length + 1} — ממתינה לאישורך` : `Paragraph ${approvedParagraphs.length + 1} — Awaiting your review`)}
                 </p>
               </div>
               <div dir="rtl" className="px-6 py-5">
                 {currentDraftHtml
-                  ? <RenderedHtml html={currentDraftHtml} className="text-sm leading-8" />
+                  ? <RenderedHtml html={currentDraftHtml} className="text-base text-slate-700 leading-loose text-right prose-para" />
                   : <ReactMarkdown
                       remarkPlugins={[remarkGfm, remarkMath]}
                       rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: '#cc0000', strict: false }]]}
                       components={{
-                        p: ({ children }) => <p className="text-sm leading-8 mb-3" style={{ color: '#374151', textAlign: 'justify' }}>{children}</p>,
-                        strong: ({ children }) => <strong className="font-semibold" style={{ color: '#1a2e14' }}>{children}</strong>,
-                        em: ({ children }) => <em className="italic" style={{ color: '#4a5e3a' }}>{children}</em>,
+                        h1: ({ children }) => <h1 className="text-3xl md:text-4xl font-extrabold text-slate-900 mb-8 mt-2 text-center underline decoration-emerald-500/30 underline-offset-8">{children}</h1>,
+                        h2: ({ children }) => <h2 className="text-2xl font-bold text-slate-800 mb-4 mt-8 border-b border-slate-200 pb-2">{children}</h2>,
+                        h3: ({ children }) => <h3 className="text-lg font-bold text-slate-800 mt-5 mb-3">{children}</h3>,
+                        p: ({ children }) => <p className="text-base leading-relaxed mb-4 text-slate-700" style={{ textAlign: 'right' }}>{children}</p>,
+                        strong: ({ children }) => <strong className="font-semibold text-slate-900">{children}</strong>,
+                        em: ({ children }) => <em className="italic text-slate-600">{children}</em>,
                       }}>
                       {preprocessMath(currentDraft)}
                     </ReactMarkdown>
@@ -1365,22 +1555,22 @@ function WritingPanel({
                   className="w-full rounded-xl px-4 py-2.5 text-sm outline-none resize-none"
                   style={{ border: '1px solid rgba(157,192,139,0.4)', background: 'rgba(255,255,255,0.80)', color: '#2A3B22' }} />
                 <div className="flex flex-col sm:flex-row gap-2">
-                  <button onClick={approveAndContinue}
-                    className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-white text-sm font-bold transition-all active:scale-[0.98]"
+                  <button onClick={approveAndContinue} disabled={isStreamingDraft}
+                    className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-white text-sm font-bold transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
                     style={{ background: 'linear-gradient(135deg,#517B3E,#2A3B22)', boxShadow: '0 3px 14px rgba(81,123,62,0.32)' }}>
                     <IconCheck className="w-4 h-4" />
                     {he ? 'אשר והמשך לפסקה הבאה' : 'Approve & Continue'}
                   </button>
-                  <button onClick={regenerateWithFeedback}
-                    className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                  <button onClick={regenerateWithFeedback} disabled={isStreamingDraft}
+                    className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
                     style={{ background: 'rgba(255,255,255,0.80)', border: '1px solid rgba(157,192,139,0.5)', color: '#527061' }}>
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
                     </svg>
                     {he ? 'תקן לפי ההערות' : 'Regenerate with Feedback'}
                   </button>
-                  <button onClick={finishDocument}
-                    className="sm:w-auto px-4 py-2.5 rounded-xl text-sm font-medium transition-colors text-gray-500 hover:text-gray-800 hover:bg-gray-100/50">
+                  <button onClick={finishDocument} disabled={isStreamingDraft}
+                    className="sm:w-auto px-4 py-2.5 rounded-xl text-sm font-medium transition-colors text-gray-500 hover:text-gray-800 hover:bg-gray-100/50 disabled:opacity-50 disabled:cursor-not-allowed">
                     {he ? 'סיים כתיבה' : 'Finish Document'}
                   </button>
                 </div>
@@ -1442,46 +1632,75 @@ function WritingPanel({
                   </p>
                 </div>
               ) : (
-                /* ── Read-only rendered view ────────────────────────────── */
-                <div className="p-8" style={{ color: '#2A3B22' }}>
-                {paperFullHtml
-                  ? <RenderedHtml
-                      html={paperFullHtml}
-                      className="paper-rendered-html text-sm leading-8"
-                    />
-                  : <ReactMarkdown
-                      remarkPlugins={[remarkGfm, remarkMath]}
-                      rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: '#cc0000', strict: false }]]}
-                      components={{
-                        pre: CodeBlockPre,
-                        code: ({ className, children }) => {
-                          if (className) return <code dir="ltr" className={`${className} text-[#9DC08B] text-[11px] font-mono leading-relaxed`} style={{ direction: 'ltr', textAlign: 'left', unicodeBidi: 'embed' }}>{children}</code>;
-                          return <InlineCode>{children}</InlineCode>;
-                        },
-                        h1: ({ children }) => <h1 className="text-2xl font-bold mb-4 pb-2 text-center" style={{ color: '#2A3B22', borderBottom: '1px solid rgba(157,192,139,0.4)' }}>{children}</h1>,
-                        h2: ({ children }) => <h2 className="text-lg font-bold mt-7 mb-3" style={{ color: '#2A3B22' }}>{children}</h2>,
-                        h3: ({ children }) => <h3 className="text-base font-semibold mt-5 mb-2" style={{ color: '#2d3b25' }}>{children}</h3>,
-                        p:  ({ children }) => <p className="text-sm leading-8 mb-4" style={{ color: '#374151', textAlign: 'justify' }}>{children}</p>,
-                        strong: ({ children }) => <strong className="font-semibold" style={{ color: '#1a2e14' }}>{children}</strong>,
-                        em:     ({ children }) => <em className="italic" style={{ color: '#4a5e3a' }}>{children}</em>,
-                        ul: ({ children }) => <ul className="list-disc mb-4 space-y-1 text-sm pe-5">{children}</ul>,
-                        ol: ({ children }) => <ol className="list-decimal mb-4 space-y-1 text-sm pe-5">{children}</ol>,
-                        li: ({ children }) => <li className="text-sm leading-7" style={{ color: '#374151' }}>{children}</li>,
-                        blockquote: ({ children }) => (
-                          <blockquote className="pr-4 my-4 italic text-sm py-2 rounded-sm" style={{ borderRight: '4px solid rgba(81,123,62,0.4)', background: 'rgba(81,123,62,0.05)', color: '#4a5e3a' }}>{children}</blockquote>
-                        ),
-                        hr: () => <hr className="my-6" style={{ borderColor: 'rgba(157,192,139,0.4)' }} />,
-                        table: ({ children }) => <div className="overflow-x-auto my-4"><table className="w-full text-sm border-collapse">{children}</table></div>,
-                        th: ({ children }) => <th className="px-3 py-2 font-semibold text-right" style={{ border: '1px solid rgba(157,192,139,0.3)', background: 'rgba(81,123,62,0.06)', color: '#2d3b25' }}>{children}</th>,
-                        td: ({ children }) => <td className="px-3 py-2 text-right" style={{ border: '1px solid rgba(157,192,139,0.3)', color: '#4a5e3a' }}>{children}</td>,
-                        a: ({ href, children }) => {
-                          const safeHref = href && /^https?:\/\//i.test(href) ? href : '#';
-                          return <a href={safeHref} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:opacity-75" style={{ color: '#517B3E' }}>{children}</a>;
-                        },
-                      }}>
-                      {preprocessMath(editedContent ?? approvedParagraphs.join('\n\n'))}
-                    </ReactMarkdown>
-                }
+                /* ── Read-only "Page View" — A4-style document, ready for submission ── */
+                <div className="px-3 sm:px-8 py-10" style={{ background: '#EEF2EF' }}>
+                  <div
+                    dir="rtl"
+                    className="bg-white shadow-lg border border-slate-200 max-w-4xl mx-auto py-16 px-12"
+                    style={{ fontFamily: 'Georgia, "Times New Roman", serif', color: '#1f2937' }}
+                  >
+                    {/* Document header — student metadata, shown for personal-style / named documents */}
+                    {(() => {
+                      const displayName = studentName.trim() || [userFirstName, userLastName].filter(Boolean).join(' ');
+                      if (!usePersonalStyle && !displayName) return null;
+                      return (
+                        <div className="border-b-2 border-slate-800 pb-4 mb-10">
+                          {displayName && (
+                            <p className="text-right font-bold text-slate-900 mb-2 leading-[1.8]">
+                              {he ? `שם הסטודנט: ${displayName}` : `Student name: ${displayName}`}
+                            </p>
+                          )}
+                          <p className="text-right font-bold text-slate-900 mb-2 leading-[1.8]">
+                            {he ? `תאריך: ${formattedDate}` : `Date: ${formattedDate}`}
+                          </p>
+                          <p className="text-right text-slate-700 leading-[1.8]">
+                            {he ? `נושא: ${topic}` : `Topic: ${topic}`}
+                          </p>
+                        </div>
+                      );
+                    })()}
+
+                    <div className="leading-[1.8]">
+                    {paperFullHtml
+                      ? <RenderedHtml
+                          html={paperFullHtml}
+                          className="paper-rendered-html text-base leading-[1.8]"
+                        />
+                      : <ReactMarkdown
+                          remarkPlugins={[remarkGfm, remarkMath]}
+                          rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: '#cc0000', strict: false }]]}
+                          components={{
+                            pre: CodeBlockPre,
+                            code: ({ className, children }) => {
+                              if (className) return <code dir="ltr" className={`${className} text-[#9DC08B] text-[11px] font-mono leading-relaxed`} style={{ direction: 'ltr', textAlign: 'left', unicodeBidi: 'embed' }}>{children}</code>;
+                              return <InlineCode>{children}</InlineCode>;
+                            },
+                            h1: ({ children }) => <h1 className="text-3xl font-bold mb-8 mt-2 pb-3 text-center" style={{ color: '#1f2937', borderBottom: '1px solid #e2e8f0' }}>{children}</h1>,
+                            h2: ({ children }) => <h2 className="text-xl font-bold mt-8 mb-4 pb-2" style={{ color: '#1f2937', borderBottom: '1px solid #e2e8f0' }}>{children}</h2>,
+                            h3: ({ children }) => <h3 className="text-lg font-semibold mt-6 mb-3" style={{ color: '#1f2937' }}>{children}</h3>,
+                            p:  ({ children }) => <p className="text-base leading-[1.8] mb-4" style={{ color: '#1f2937', textAlign: 'justify' }}>{children}</p>,
+                            strong: ({ children }) => <strong className="font-semibold" style={{ color: '#0f172a' }}>{children}</strong>,
+                            em:     ({ children }) => <em className="italic" style={{ color: '#374151' }}>{children}</em>,
+                            ul: ({ children }) => <ul className="list-disc mb-4 space-y-1.5 text-base leading-[1.8] pe-5">{children}</ul>,
+                            ol: ({ children }) => <ol className="list-decimal mb-4 space-y-1.5 text-base leading-[1.8] pe-5">{children}</ol>,
+                            li: ({ children }) => <li className="text-base leading-[1.8]" style={{ color: '#1f2937' }}>{children}</li>,
+                            blockquote: ({ children }) => (
+                              <blockquote className="pr-4 my-4 italic text-base leading-[1.8] py-2 rounded-sm" style={{ borderRight: '4px solid #cbd5e1', background: '#f8fafc', color: '#374151' }}>{children}</blockquote>
+                            ),
+                            hr: () => <hr className="my-8" style={{ borderColor: '#e2e8f0' }} />,
+                            table: ({ children }) => <div className="overflow-x-auto my-4"><table className="w-full text-sm border-collapse">{children}</table></div>,
+                            th: ({ children }) => <th className="px-3 py-2 font-semibold text-right" style={{ border: '1px solid #e2e8f0', background: '#f8fafc', color: '#1f2937' }}>{children}</th>,
+                            td: ({ children }) => <td className="px-3 py-2 text-right" style={{ border: '1px solid #e2e8f0', color: '#374151' }}>{children}</td>,
+                            a: ({ href, children }) => {
+                              const safeHref = href && /^https?:\/\//i.test(href) ? href : '#';
+                              return <a href={safeHref} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:opacity-75" style={{ color: '#517B3E' }}>{children}</a>;
+                            },
+                          }}>
+                          {preprocessMath(editedContent ?? approvedParagraphs.join('\n\n'))}
+                        </ReactMarkdown>
+                    }
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -1526,6 +1745,8 @@ export default function AcademicWritingPage() {
   const [wizardInstructions,  setWizardInstructions]  = useState('');
   const [wizardPersonalStyle,  setWizardPersonalStyle]  = useState(false);
   const [wizardIncludeSources, setWizardIncludeSources] = useState(false);
+  const [wizardPageCount,      setWizardPageCount]      = useState(1);
+  const [wizardStudentName,    setWizardStudentName]    = useState('');
   const [sessions,          setSessions]           = useState<SessionInfo[]>([]);
   const [docs,              setDocs]               = useState<DocInfo[]>([]);
   const [sessionsLoading,   setSessionsLoading]    = useState(true);
@@ -1723,7 +1944,7 @@ export default function AcademicWritingPage() {
             selectedDocId={selectedDocId} onSelectDoc={setSelectedDocId}
             writingType={writingType} onSelectType={setWritingType}
             uploadedFiles={uploadedFiles} uploading={uploading} uploadError={uploadError} onDrop={handleDrop} onRemoveFile={handleRemoveFile}
-            hasDoc={hasDoc} onStart={(ci, ps, is) => { setWizardInstructions(ci); setWizardPersonalStyle(ps); setWizardIncludeSources(is); setPhase('writing'); }}
+            hasDoc={hasDoc} onStart={(ci, ps, is, pc, sn) => { setWizardInstructions(ci); setWizardPersonalStyle(ps); setWizardIncludeSources(is); setWizardPageCount(pc); setWizardStudentName(sn); setPhase('writing'); }}
           />
         ) : (
           <WritingPanel
@@ -1734,6 +1955,10 @@ export default function AcademicWritingPage() {
             wizardInstructions={wizardInstructions}
             usePersonalStyle={wizardPersonalStyle}
             includeSources={wizardIncludeSources}
+            pageCount={wizardPageCount}
+            studentName={wizardStudentName}
+            userFirstName={userFirstName}
+            userLastName={userLastName}
           />
         )}
       </main>

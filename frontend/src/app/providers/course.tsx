@@ -41,12 +41,14 @@ export function CourseProvider({ children }: { children: ReactNode }) {
   const [customCourses,   setCustomCoursesState]  = useState<Course[]>([]);
 
   useEffect(() => {
-    // selectedCourse intentionally NOT restored from localStorage — users must
-    // always pick a course explicitly on entry (see /course-picker redirect in dashboard).
-    const storedCustom = localStorage.getItem('levy_ai_custom_courses');
+    const storedCustom   = localStorage.getItem('levy_ai_custom_courses');
+    const storedSelected = localStorage.getItem('levy_ai_course');
 
-    Promise.resolve(storedCustom)
-      .then(s => { if (s) setCustomCoursesState(JSON.parse(s) as Course[]); })
+    Promise.resolve()
+      .then(() => {
+        if (storedCustom)   setCustomCoursesState(JSON.parse(storedCustom) as Course[]);
+        if (storedSelected) setSelectedCourseState(JSON.parse(storedSelected) as Course);
+      })
       .catch(() => {})
       .finally(() => setCourseHydrated(true));
   }, []);

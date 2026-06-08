@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { X, MessagesSquare, PenTool, TrendingUp, GraduationCap, ChevronUp, Check } from 'lucide-react';
 import { useLanguage } from './providers/language';
 import { useCourse }   from './providers/course';
+import { useAuth }     from './providers/auth';
 import { landing } from './locales/landing';
 
 type Mode = 'magic' | 'password';
@@ -150,6 +151,7 @@ export default function HomePage() {
   const { lang, toggleLanguage } = useLanguage();
   const t = landing[lang];
   const { setSelectedCourse } = useCourse();
+  const { updateToken } = useAuth();
 
   /* Clear any lingering course selection whenever the auth screen mounts. */
   useEffect(() => {
@@ -426,7 +428,6 @@ export default function HomePage() {
         setTimeout(() => otpRefs.current[0]?.focus(), 50);
         return;
       }
-      if (data.token)      localStorage.setItem('levy_ai_token',      data.token);
       if (data.email)      localStorage.setItem('levy_ai_email',      data.email);
       if (data.first_name) localStorage.setItem('levy_ai_first_name', data.first_name);
       if (data.last_name)  localStorage.setItem('levy_ai_last_name',  data.last_name);
@@ -434,6 +435,9 @@ export default function HomePage() {
       document.cookie = 'levy_ai_session=1; path=/; SameSite=Lax; max-age=86400';
       // Token cookie — allows middleware to decode the is_admin claim server-side.
       if (data.token) document.cookie = `levy_ai_token=${data.token}; path=/; SameSite=Lax; max-age=86400`;
+      // Write the token through the auth context so `useAuth().user` is populated
+      // immediately — pages guard on it right after the redirect below.
+      if (data.token) updateToken(data.token);
       setIsTransitioning(true);
       setTimeout(() => router.push(WORKSPACE_ROUTE), 1800);
     } catch { setNetError(true); }
@@ -454,12 +458,14 @@ export default function HomePage() {
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error ?? t.errBadLogin); return; }
-      if (data.token)      localStorage.setItem('levy_ai_token',      data.token);
       if (data.email)      localStorage.setItem('levy_ai_email',      data.email);
       if (data.first_name) localStorage.setItem('levy_ai_first_name', data.first_name);
       if (data.last_name)  localStorage.setItem('levy_ai_last_name',  data.last_name);
       document.cookie = 'levy_ai_session=1; path=/; SameSite=Lax; max-age=86400';
       if (data.token) document.cookie = `levy_ai_token=${data.token}; path=/; SameSite=Lax; max-age=86400`;
+      // Write the token through the auth context so `useAuth().user` is populated
+      // immediately — pages guard on it right after the redirect below.
+      if (data.token) updateToken(data.token);
       setIsTransitioning(true);
       setTimeout(() => router.push(WORKSPACE_ROUTE), 1800);
     } catch { setNetError(true); }
@@ -556,12 +562,14 @@ export default function HomePage() {
       });
       const data = await res.json();
       if (!res.ok) { setRegError(data.error ?? t.errRegFailed); return; }
-      if (data.token)      localStorage.setItem('levy_ai_token',      data.token);
       if (data.email)      localStorage.setItem('levy_ai_email',      data.email);
       if (data.first_name) localStorage.setItem('levy_ai_first_name', data.first_name);
       if (data.last_name)  localStorage.setItem('levy_ai_last_name',  data.last_name);
       document.cookie = 'levy_ai_session=1; path=/; SameSite=Lax; max-age=86400';
       if (data.token) document.cookie = `levy_ai_token=${data.token}; path=/; SameSite=Lax; max-age=86400`;
+      // Write the token through the auth context so `useAuth().user` is populated
+      // immediately — onboarding (and any later guard) sees it right away.
+      if (data.token) updateToken(data.token);
       closeRegisterModal();
       setIsTransitioning(true);
       setIsLoginModalOpen(true);
