@@ -32,8 +32,36 @@ browser client exists; this looks like in-progress migration scaffolding at the 
 
 ## Scale note
 
-`workspace/page.tsx` has grown to ~3000 lines (root CLAUDE.md says ~2500) — same inline-component
+`workspace/page.tsx` has grown to 3017 lines (root CLAUDE.md says ~2500) — same inline-component
 structure (`CodeExecutionBlock` → `QuizModal` → `LogoutConfirmModal` → `Sidebar` → `Home`).
+`academic-writing/page.tsx` has grown to ~2000 lines on the same single-file, inline-everything
+pattern (the `WritingPanel` component plus the paragraph-by-paragraph SSE co-writing flow all live
+in this one file).
+
+## Empty scaffold directories — ignore
+
+`components/` and `lib/` at the frontend root, and `src/components/Chat/` and
+`src/components/Dashboard/`, are all empty. They predate the current flat `src/components/*.tsx`
+layout and aren't wired into anything — don't be misled into thinking chat/dashboard pieces live
+there; e.g. the dashboard UI is `src/app/dashboard/page.tsx` and chat is inline in
+`workspace/page.tsx`.
+
+## `locales/landing.ts` — one-off dictionary pattern (landing page only)
+
+`src/app/locales/landing.ts` (339 lines) is a dedicated `{ he: {...}, en: {...} }` translation
+object imported only by `src/app/page.tsx` (the marketing landing page, including its blog post
+copy). This is a deliberate exception to the root CLAUDE.md's "inline `const he = lang === 'he'`"
+i18n convention — the landing page's copy volume (long blog excerpts, multi-paragraph card text)
+made an inline approach unwieldy. Don't propagate this dictionary pattern to other pages; it exists
+because of this one page's unusual amount of static prose.
+
+## `AcademicRichEditor.tsx` — Markdown rich-text editor (academic-writing only)
+
+`src/components/AcademicRichEditor.tsx` wraps `@uiw/react-md-editor` with three custom toolbar
+commands (insert image / equation / code block) and KaTeX + Prism rendering in the preview pane.
+Used exclusively by `academic-writing/page.tsx`. **Must always be loaded via
+`dynamic(() => import(...), { ssr: false })`** — `@uiw/react-md-editor` touches `window` at module
+evaluation time and will break SSR otherwise.
 
 ## Commands (run from `frontend/`)
 

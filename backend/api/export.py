@@ -8,7 +8,7 @@ from flask import Blueprint, Response, jsonify, request, send_file, stream_with_
 
 from api.middleware import token_required
 from extensions import client, limiter
-from models import SessionLocal, TopicMastery, UserDocument
+from models import SessionLocal, TopicMastery, User, UserDocument
 from services.md_renderer import render_markdown_html
 from services.rag import get_user_collection, hybrid_search
 from services.security import (
@@ -64,9 +64,30 @@ def generate_paper(user_id: int):
     topic        = strip_html((data.get("topic")        or "").strip() if data else "")
     instructions = strip_html((data.get("instructions") or "").strip() if data else "")
     course_name  = strip_html((data.get("courseName")   or "").strip() if data else "")
-    student_name = strip_html((data.get("studentName")  or "").strip() if data else "")
+    # Full text of every section already generated + approved earlier in this same
+    # paper (sent fresh on every section request — the model has no memory between
+    # calls). Kept as its own field rather than folded into `instructions` so it can
+    # be surfaced as a clearly-labeled, high-priority block instead of getting
+    # diluted inside "style guidelines", which is what was causing repeated sections.
+    previous_content = strip_html((data.get("previousContent") or "").strip() if data else "")
+    # Drives whether the model tries to mimic the student's own writing-sample voice
+    # (the "כתוב בשמך" / personal-style toggle) vs. a neutral student-academic tone.
+    personal_style = bool(data.get("personalStyle")) if data else False
     if not topic:
         return jsonify({"error": "topic is required"}), 400
+
+    # Author attribution is automatic — pulled from the logged-in user's
+    # profile rather than a manually-typed field, so the paper header always
+    # matches the account it belongs to.
+    _db_user = SessionLocal()
+    try:
+        _user = _db_user.query(User).filter(User.id == user_id).first()
+        student_name = " ".join(filter(None, [
+            (_user.first_name or "").strip() if _user else "",
+            (_user.last_name  or "").strip() if _user else "",
+        ])).strip()
+    finally:
+        _db_user.close()
 
     try:
         page_count = int(data.get("pageCount", 1)) if data else 1
@@ -102,6 +123,7 @@ def generate_paper(user_id: int):
     safe_context      = _sanitize(context)
     safe_course       = _sanitize(course_name) if course_name else ""
     safe_student_name = _sanitize(student_name) if student_name else ""
+    safe_previous_content = _sanitize(previous_content) if previous_content else ""
 
     # NOTE: SECURITY_SYSTEM_INSTRUCTION is intentionally NOT prepended here.
     # That prefix labels the AI a "student assistant" and carries a
@@ -164,25 +186,99 @@ def generate_paper(user_id: int):
         f"academic rigor to reach this length requirement. Do NOT summarize or cut the "
         f"paper short."
         + (
-            f"\n\nPERSONAL VOICE REQUIREMENT: You are writing this specific paper as the "
-            f"student {safe_student_name}. Write in a natural, cohesive, and personal "
-            f"academic voice — as {safe_student_name} themselves would write it. Avoid "
-            f"generic 'AI-sounding' openings or stock phrasing; use the kind of critical "
-            f"thinking and logical flow a student engaged with the material would show. "
-            f"Maintain a properly academic tone throughout, but make it read as though a "
-            f"human student wrote it, not a machine."
+            "\n\nCONTINUITY — THIS IS ONE SECTION OF A MULTI-PART DOCUMENT: You are generating "
+            "a single new section that continues a paper whose earlier sections are supplied "
+            "below as 'ALREADY-WRITTEN CONTENT'. You have no memory of prior requests — that "
+            "block is the ONLY record of what has already been written, so read it carefully "
+            "before producing a single word. Do NOT redefine the same concepts, re-derive the "
+            "same equations, restate the same examples, or reuse the same phrasing — even under "
+            "a new heading; that block already exists in the final document and repeating it "
+            "creates duplicate sections. Always advance the discussion strictly forward into "
+            "material not yet covered: new angles, deeper analysis, new examples, the next "
+            "logical step of the argument."
+            if safe_previous_content else ""
+        )
+        + (
+            f"\n\nAUTHORSHIP — GHOST-WRITING MODE: The author of this paper is "
+            f"{safe_student_name}. You are writing this specific paper AS {safe_student_name} "
+            f"— take full authorship on their behalf, in the first person where appropriate, "
+            f"as if {safe_student_name} sat down and wrote every word themselves.\n"
+            f"CRITICAL — DO NOT write any attribution header yourself (no 'מאת:', 'קורס:', "
+            f"'שם:', 'מוגש על ידי:', 'תאריך:', or similar lines): the author/course/date header "
+            f"is rendered separately, deterministically, by the application UI and the export "
+            f"pipeline — using the verified name on file — precisely so it is always accurate "
+            f"and never duplicated. Writing one yourself would create a duplicate, conflicting "
+            f"header. Begin your first section directly with the document title (`# Title`), "
+            f"nothing before it.\n"
+            + (
+                f"PERSONAL VOICE REQUIREMENT (personal-style mode is ON): Write in a natural, "
+                f"cohesive, and deeply personal academic voice — exactly as {safe_student_name} "
+                f"themselves would write it. Avoid generic 'AI-sounding' openings or stock "
+                f"phrasing; use the kind of critical thinking and logical flow a student engaged "
+                f"with the material would show. If writing-sample context from "
+                f"{safe_student_name}'s previously uploaded documents is provided below, mimic "
+                f"that specific tone, vocabulary, sentence rhythm, and quirks as closely as "
+                f"possible — this student explicitly asked the paper to sound like them."
+                if personal_style else
+                f"VOICE REQUIREMENT (personal-style mode is OFF): Write in a natural, "
+                f"cohesive academic voice appropriate for a university assignment — the kind "
+                f"of critical thinking and logical flow an engaged student would show. Avoid "
+                f"generic 'AI-sounding' openings or stock phrasing, and make it read as though "
+                f"a human student wrote it, not a machine — but do NOT attempt to mimic "
+                f"{safe_student_name}'s personal writing samples or private vocabulary/quirks; "
+                f"keep the tone natural but neutral and broadly representative of a student's "
+                f"formal academic register."
+            )
             if safe_student_name else ""
         )
     )
     style_guidelines = safe_instructions if safe_instructions else "Standard professional formal tone"
     course_line = f"Course/Subject context: {safe_course}\n" if safe_course else ""
     student_line = f"Writing as student: {safe_student_name}\n" if safe_student_name else ""
+    # Length-progress awareness: without this, a model asked for "~10-15 more lines"
+    # on a short (e.g. 1-page / ~350-word) paper has no idea it has already said
+    # everything there is to say at that length — so it keeps inventing "new"
+    # sections and inevitably re-treads the same concepts. Telling it how close it
+    # already is to the target lets it choose to wrap up instead of padding/repeating.
+    previous_word_count = len(safe_previous_content.split())
+    remaining_words = max(0, target_word_count - previous_word_count)
+    if not safe_previous_content:
+        pacing_note = ""
+    elif remaining_words <= 120:
+        pacing_note = (
+            f"LENGTH CHECK: the already-written content above is roughly {previous_word_count} "
+            f"words, essentially at the ~{target_word_count}-word target for this "
+            f"{page_count}-page document. Treat this as the FINAL section: write a natural "
+            f"closing (e.g. `## סיכום` and, if relevant, `## מקורות`) that wraps up what is "
+            f"already there. Do NOT open a new major topic, re-explain existing concepts, or "
+            f"pad with repetition just to keep going — a short, sharp ending beats a bloated, "
+            f"repetitive one.\n\n"
+        )
+    else:
+        pacing_note = (
+            f"LENGTH CHECK: the already-written content above is roughly {previous_word_count} "
+            f"of the ~{target_word_count} requested words (~{remaining_words} words still to "
+            f"go for this {page_count}-page document). Keep developing genuinely NEW material — "
+            f"new angles, deeper analysis, concrete examples not yet covered — rather than "
+            f"slowing down to re-explain what is already written above.\n\n"
+        )
+    previous_block = (
+        f"=== ALREADY-WRITTEN CONTENT — part of the SAME final document, DO NOT REPEAT ANY OF IT ===\n"
+        f"---\n{safe_previous_content}\n---\n"
+        f"^^ Everything above this line is already written, approved, and permanently part of "
+        f"the document. Your new section must NOT redefine the same concepts, re-derive the same "
+        f"equations, restate the same examples, or reuse the same phrasing/headings from it — "
+        f"under any heading. Move strictly forward into new material.\n\n"
+        f"{pacing_note}"
+        if safe_previous_content else ""
+    )
     user_message = (
         f"Task: Transform the following raw source data into a well-structured, "
         f"formal academic text in Hebrew.\n\n"
         f"Topic/Focus: {safe_topic}\n"
         f"{course_line}"
         f"{student_line}"
+        f"{previous_block}"
         f"Style/Formatting Guidelines: {style_guidelines}\n\n"
         f"Source Data/Context:\n---\n{safe_context}\n---\n\n"
         "Generate only the formatted text output based strictly on the source data above. "

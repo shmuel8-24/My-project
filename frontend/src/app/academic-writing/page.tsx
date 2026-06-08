@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { Settings as IconSettings } from 'lucide-react';
+import { Settings as IconSettings, Minus, Plus } from 'lucide-react';
 import { useAuth }     from '../providers/auth';
 import { useLanguage } from '../providers/language';
 import { useCourse }   from '../providers/course';
@@ -263,7 +263,7 @@ const TR = {
     wordErr:              'שגיאה בייצוא Word',
     backToConfig:         'חזרה להגדרות',
     customInstructionsPh: 'הנחיות נוספות ל-AI (למשל: דגשים לעבודה, מבנה רצוי, הגבלת מילים)...',
-    personalStyleLabel:   'כתוב בסגנון הכתיבה הטבעי שלך',
+    personalStyleLabel:   'כתוב בשמך',
     navHome:         'בית',
     navStudyLab:     'מרחב לימוד',
     navProfSim:      'הראש של המרצה',
@@ -319,7 +319,7 @@ const TR = {
     wordErr:              'Error exporting Word',
     backToConfig:         'Back to Setup',
     customInstructionsPh: 'Additional AI instructions (e.g. emphasis, desired structure, word limit)...',
-    personalStyleLabel:   'Write in your natural writing style',
+    personalStyleLabel:   'Write in your name',
     navHome:         'Home',
     navStudyLab:     'StudyLab',
     navProfSim:      "Professor's Brain",
@@ -544,7 +544,7 @@ function Wizard({
   selectedDocId: string | null; onSelectDoc: (id: string | null) => void;
   writingType: WritingTypeId | null; onSelectType: (id: WritingTypeId) => void;
   uploadedFiles: UploadedFile[]; uploading: boolean; uploadError: string | null; onDrop: (files: File[]) => void; onRemoveFile: (file: UploadedFile) => void;
-  hasDoc: boolean; onStart: (customInstructions: string, usePersonalStyle: boolean, includeSources: boolean, pageCount: number, studentName: string) => void;
+  hasDoc: boolean; onStart: (customInstructions: string, usePersonalStyle: boolean, includeSources: boolean, pageCount: number) => void;
 }) {
   const router = useRouter();
   const [step,               setStep]               = useState<1 | 2 | 3>(1);
@@ -553,7 +553,6 @@ function Wizard({
   const [usePersonalStyle,   setUsePersonalStyle]   = useState(false);
   const [includeSources,     setIncludeSources]     = useState(false);
   const [pageCount,          setPageCount]          = useState(1);
-  const [studentName,        setStudentName]        = useState('');
   const [scanningFileNames,  setScanningFileNames]  = useState<string[]>([]);
 
   // Capture file names immediately when dropped so we can show per-file
@@ -905,142 +904,125 @@ function Wizard({
               <SummaryRow emoji={wtEmoji} label={he ? 'סוג כתיבה' : 'Writing type'} value={wtLabel} />
             </div>
 
-            {/* Page count selector */}
-            <div className="flex items-center justify-between gap-3 px-1">
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold" style={{ color: '#1C3329' }}>
-                  {he ? 'אורך מוערך (עמודים)' : 'Estimated length (pages)'}
-                </p>
-                <p className="text-xs mt-0.5" style={{ color: '#7BA08A' }}>
-                  {he ? 'כמה עמודים בערך תרצה שהמסמך יכיל' : 'Roughly how many pages the document should span'}
-                </p>
+            {/* Document settings — grouped into one bordered list so related
+                controls read as a single unit instead of loose floating rows. */}
+            <div className="flex flex-col rounded-2xl overflow-hidden" style={{
+              background: 'rgba(255,255,255,0.50)',
+              border: '1px solid rgba(157,192,139,0.38)',
+            }}>
+              {/* Page count stepper */}
+              <div className="flex items-center justify-between gap-3 px-4 py-4" style={{ borderBottom: '1px solid rgba(157,192,139,0.25)' }}>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold" style={{ color: '#1C3329' }}>
+                    {he ? 'אורך מוערך (עמודים)' : 'Estimated length (pages)'}
+                  </p>
+                  <p className="text-xs mt-0.5" style={{ color: '#7BA08A' }}>
+                    {he ? 'כמה עמודים בערך תרצה שהמסמך יכיל' : 'Roughly how many pages the document should span'}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0" style={{
+                  background: 'rgba(255,255,255,0.65)',
+                  border: '1px solid rgba(157,192,139,0.42)',
+                  borderRadius: '0.75rem',
+                  padding: '6px 10px',
+                }}>
+                  <button
+                    type="button"
+                    onClick={() => setPageCount(p => Math.max(1, p - 1))}
+                    disabled={pageCount <= 1}
+                    className="w-7 h-7 flex items-center justify-center rounded-lg text-base font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                    style={{ color: '#2A3B22', background: 'rgba(81,123,62,0.10)' }}
+                    aria-label={he ? 'הפחת עמוד' : 'Decrease pages'}
+                  >
+                    <Minus className="w-3.5 h-3.5" strokeWidth={2.5} />
+                  </button>
+                  <input
+                    type="number"
+                    min={1}
+                    max={15}
+                    value={pageCount}
+                    onChange={e => {
+                      const v = parseInt(e.target.value, 10);
+                      if (!Number.isNaN(v)) setPageCount(Math.min(15, Math.max(1, v)));
+                    }}
+                    className="w-10 text-center text-sm font-bold outline-none bg-transparent [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    style={{ color: '#1C3329' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setPageCount(p => Math.min(15, p + 1))}
+                    disabled={pageCount >= 15}
+                    className="w-7 h-7 flex items-center justify-center rounded-lg text-base font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                    style={{ color: '#2A3B22', background: 'rgba(81,123,62,0.10)' }}
+                    aria-label={he ? 'הוסף עמוד' : 'Increase pages'}
+                  >
+                    <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0" style={{
-                background: 'rgba(255,255,255,0.55)',
-                border: '1px solid rgba(157,192,139,0.42)',
-                borderRadius: '0.75rem',
-                padding: '6px 10px',
-              }}>
-                <button
-                  type="button"
-                  onClick={() => setPageCount(p => Math.max(1, p - 1))}
-                  disabled={pageCount <= 1}
-                  className="w-7 h-7 flex items-center justify-center rounded-lg text-base font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                  style={{ color: '#2A3B22', background: 'rgba(81,123,62,0.10)' }}
-                  aria-label={he ? 'הפחת עמוד' : 'Decrease pages'}
-                >
-                  −
-                </button>
-                <input
-                  type="number"
-                  min={1}
-                  max={15}
-                  value={pageCount}
-                  onChange={e => {
-                    const v = parseInt(e.target.value, 10);
-                    if (!Number.isNaN(v)) setPageCount(Math.min(15, Math.max(1, v)));
-                  }}
-                  className="w-10 text-center text-sm font-bold outline-none bg-transparent [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                  style={{ color: '#1C3329' }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setPageCount(p => Math.min(15, p + 1))}
-                  disabled={pageCount >= 15}
-                  className="w-7 h-7 flex items-center justify-center rounded-lg text-base font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                  style={{ color: '#2A3B22', background: 'rgba(81,123,62,0.10)' }}
-                  aria-label={he ? 'הוסף עמוד' : 'Increase pages'}
-                >
-                  +
-                </button>
+
+              {/* Personal style toggle — single, specific description (no
+                  restating the label) so the row reads cleanly at a glance. */}
+              <div className="flex items-center gap-3 px-4 py-4" style={{ borderBottom: '1px solid rgba(157,192,139,0.25)' }}>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold" style={{ color: '#1C3329' }}>{t.personalStyleLabel}</p>
+                  <p className="text-xs mt-0.5" style={{ color: '#7BA08A' }}>
+                    {he
+                      ? 'ילמד מהחומרים שהעלית כדי לכתוב בטון ובסגנון שמרגישים כמוך'
+                      : 'Learns from your uploaded materials to write in a tone and style that feels like you'}
+                  </p>
+                </div>
+                <ToggleSwitch checked={usePersonalStyle} onChange={setUsePersonalStyle} />
+              </div>
+
+              {/* Include sources toggle */}
+              <div className="flex items-center gap-3 px-4 py-4">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold" style={{ color: '#1C3329' }}>{he ? 'הוסף מקורות' : 'Add sources'}</p>
+                  <p className="text-xs mt-0.5" style={{ color: '#7BA08A' }}>
+                    {he ? 'ציין מאיזה קובץ נלקח המידע בסוף כל פסקה' : 'Cite which file each paragraph draws from'}
+                  </p>
+                </div>
+                <ToggleSwitch checked={includeSources} onChange={setIncludeSources} />
               </div>
             </div>
 
-            {/* Student name — used for the document header & personal writing voice */}
+            {/* Custom instructions — plain textarea, kept visually separate from
+                the structured toggles above since it's freeform input. */}
             <div className="flex flex-col gap-1.5 px-1">
               <p className="text-sm font-semibold" style={{ color: '#1C3329' }}>
-                {he ? 'שם הסטודנט' : 'Student name'}
+                {he ? 'הנחיות מותאמות אישית' : 'Custom instructions'}
               </p>
-              <p className="text-xs" style={{ color: '#7BA08A' }}>
-                {he ? 'יוצג בראש המסמך והכתיבה תותאם לקול אישי בשמך' : 'Shown at the top of the document and used to write in your personal voice'}
-              </p>
-              <input
-                type="text"
+              <textarea
                 dir="auto"
-                value={studentName}
-                onChange={e => setStudentName(e.target.value)}
-                placeholder={he ? 'לדוגמה: ישראל ישראלי' : 'e.g. Jane Doe'}
-                className="w-full rounded-xl px-4 py-3 text-sm outline-none transition-all"
+                rows={3}
+                value={customInstructions}
+                onChange={e => setCustomInstructions(e.target.value)}
+                placeholder={t.customInstructionsPh}
+                className="w-full rounded-xl resize-none outline-none text-sm transition-all"
                 style={{
                   background:  'rgba(255,255,255,0.50)',
                   border:      '1px solid rgba(157,192,139,0.42)',
                   color:       '#1A2E26',
+                  padding:     '14px 16px',
+                  lineHeight:  1.65,
+                  fontFamily:  'inherit',
+                  height:      96,
                 }}
                 onFocus={e => {
-                  e.currentTarget.style.background  = 'rgba(255,255,255,0.80)';
-                  e.currentTarget.style.borderColor = 'rgba(81,123,62,0.65)';
-                  e.currentTarget.style.boxShadow   = '0 0 0 2px rgba(81,123,62,0.10)';
+                  e.currentTarget.style.background    = 'rgba(255,255,255,0.80)';
+                  e.currentTarget.style.borderColor   = 'rgba(81,123,62,0.65)';
+                  e.currentTarget.style.boxShadow     = '0 0 0 2px rgba(81,123,62,0.10)';
                 }}
                 onBlur={e => {
-                  e.currentTarget.style.background  = 'rgba(255,255,255,0.50)';
-                  e.currentTarget.style.borderColor = 'rgba(157,192,139,0.42)';
-                  e.currentTarget.style.boxShadow   = 'none';
+                  e.currentTarget.style.background    = 'rgba(255,255,255,0.50)';
+                  e.currentTarget.style.borderColor   = 'rgba(157,192,139,0.42)';
+                  e.currentTarget.style.boxShadow     = 'none';
                 }}
               />
             </div>
 
-            {/* Custom instructions — plain textarea */}
-            <textarea
-              dir="auto"
-              rows={3}
-              value={customInstructions}
-              onChange={e => setCustomInstructions(e.target.value)}
-              placeholder={t.customInstructionsPh}
-              className="w-full rounded-xl resize-none outline-none text-sm transition-all"
-              style={{
-                background:  'rgba(255,255,255,0.50)',
-                border:      '1px solid rgba(157,192,139,0.42)',
-                color:       '#1A2E26',
-                padding:     '14px 16px',
-                lineHeight:  1.65,
-                fontFamily:  'inherit',
-                height:      96,
-              }}
-              onFocus={e => {
-                e.currentTarget.style.background    = 'rgba(255,255,255,0.80)';
-                e.currentTarget.style.borderColor   = 'rgba(81,123,62,0.65)';
-                e.currentTarget.style.boxShadow     = '0 0 0 2px rgba(81,123,62,0.10)';
-              }}
-              onBlur={e => {
-                e.currentTarget.style.background    = 'rgba(255,255,255,0.50)';
-                e.currentTarget.style.borderColor   = 'rgba(157,192,139,0.42)';
-                e.currentTarget.style.boxShadow     = 'none';
-              }}
-            />
-
-            {/* Personal style toggle */}
-            <div className="flex items-center gap-3 px-1">
-              <ToggleSwitch checked={usePersonalStyle} onChange={setUsePersonalStyle} />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold" style={{ color: '#1C3329' }}>{t.personalStyleLabel}</p>
-                <p className="text-xs mt-0.5" style={{ color: '#7BA08A' }}>
-                  {he ? 'התאם את הכתיבה לסגנון אישי וישיר' : 'Adapts the output to a personal, direct voice'}
-                </p>
-              </div>
-            </div>
-
-            {/* Include sources toggle */}
-            <div className="flex items-center gap-3 px-1">
-              <ToggleSwitch checked={includeSources} onChange={setIncludeSources} />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold" style={{ color: '#1C3329' }}>{he ? 'הוסף מקורות' : 'Add sources'}</p>
-                <p className="text-xs mt-0.5" style={{ color: '#7BA08A' }}>
-                  {he ? 'ציין מאיזה קובץ נלקח המידע בסוף כל פסקה' : 'Cite which file each paragraph draws from'}
-                </p>
-              </div>
-            </div>
-
-            <button onClick={() => onStart(customInstructions, usePersonalStyle, includeSources, pageCount, studentName.trim())}
+            <button onClick={() => onStart(customInstructions, usePersonalStyle, includeSources, pageCount)}
               className="w-full flex items-center justify-center gap-2.5 py-4 rounded-2xl text-base font-bold text-white transition-all active:scale-[0.98] mt-2"
               style={{ background: 'linear-gradient(135deg,#517B3E,#2A3B22)', boxShadow: '0 8px 28px rgba(81,123,62,0.42)' }}>
               <IconPen className="w-5 h-5" />
@@ -1083,8 +1065,8 @@ function Wizard({
 
 /* ─── Writing panel — Co-Writer mode (paragraph-by-paragraph) ───────────── */
 function WritingPanel({
-  t, he, hasDoc, writingType, onBack, wizardInstructions, usePersonalStyle, includeSources, pageCount, studentName,
-  userFirstName, userLastName,
+  t, he, hasDoc, writingType, onBack, wizardInstructions, usePersonalStyle, includeSources, pageCount,
+  userFirstName, userLastName, userInstitution,
 }: {
   t: TType; he: boolean; hasDoc: boolean;
   writingType: WritingTypeId | null;
@@ -1093,9 +1075,9 @@ function WritingPanel({
   usePersonalStyle: boolean;
   includeSources: boolean;
   pageCount: number;
-  studentName: string;
   userFirstName: string;
   userLastName: string;
+  userInstitution: string;
 }) {
   const { selectedCourse } = useCourse();
   const formattedDate = useMemo(
@@ -1159,12 +1141,6 @@ function WritingPanel({
     const styleHint = usePersonalStyle
       ? (he ? 'עצב בסגנון אישי וטבעי, לא פורמלי מדי.' : 'Use a personal, natural voice — not overly formal.')
       : '';
-    const nameHint = studentName.trim()
-      ? (he
-          ? `כתוב מסמך זה כאילו הסטודנט/ית ${studentName.trim()} כתב/ה אותו בעצמו/ה — בקול אקדמי טבעי, מגובש ואישי. הימנע מפתיחות שנשמעות כמו AI, והשתמש בחשיבה ביקורתית וזרימה לוגית כפי שסטודנט/ית היה/הייתה כותב/ת.`
-          : `Write this document as if the student ${studentName.trim()} wrote it themselves — in a natural, cohesive, personal academic voice. Avoid generic "AI-sounding" intros, and use the kind of critical thinking and logical flow a student would have.`)
-      : '';
-
     const prevContext = approved.length > 0
       ? approved.map((p, i) => `[Section ${i + 1}]:\n${p}`).join('\n\n---\n\n')
       : '';
@@ -1186,8 +1162,14 @@ function WritingPanel({
           + 'in the first section above; never repeat or duplicate it.',
       'STRICT MARKDOWN STRUCTURE RULE — mandatory: if this section opens a new logical '
         + 'part of the document (e.g., a new argument/topic, a conclusion), '
-        + 'it MUST start with a real Markdown heading on its own line — '
-        + '`## גוף הדיון`, `## סיכום`, etc. (use `###` for sub-points within a section). '
+        + 'it MUST start with a real Markdown heading on its own line — but that heading '
+        + 'MUST be SPECIFIC and DESCRIPTIVE of this section\'s actual content '
+        + '(e.g., `## ניתוח מתמטי של עקרון אי-הוודאות`, `## יישומים נסיוניים: ניסוי שטרן-גרלך`, '
+        + '`## סיכום ומסקנות`). NEVER use a generic placeholder heading like `## גוף הדיון` '
+        + 'or `## חלק ב\'` — vague titles like that carry no real information and tempt you '
+        + 'to reuse the exact same heading (and the content under it) across multiple sections, '
+        + 'which creates duplicated sections in the final document. '
+        + '(Use `###` for sub-points within a section.) '
         + 'NEVER write section names as plain inline prose like "במבוא זה..." or "לסיכום, ...". '
         + 'If this section continues the SAME part as the previous one, do not repeat its heading — '
         + 'just continue the prose.',
@@ -1195,9 +1177,6 @@ function WritingPanel({
         + 'of a specific technical term — write naturally, as a professional academic '
         + 'researcher would, and prioritize readability and flow over stylistic decoration.',
       `This is section number ${paragraphNum + 1}.`,
-      approved.length > 0
-        ? `The following sections have already been written and approved (do not repeat their headings, including the title):\n\n${prevContext}`
-        : '',
       feedback.trim()
         ? `The user requested this revision to the previous draft: "${feedback.trim()}". Address this feedback carefully.`
         : '',
@@ -1214,9 +1193,10 @@ function WritingPanel({
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           topic,
-          instructions: [typeHint, styleHint, nameHint, wizardInstructions, constraint].filter(Boolean).join('\n\n'),
+          instructions: [typeHint, styleHint, wizardInstructions, constraint].filter(Boolean).join('\n\n'),
+          previousContent: prevContext || null,
+          personalStyle: usePersonalStyle,
           pageCount,
-          studentName: studentName.trim() || null,
           courseId:   selectedCourse?.id   ?? null,
           courseName: selectedCourse?.name ?? null,
         }),
@@ -1281,7 +1261,7 @@ function WritingPanel({
       setWaitingForFeedback(false);
     }
     finally { setLoading(false); setIsStreamingDraft(false); }
-  }, [topic, hasDoc, writingType, wtLabel, he, usePersonalStyle, includeSources, wizardInstructions, pageCount, studentName, selectedCourse, t]);
+  }, [topic, hasDoc, writingType, wtLabel, he, usePersonalStyle, includeSources, wizardInstructions, pageCount, selectedCourse, t]);
 
   const approveAndContinue = () => {
     if (!currentDraft) return;
@@ -1324,8 +1304,24 @@ function WritingPanel({
 
   const safeTitle = () => topic.trim().slice(0, 40).replace(/[^\w֐-׿\s-]/g, '') || 'paper';
 
+  /* Mirrors the on-screen attribution block (line ~1623) as Markdown so the
+     exported file — the actual deliverable — carries the same מאת/קורס/תאריך/נושא
+     header the student sees in the preview. Built deterministically (never by
+     the LLM) so the name/course/date are always 100% accurate. */
+  const buildAttributionHeader = () => {
+    const displayName = [userFirstName, userLastName].filter(Boolean).join(' ');
+    if (!usePersonalStyle && !displayName) return '';
+    const lines: string[] = [];
+    if (displayName)          lines.push(he ? `**מאת:** ${displayName}`           : `**By:** ${displayName}`);
+    if (userInstitution)      lines.push(he ? `**מוסד לימודים:** ${userInstitution}` : `**Institution:** ${userInstitution}`);
+    if (selectedCourse?.name) lines.push(he ? `**קורס:** ${selectedCourse.name}`   : `**Course:** ${selectedCourse.name}`);
+    lines.push(he ? `**תאריך:** ${formattedDate}` : `**Date:** ${formattedDate}`);
+    lines.push(he ? `**נושא:** ${topic}` : `**Topic:** ${topic}`);
+    return `${lines.join('  \n')}\n\n---\n\n`;
+  };
+
   const downloadPdf = async () => {
-    const text = editedContent ?? approvedParagraphs.join('\n\n');
+    const text = buildAttributionHeader() + (editedContent ?? approvedParagraphs.join('\n\n'));
     if (!text || downloading) return;
     setDownloading(true);
     try {
@@ -1342,7 +1338,7 @@ function WritingPanel({
   };
 
   const downloadWord = async () => {
-    const text = editedContent ?? approvedParagraphs.join('\n\n');
+    const text = buildAttributionHeader() + (editedContent ?? approvedParagraphs.join('\n\n'));
     if (!text || downloadingWord) return;
     setDownloadingWord(true);
     try {
@@ -1639,15 +1635,27 @@ function WritingPanel({
                     className="bg-white shadow-lg border border-slate-200 max-w-4xl mx-auto py-16 px-12"
                     style={{ fontFamily: 'Georgia, "Times New Roman", serif', color: '#1f2937' }}
                   >
-                    {/* Document header — student metadata, shown for personal-style / named documents */}
+                    {/* Document header — rendered deterministically by the UI (never by the
+                        LLM) so author attribution is always present, accurate, and never
+                        duplicated inside the generated Markdown body. */}
                     {(() => {
-                      const displayName = studentName.trim() || [userFirstName, userLastName].filter(Boolean).join(' ');
+                      const displayName = [userFirstName, userLastName].filter(Boolean).join(' ');
                       if (!usePersonalStyle && !displayName) return null;
                       return (
                         <div className="border-b-2 border-slate-800 pb-4 mb-10">
                           {displayName && (
                             <p className="text-right font-bold text-slate-900 mb-2 leading-[1.8]">
-                              {he ? `שם הסטודנט: ${displayName}` : `Student name: ${displayName}`}
+                              {he ? `מאת: ${displayName}` : `By: ${displayName}`}
+                            </p>
+                          )}
+                          {userInstitution && (
+                            <p className="text-right font-bold text-slate-900 mb-2 leading-[1.8]">
+                              {he ? `מוסד לימודים: ${userInstitution}` : `Institution: ${userInstitution}`}
+                            </p>
+                          )}
+                          {selectedCourse?.name && (
+                            <p className="text-right font-bold text-slate-900 mb-2 leading-[1.8]">
+                              {he ? `קורס: ${selectedCourse.name}` : `Course: ${selectedCourse.name}`}
                             </p>
                           )}
                           <p className="text-right font-bold text-slate-900 mb-2 leading-[1.8]">
@@ -1731,6 +1739,7 @@ function WritingPanel({
 export default function AcademicWritingPage() {
   const router = useRouter();
   const { user: authUser, isLoading: authLoading } = useAuth();
+  const { selectedCourse, courseHydrated } = useCourse();
   const { lang, toggleLanguage } = useLanguage();
   const he = lang === 'he';
   const t  = (he ? TR.he : TR.en) as TType;
@@ -1746,7 +1755,6 @@ export default function AcademicWritingPage() {
   const [wizardPersonalStyle,  setWizardPersonalStyle]  = useState(false);
   const [wizardIncludeSources, setWizardIncludeSources] = useState(false);
   const [wizardPageCount,      setWizardPageCount]      = useState(1);
-  const [wizardStudentName,    setWizardStudentName]    = useState('');
   const [sessions,          setSessions]           = useState<SessionInfo[]>([]);
   const [docs,              setDocs]               = useState<DocInfo[]>([]);
   const [sessionsLoading,   setSessionsLoading]    = useState(true);
@@ -1765,6 +1773,7 @@ export default function AcademicWritingPage() {
   const [userFirstName] = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_first_name') ?? '') : '');
   const [userLastName]  = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_last_name')  ?? '') : '');
   const [userGender]    = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_gender')     ?? '') : '');
+  const [userInstitution] = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_institution') ?? '') : '');
   const userInitials = [userFirstName[0], userLastName[0]].filter(Boolean).join('').toUpperCase() || (userEmail ? userEmail.slice(0, 2).toUpperCase() : '?');
 
   /* Guards */
@@ -1772,6 +1781,16 @@ export default function AcademicWritingPage() {
     if (authLoading) return;
     if (!authUser) router.replace('/?login=true');
   }, [authLoading, authUser, router]);
+
+  // Academic writing always needs course context (syllabus material, paper
+  // attribution, etc.) — bounce to the course picker the moment the active
+  // course is cleared (e.g. via the "✕" on the header CoursePill), mirroring
+  // the guard in dashboard/layout.tsx.
+  useEffect(() => {
+    if (authLoading || !authUser) return;
+    if (!courseHydrated) return;
+    if (!selectedCourse) router.replace('/course-picker');
+  }, [authLoading, authUser, courseHydrated, selectedCourse, router]);
 
   useEffect(() => {
     function onScroll() { setHeaderScrolled(window.scrollY > 4); }
@@ -1882,7 +1901,7 @@ export default function AcademicWritingPage() {
     window.location.href = '/';
   }, []);
 
-  if (authLoading || !authUser) return null;
+  if (authLoading || !authUser || !courseHydrated || !selectedCourse) return null;
 
   return (
     <div dir={he ? 'rtl' : 'ltr'} className="min-h-screen flex flex-col overflow-x-hidden"
@@ -1944,7 +1963,7 @@ export default function AcademicWritingPage() {
             selectedDocId={selectedDocId} onSelectDoc={setSelectedDocId}
             writingType={writingType} onSelectType={setWritingType}
             uploadedFiles={uploadedFiles} uploading={uploading} uploadError={uploadError} onDrop={handleDrop} onRemoveFile={handleRemoveFile}
-            hasDoc={hasDoc} onStart={(ci, ps, is, pc, sn) => { setWizardInstructions(ci); setWizardPersonalStyle(ps); setWizardIncludeSources(is); setWizardPageCount(pc); setWizardStudentName(sn); setPhase('writing'); }}
+            hasDoc={hasDoc} onStart={(ci, ps, is, pc) => { setWizardInstructions(ci); setWizardPersonalStyle(ps); setWizardIncludeSources(is); setWizardPageCount(pc); setPhase('writing'); }}
           />
         ) : (
           <WritingPanel
@@ -1956,9 +1975,9 @@ export default function AcademicWritingPage() {
             usePersonalStyle={wizardPersonalStyle}
             includeSources={wizardIncludeSources}
             pageCount={wizardPageCount}
-            studentName={wizardStudentName}
             userFirstName={userFirstName}
             userLastName={userLastName}
+            userInstitution={userInstitution}
           />
         )}
       </main>
