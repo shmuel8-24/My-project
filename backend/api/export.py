@@ -72,22 +72,38 @@ def generate_paper(user_id: int):
     previous_content = strip_html((data.get("previousContent") or "").strip() if data else "")
     # Drives whether the model tries to mimic the student's own writing-sample voice
     # (the "כתוב בשמך" / personal-style toggle) vs. a neutral student-academic tone.
-    personal_style = bool(data.get("personalStyle")) if data else False
+    personal_style   = bool(data.get("personalStyle"))   if data else False
+    is_final_section = bool(data.get("isFinalSection")) if data else False
+    # File IDs to restrict RAG retrieval to the exact documents selected by the user.
+    # An empty list means "search all user documents" (sessions source type or no selection).
+    raw_file_ids = data.get("fileIds") if data else None
+    req_file_ids: list[str] = [str(f) for f in raw_file_ids if f] if isinstance(raw_file_ids, list) else []
+    try:
+        current_chunk_index = int(data.get("currentChunkIndex", 0)) if data else 0
+        # Accept both new (maxChunks) and legacy (totalChunksTarget) field names
+        max_chunks = int(data.get("maxChunks") or data.get("totalChunksTarget") or 4) if data else 4
+    except (TypeError, ValueError):
+        current_chunk_index = 0
+        max_chunks = 4
+    max_chunks = max(1, max_chunks)
     if not topic:
         return jsonify({"error": "topic is required"}), 400
 
-    # Author attribution is automatic — pulled from the logged-in user's
-    # profile rather than a manually-typed field, so the paper header always
-    # matches the account it belongs to.
-    _db_user = SessionLocal()
-    try:
-        _user = _db_user.query(User).filter(User.id == user_id).first()
-        student_name = " ".join(filter(None, [
-            (_user.first_name or "").strip() if _user else "",
-            (_user.last_name  or "").strip() if _user else "",
-        ])).strip()
-    finally:
-        _db_user.close()
+    # Accept a pre-computed name from the frontend (already fresh from /api/profile);
+    # fall back to the DB if the payload doesn't include one.
+    payload_student_name = (data.get("studentName") or "").strip() if data else ""
+    if payload_student_name:
+        student_name = payload_student_name
+    else:
+        _db_user = SessionLocal()
+        try:
+            _user = _db_user.query(User).filter(User.id == user_id).first()
+            student_name = " ".join(filter(None, [
+                (_user.first_name or "").strip() if _user else "",
+                (_user.last_name  or "").strip() if _user else "",
+            ])).strip()
+        finally:
+            _db_user.close()
 
     try:
         page_count = int(data.get("pageCount", 1)) if data else 1
@@ -101,7 +117,10 @@ def generate_paper(user_id: int):
     if doc_count == 0:
         return jsonify({"error": "no documents in the knowledge base — upload a PDF first"}), 400
 
-    chunks, metadatas = hybrid_search(user_id, topic, min(20, doc_count))
+    chunks, metadatas = hybrid_search(
+        user_id, topic, min(20, doc_count),
+        file_ids=req_file_ids or None,
+    )
     if not chunks:
         return jsonify({"error": "no relevant chunks found for this topic"}), 400
 
@@ -165,10 +184,10 @@ def generate_paper(user_id: int):
         "specific section (e.g., to avoid duplicating a title already generated earlier "
         "in the document) — in that case follow those guidelines exactly.\n"
         "- Unless the instructions explicitly ask for a single paragraph/section with no "
-        "headers, structure the output as a complete formal document: open with the main "
-        "title as a Markdown `# Title` on the very first line, then use `## Subtitle` for "
-        "section headings (suggested structure: title, תקציר (summary), מבוא (introduction), "
-        "body sections with sub-headings, סיכום (conclusion), מקורות (sources))\n"
+        "headers, contribute to the complete formal document structure: the full paper "
+        "across all chunks follows: title → תקציר → מבוא → body sections → "
+        "סיכום (FINAL chunk ONLY) → מקורות. Each individual chunk writes ONLY its "
+        "assigned portion of this structure — never the full sequence.\n"
         "- If the instructions explicitly ask for only a single paragraph or section "
         "without a title/headers, follow that constraint exactly and output pure prose only — "
         "but if that section opens a new logical part of the document, it MUST still begin "
@@ -180,27 +199,94 @@ def generate_paper(user_id: int):
         "- EQUATIONS: for any mathematical, physical, or chemical formula use LaTeX notation. "
         "Inline: $E=mc^2$. Display block: $$\\int_0^\\infty e^{-x}\\,dx = 1$$. "
         "Never write equations as plain text.\n\n"
-        f"CRITICAL LENGTH REQUIREMENT: The user requested a document length of "
-        f"{page_count} pages. You MUST generate approximately {target_word_count} words. "
-        f"You must expand deeply on concepts, provide thorough explanations, and maintain "
-        f"academic rigor to reach this length requirement. Do NOT summarize or cut the "
-        f"paper short."
+        "CRITICAL GROUNDING RULE — ABSOLUTE CONSTRAINT: Your entire output MUST be based "
+        "STRICTLY AND EXCLUSIVELY on the 'Source Data/Context' provided in the user message "
+        "below. Every sentence, argument, fact, and conclusion MUST be derivable from that "
+        "context — nothing more, nothing less. "
+        "DO NOT use external knowledge or training-data facts beyond what appears in the source. "
+        "DO NOT switch topics. If the source material is about Law, write about Law. "
+        "If the source material is about History, write about History. "
+        "If you generate content about any topic NOT explicitly present in the retrieved "
+        "context (e.g., writing about Quantum Physics when the source is about Civil Law), "
+        "that is a catastrophic, unacceptable failure. "
+        "The topic in the user request is a focusing lens — it never overrides the subject "
+        "matter of the source documents.\n\n"
+        f"CRITICAL LENGTH ENFORCEMENT: The user requested a document length of "
+        f"{page_count} pages, which equals approximately {target_word_count} words in total.\n"
+        f"You MUST write extensively to reach this exact length.\n"
+        f"DO NOT summarize. DO NOT be concise.\n"
+        f"To reach this word count naturally without repeating yourself, you must:\n"
+        f"1. Provide deep theoretical background and context.\n"
+        f"2. Elaborate significantly on mathematical formulas, derivations, or complex concepts.\n"
+        f"3. Provide detailed, multi-step real-world examples or case studies.\n"
+        f"4. Expand on the broader applications and implications of the topics discussed."
         + (
-            "\n\nCONTINUITY — THIS IS ONE SECTION OF A MULTI-PART DOCUMENT: You are generating "
-            "a single new section that continues a paper whose earlier sections are supplied "
-            "below as 'ALREADY-WRITTEN CONTENT'. You have no memory of prior requests — that "
-            "block is the ONLY record of what has already been written, so read it carefully "
-            "before producing a single word. Do NOT redefine the same concepts, re-derive the "
-            "same equations, restate the same examples, or reuse the same phrasing — even under "
-            "a new heading; that block already exists in the final document and repeating it "
-            "creates duplicate sections. Always advance the discussion strictly forward into "
-            "material not yet covered: new angles, deeper analysis, new examples, the next "
-            "logical step of the argument."
+            f"\n\n=== CHUNK ROUTING: PART {current_chunk_index + 1} OF {max_chunks} ===\n"
+            + (
+                # ── FINAL CHUNK ──────────────────────────────────────────────
+                f"THIS IS THE FINAL CHUNK ({current_chunk_index + 1} of {max_chunks}).\n"
+                "YOUR ONLY TASK NOW: Write the conclusion section.\n"
+                "1. Open with the heading '## סיכום' on its own line.\n"
+                "2. Synthesise the NEW arguments and findings established throughout the paper.\n"
+                "3. Close with a strong, decisive final paragraph.\n"
+                "STRICT PROHIBITION: Do NOT open a new argument, introduce a new author, "
+                "or derive any new formula. This section closes — it does not extend.\n"
+                "STRICT PROHIBITION: Do NOT use any variant of 'לסיכום' as inline prose — "
+                "only the formal '## סיכום' Markdown heading is allowed."
+                if is_final_section else
+                # ── MIDDLE CHUNK ─────────────────────────────────────────────
+                f"THIS IS CHUNK {current_chunk_index + 1} OF {max_chunks} — NOT THE FINAL CHUNK.\n"
+                f"There are still {max_chunks - current_chunk_index - 1} chunk(s) to follow after this one.\n"
+                "STRICT PROHIBITION: Do NOT write a conclusion. Do NOT use '## סיכום', "
+                "'### סיכום', 'לסיכום', 'לסיום', 'לסכם', 'סיכום ביניים', 'לסיכומו של דבר', "
+                "or ANY phrasing that signals the paper is ending or wrapping up.\n"
+                "YOUR TASK: Write pure BODY content — analysis, elaboration, "
+                "concrete examples, the next logical step of the argument.\n"
+                f"End this chunk mid-flow; chunk {current_chunk_index + 2} will continue seamlessly."
+            )
+        )
+        + (
+            # ── ANTI-REPETITION ENGINE (active whenever prior text exists) ──
+            "\n\n=== ANTI-REPETITION ENGINE — MANDATORY 3-STEP PROCESS ===\n"
+            "You are continuing a document. The text already written is supplied below under "
+            "'ALREADY-WRITTEN CONTENT'. You have NO memory of previous API calls — "
+            "that block is the ONLY record of what exists in the document so far.\n\n"
+            "STEP 1 — CATALOG WHAT IS ALREADY COVERED (do this silently, in your reasoning):\n"
+            "Read every sentence of the ALREADY-WRITTEN CONTENT and mentally list:\n"
+            "  • Every author, researcher, or thinker mentioned by name.\n"
+            "  • Every case study, experiment, or real-world example cited.\n"
+            "  • Every theoretical argument, concept definition, or formula derived.\n"
+            "  • Every heading that has already been used.\n\n"
+            "STEP 2 — ABSOLUTE PROHIBITION LIST:\n"
+            "YOU ARE STRICTLY FORBIDDEN from:\n"
+            "  • Mentioning any author, researcher, or thinker from your Step 1 catalog again.\n"
+            "  • Re-citing any case study, experiment, or example from your Step 1 catalog.\n"
+            "  • Re-deriving any formula or re-defining any concept from your Step 1 catalog.\n"
+            "  • Using any heading identical or near-identical to a heading already written.\n"
+            "  • Rephrasing or paraphrasing anything already written, even under a new heading.\n"
+            "  • Writing 'כפי שצוין לעיל', 'כאמור', 'כפי שהוסבר' or ANY back-reference "
+            "    to content already in the document — just move forward.\n\n"
+            "STEP 3 — EXTRACT AND WRITE GENUINELY NEW MATERIAL:\n"
+            "Scan the 'Source Data/Context' in the user message for material NOT yet used:\n"
+            "  • New authors or researchers not yet mentioned.\n"
+            "  • New case studies, experiments, or examples not yet cited.\n"
+            "  • New theoretical angles, sub-arguments, or deeper elaborations.\n"
+            "If the source data contains no new material you have not yet exhausted, "
+            "deepen the analysis of what the sources imply — broader context, "
+            "implications, counter-arguments — rather than repeating what is stated."
             if safe_previous_content else ""
         )
         + (
             f"\n\nAUTHORSHIP — GHOST-WRITING MODE: The author of this paper is "
-            f"{safe_student_name}. You are writing this specific paper AS {safe_student_name} "
+            f"{safe_student_name}. "
+            f"CRITICAL NAME TRANSLITERATION RULE: If you are writing in Hebrew, you MUST "
+            f"transliterate the student's name '{safe_student_name}' into Hebrew script whenever "
+            f"you reference it inside the body of the document. "
+            f"For example: 'Shmuel Levy' → 'שמואל לוי', 'David Cohen' → 'דוד כהן', "
+            f"'Yael Mizrachi' → 'יעל מזרחי'. "
+            f"NEVER write the student's name in Latin/English characters within Hebrew prose — "
+            f"always use the Hebrew transliteration. "
+            f"You are writing this specific paper AS {safe_student_name} "
             f"— take full authorship on their behalf, in the first person where appropriate, "
             f"as if {safe_student_name} sat down and wrote every word themselves.\n"
             f"CRITICAL — DO NOT write any attribution header yourself (no 'מאת:', 'קורס:', "
@@ -244,15 +330,24 @@ def generate_paper(user_id: int):
     remaining_words = max(0, target_word_count - previous_word_count)
     if not safe_previous_content:
         pacing_note = ""
-    elif remaining_words <= 120:
+    elif remaining_words <= 120 and is_final_section:
+        # Word target met AND this is the designated final chunk — appropriate to close.
         pacing_note = (
             f"LENGTH CHECK: the already-written content above is roughly {previous_word_count} "
             f"words, essentially at the ~{target_word_count}-word target for this "
-            f"{page_count}-page document. Treat this as the FINAL section: write a natural "
-            f"closing (e.g. `## סיכום` and, if relevant, `## מקורות`) that wraps up what is "
+            f"{page_count}-page document. This is also the FINAL chunk — write a natural "
+            f"closing (`## סיכום` and, if relevant, `## מקורות`) that wraps up what is "
             f"already there. Do NOT open a new major topic, re-explain existing concepts, or "
-            f"pad with repetition just to keep going — a short, sharp ending beats a bloated, "
-            f"repetitive one.\n\n"
+            f"pad with repetition just to keep going.\n\n"
+        )
+    elif remaining_words <= 120 and not is_final_section:
+        # Word target met early but this is NOT the final chunk — must NOT conclude yet.
+        pacing_note = (
+            f"LENGTH CHECK: the already-written content is roughly {previous_word_count} words "
+            f"(near the ~{target_word_count}-word total target), but this is chunk "
+            f"{current_chunk_index + 1} of {max_chunks} — NOT the final chunk. "
+            f"Do NOT write a conclusion or '## סיכום'. Continue developing NEW body material "
+            f"for this section. The conclusion is reserved exclusively for chunk {max_chunks}.\n\n"
         )
     else:
         pacing_note = (
@@ -297,7 +392,7 @@ def generate_paper(user_id: int):
                     {"role": "user",   "content": user_message},
                 ],
                 temperature=0.4,
-                max_tokens=4000,
+                max_tokens=min(int(target_word_count * 1.8) + 1000, 8000),
                 stream=True,
             )
 

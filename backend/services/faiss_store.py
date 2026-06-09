@@ -256,6 +256,8 @@ def _matches_where(meta: dict, where: dict) -> bool:
             op, val = next(iter(cond.items()))
             if op == "$eq"  and mv != val:                             return False
             if op == "$ne"  and mv == val:                             return False
+            if op == "$in"  and mv not in val:                         return False
+            if op == "$nin" and mv in val:                             return False
             if op == "$gt"  and not (mv is not None and mv >  val):    return False
             if op == "$gte" and not (mv is not None and mv >= val):    return False
             if op == "$lt"  and not (mv is not None and mv <  val):    return False

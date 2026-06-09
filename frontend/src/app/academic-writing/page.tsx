@@ -537,6 +537,8 @@ function Wizard({
   writingType, onSelectType,
   uploadedFiles, uploading, uploadError, onDrop, onRemoveFile,
   hasDoc, onStart,
+  initialStep, initialSourceType, initialCustomInstructions,
+  initialUsePersonalStyle, initialIncludeSources, initialPageCount,
 }: {
   t: TType; he: boolean;
   sessions: SessionInfo[]; docs: DocInfo[]; docsLoading: boolean; sessionsLoading: boolean;
@@ -544,15 +546,21 @@ function Wizard({
   selectedDocId: string | null; onSelectDoc: (id: string | null) => void;
   writingType: WritingTypeId | null; onSelectType: (id: WritingTypeId) => void;
   uploadedFiles: UploadedFile[]; uploading: boolean; uploadError: string | null; onDrop: (files: File[]) => void; onRemoveFile: (file: UploadedFile) => void;
-  hasDoc: boolean; onStart: (customInstructions: string, usePersonalStyle: boolean, includeSources: boolean, pageCount: number) => void;
+  hasDoc: boolean; onStart: (customInstructions: string, usePersonalStyle: boolean, includeSources: boolean, pageCount: number, sourceType: SourceType | null) => void;
+  initialStep?: 1 | 2 | 3;
+  initialSourceType?: SourceType | null;
+  initialCustomInstructions?: string;
+  initialUsePersonalStyle?: boolean;
+  initialIncludeSources?: boolean;
+  initialPageCount?: number;
 }) {
   const router = useRouter();
-  const [step,               setStep]               = useState<1 | 2 | 3>(1);
-  const [sourceType,         setSourceType]         = useState<SourceType | null>(null);
-  const [customInstructions, setCustomInstructions] = useState('');
-  const [usePersonalStyle,   setUsePersonalStyle]   = useState(false);
-  const [includeSources,     setIncludeSources]     = useState(false);
-  const [pageCount,          setPageCount]          = useState(1);
+  const [step,               setStep]               = useState<1 | 2 | 3>(initialStep ?? 1);
+  const [sourceType,         setSourceType]         = useState<SourceType | null>(initialSourceType ?? null);
+  const [customInstructions, setCustomInstructions] = useState(initialCustomInstructions ?? '');
+  const [usePersonalStyle,   setUsePersonalStyle]   = useState(initialUsePersonalStyle ?? false);
+  const [includeSources,     setIncludeSources]     = useState(initialIncludeSources ?? false);
+  const [pageCount,          setPageCount]          = useState(initialPageCount ?? 1);
   const [scanningFileNames,  setScanningFileNames]  = useState<string[]>([]);
 
   // Capture file names immediately when dropped so we can show per-file
@@ -1022,7 +1030,7 @@ function Wizard({
               />
             </div>
 
-            <button onClick={() => onStart(customInstructions, usePersonalStyle, includeSources, pageCount)}
+            <button onClick={() => onStart(customInstructions, usePersonalStyle, includeSources, pageCount, sourceType)}
               className="w-full flex items-center justify-center gap-2.5 py-4 rounded-2xl text-base font-bold text-white transition-all active:scale-[0.98] mt-2"
               style={{ background: 'linear-gradient(135deg,#517B3E,#2A3B22)', boxShadow: '0 8px 28px rgba(81,123,62,0.42)' }}>
               <IconPen className="w-5 h-5" />
@@ -1063,10 +1071,15 @@ function Wizard({
   );
 }
 
+// 1 page ≈ 4 chunks of ~10-15 lines each ≈ ~350 words/page
+// maxChunks = pageCount * CHUNKS_PER_PAGE  (e.g. 3 pages → 12 chunks)
+const CHUNKS_PER_PAGE = 4;
+
 /* ─── Writing panel — Co-Writer mode (paragraph-by-paragraph) ───────────── */
 function WritingPanel({
   t, he, hasDoc, writingType, onBack, wizardInstructions, usePersonalStyle, includeSources, pageCount,
   userFirstName, userLastName, userInstitution,
+  sourceType, sourceDocId, sourceUploadFileIds,
 }: {
   t: TType; he: boolean; hasDoc: boolean;
   writingType: WritingTypeId | null;
@@ -1078,6 +1091,9 @@ function WritingPanel({
   userFirstName: string;
   userLastName: string;
   userInstitution: string;
+  sourceType: SourceType | null;
+  sourceDocId: string | null;
+  sourceUploadFileIds: string[];
 }) {
   const { selectedCourse } = useCourse();
   const formattedDate = useMemo(
@@ -1102,11 +1118,19 @@ function WritingPanel({
   const [approvedParagraphsHtml, setApprovedParagraphsHtml] = useState<string[]>([]);
   const [currentDraftHtml,       setCurrentDraftHtml]       = useState<string | null>(null);
   const [paperFullHtml,          setPaperFullHtml]           = useState<string | null>(null);
+  // 1-based chunk counter. chunkIndexRef holds the always-current value used by
+  // event handlers; currentChunkIndex (state) drives the rendered UI. Both are
+  // kept in sync — ref is written first so event handlers never see stale state.
+  const [currentChunkIndex,    setCurrentChunkIndex]    = useState(1);
+  const chunkIndexRef = useRef(1);
   const reviewRef = useRef<HTMLDivElement>(null);
 
   const wtLabel = writingType
     ? (he ? WRITING_TYPES.find(w => w.id === writingType)?.he : WRITING_TYPES.find(w => w.id === writingType)?.en) ?? ''
     : '';
+
+  const maxChunks   = (pageCount || 1) * CHUNKS_PER_PAGE;
+  const isLastChunk = currentChunkIndex >= maxChunks;
 
   const isStarted = approvedParagraphs.length > 0 || waitingForFeedback || loading || isFinished;
 
@@ -1141,11 +1165,25 @@ function WritingPanel({
     const styleHint = usePersonalStyle
       ? (he ? 'עצב בסגנון אישי וטבעי, לא פורמלי מדי.' : 'Use a personal, natural voice — not overly formal.')
       : '';
+    // Send ONLY the raw LLM-generated text — no UI labels, no section wrappers.
+    // The backend wraps it in its own ALREADY-WRITTEN CONTENT block.
     const prevContext = approved.length > 0
-      ? approved.map((p, i) => `[Section ${i + 1}]:\n${p}`).join('\n\n---\n\n')
+      ? approved.join('\n\n')
       : '';
 
-    const isFirstSection = approved.length === 0;
+    const isFirstSection  = approved.length === 0;
+    const chunkTotal      = (pageCount || 1) * CHUNKS_PER_PAGE;
+    const isFinalSection  = paragraphNum + 1 >= chunkTotal;
+
+    // Restrict RAG retrieval to the exact document(s) the user selected in Step 1.
+    // This prevents context leakage from other documents in the user's collection.
+    const fileIds: string[] = [];
+    if (sourceType === 'documents' && sourceDocId) {
+      fileIds.push(sourceDocId);
+    } else if (sourceType === 'upload') {
+      fileIds.push(...sourceUploadFileIds);
+    }
+    // sourceType === 'sessions': no file-level filter; let the full collection answer.
 
     const constraint = [
       'IMPORTANT: Generate ONLY the next single section of the document — '
@@ -1180,6 +1218,9 @@ function WritingPanel({
       feedback.trim()
         ? `The user requested this revision to the previous draft: "${feedback.trim()}". Address this feedback carefully.`
         : '',
+      isFinalSection
+        ? `CRITICAL PACING INSTRUCTION: This is chunk ${paragraphNum + 1} of ${chunkTotal} (the FINAL chunk) for a ${pageCount}-page paper. You MUST formally conclude the document now. Use '## סיכום', summarize all key arguments, and formally close the paper.`
+        : `CRITICAL PACING INSTRUCTION: This is chunk ${paragraphNum + 1} of ${chunkTotal} for a ${pageCount}-page paper. ${chunkTotal - paragraphNum - 1} chunk(s) still follow. Write BODY content only — DO NOT use '## סיכום' or any closing/summary language. End mid-flow so the next chunk continues naturally.`,
       includeSources
         ? 'When relevant, briefly note which source file a claim comes from, e.g. (Source: filename.pdf).'
         : 'CRITICAL: DO NOT include any references, citations, or source file names anywhere in the text. Output ONLY clean prose.',
@@ -1197,6 +1238,11 @@ function WritingPanel({
           previousContent: prevContext || null,
           personalStyle: usePersonalStyle,
           pageCount,
+          isFinalSection,
+          currentChunkIndex: paragraphNum,
+          maxChunks: chunkTotal,
+          studentName: [userFirstName, userLastName].filter(Boolean).join(' ') || null,
+          fileIds: fileIds.length > 0 ? fileIds : null,
           courseId:   selectedCourse?.id   ?? null,
           courseName: selectedCourse?.name ?? null,
         }),
@@ -1261,9 +1307,28 @@ function WritingPanel({
       setWaitingForFeedback(false);
     }
     finally { setLoading(false); setIsStreamingDraft(false); }
-  }, [topic, hasDoc, writingType, wtLabel, he, usePersonalStyle, includeSources, wizardInstructions, pageCount, selectedCourse, t]);
+  }, [topic, hasDoc, writingType, wtLabel, he, usePersonalStyle, includeSources, wizardInstructions, pageCount, selectedCourse, t, userFirstName, userLastName, sourceType, sourceDocId, sourceUploadFileIds]);
 
-  const approveAndContinue = () => {
+  // Called when the user approves the FINAL chunk — assembles and closes the document.
+  const handleFinalizeDocument = () => {
+    if (!currentDraft) return;
+    const final     = [...approvedParagraphs,     currentDraft];
+    const finalHtml = [...approvedParagraphsHtml, currentDraftHtml ?? ''];
+    setApprovedParagraphs(final);
+    setApprovedParagraphsHtml(finalHtml);
+    setCurrentDraft(null);
+    setCurrentDraftHtml(null);
+    setWaitingForFeedback(false);
+    setEditedContent(final.join('\n\n'));
+    setPaperFullHtml(finalHtml.filter(Boolean).join('\n') || null);
+    setIsFinished(true);
+    setEditMode(false);
+  };
+
+  // Called when the user approves an intermediate chunk — increments counter and
+  // generates the next section. chunkIndexRef is updated before the state setter so
+  // the new value is immediately readable by any code in the same synchronous tick.
+  const handleApproveAndContinue = () => {
     if (!currentDraft) return;
     const next     = [...approvedParagraphs,     currentDraft];
     const nextHtml = [...approvedParagraphsHtml, currentDraftHtml ?? ''];
@@ -1272,25 +1337,13 @@ function WritingPanel({
     setCurrentDraft(null);
     setCurrentDraftHtml(null);
     setWaitingForFeedback(false);
+    chunkIndexRef.current += 1;
+    setCurrentChunkIndex(chunkIndexRef.current);
     generateParagraph(next.length, next, '');
   };
 
   const regenerateWithFeedback = () => {
     generateParagraph(approvedParagraphs.length, approvedParagraphs, userFeedback);
-  };
-
-  const finishDocument = () => {
-    const final     = currentDraft     ? [...approvedParagraphs,     currentDraft]     : [...approvedParagraphs];
-    const finalHtml = currentDraftHtml ? [...approvedParagraphsHtml, currentDraftHtml] : [...approvedParagraphsHtml];
-    setApprovedParagraphs(final);
-    setApprovedParagraphsHtml(finalHtml);
-    setEditedContent(final.join('\n\n'));
-    setPaperFullHtml(finalHtml.filter(Boolean).join('\n') || null);
-    setCurrentDraft(null);
-    setCurrentDraftHtml(null);
-    setWaitingForFeedback(false);
-    setIsFinished(true);
-    setEditMode(false);
   };
 
   const resetSession = () => {
@@ -1300,6 +1353,8 @@ function WritingPanel({
     setWaitingForFeedback(false); setIsFinished(false);
     setEditMode(false); setEditedContent(null);
     setError(null); setUserFeedback('');
+    chunkIndexRef.current = 1;
+    setCurrentChunkIndex(1);
   };
 
   const safeTitle = () => topic.trim().slice(0, 40).replace(/[^\w֐-׿\s-]/g, '') || 'paper';
@@ -1310,7 +1365,7 @@ function WritingPanel({
      the LLM) so the name/course/date are always 100% accurate. */
   const buildAttributionHeader = () => {
     const displayName = [userFirstName, userLastName].filter(Boolean).join(' ');
-    if (!usePersonalStyle && !displayName) return '';
+    if (!displayName && !selectedCourse?.name) return '';
     const lines: string[] = [];
     if (displayName)          lines.push(he ? `**מאת:** ${displayName}`           : `**By:** ${displayName}`);
     if (userInstitution)      lines.push(he ? `**מוסד לימודים:** ${userInstitution}` : `**Institution:** ${userInstitution}`);
@@ -1363,10 +1418,14 @@ function WritingPanel({
 
         {/* ── Header ─────────────────────────────────────────────────────── */}
         <div className="px-5 py-4 flex items-center gap-3 shrink-0" style={{ borderBottom: '1px solid rgba(157,192,139,0.3)' }}>
-          <button onClick={onBack} className="p-1.5 rounded-lg transition-all hover:bg-black/05 shrink-0" title={t.backToConfig}>
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <button
+            onClick={onBack}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all shrink-0 text-[#527061] hover:text-[#1C3329] hover:bg-black/05"
+          >
+            <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d={he ? 'M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3' : 'M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18'} />
             </svg>
+            <span className="hidden sm:inline">{t.backToConfig}</span>
           </button>
           <span className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'linear-gradient(135deg, #9DC08B, #517B3E)' }}>
             <IconPen className="w-5 h-5 text-white" />
@@ -1551,11 +1610,15 @@ function WritingPanel({
                   className="w-full rounded-xl px-4 py-2.5 text-sm outline-none resize-none"
                   style={{ border: '1px solid rgba(157,192,139,0.4)', background: 'rgba(255,255,255,0.80)', color: '#2A3B22' }} />
                 <div className="flex flex-col sm:flex-row gap-2">
-                  <button onClick={approveAndContinue} disabled={isStreamingDraft}
+                  <button
+                    onClick={isLastChunk ? handleFinalizeDocument : handleApproveAndContinue}
+                    disabled={isStreamingDraft}
                     className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-white text-sm font-bold transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
                     style={{ background: 'linear-gradient(135deg,#517B3E,#2A3B22)', boxShadow: '0 3px 14px rgba(81,123,62,0.32)' }}>
                     <IconCheck className="w-4 h-4" />
-                    {he ? 'אשר והמשך לפסקה הבאה' : 'Approve & Continue'}
+                    {isLastChunk
+                      ? (he ? '✅ סיום עבודה' : '✅ Finish Writing')
+                      : (he ? 'אשר והמשך לפסקה הבאה' : 'Approve & Continue')}
                   </button>
                   <button onClick={regenerateWithFeedback} disabled={isStreamingDraft}
                     className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
@@ -1564,10 +1627,6 @@ function WritingPanel({
                       <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
                     </svg>
                     {he ? 'תקן לפי ההערות' : 'Regenerate with Feedback'}
-                  </button>
-                  <button onClick={finishDocument} disabled={isStreamingDraft}
-                    className="sm:w-auto px-4 py-2.5 rounded-xl text-sm font-medium transition-colors text-gray-500 hover:text-gray-800 hover:bg-gray-100/50 disabled:opacity-50 disabled:cursor-not-allowed">
-                    {he ? 'סיים כתיבה' : 'Finish Document'}
                   </button>
                 </div>
               </div>
@@ -1640,7 +1699,7 @@ function WritingPanel({
                         duplicated inside the generated Markdown body. */}
                     {(() => {
                       const displayName = [userFirstName, userLastName].filter(Boolean).join(' ');
-                      if (!usePersonalStyle && !displayName) return null;
+                      if (!displayName && !selectedCourse?.name) return null;
                       return (
                         <div className="border-b-2 border-slate-800 pb-4 mb-10">
                           {displayName && (
@@ -1720,14 +1779,13 @@ function WritingPanel({
           <div className="px-5 pb-3 pt-2 shrink-0 flex items-center justify-between"
             style={{ borderTop: '1px solid rgba(157,192,139,0.3)' }}>
             <p className="text-xs text-[#7a9268]">
-              {he ? `${approvedParagraphs.length} פסקאות אושרו` : `${approvedParagraphs.length} paragraph${approvedParagraphs.length !== 1 ? 's' : ''} approved`}
+              {he
+                ? `פסקה ${currentChunkIndex} מתוך ${maxChunks}`
+                : `Chunk ${currentChunkIndex} of ${maxChunks}`}
             </p>
-            {approvedParagraphs.length > 0 && (
-              <button onClick={finishDocument}
-                className="text-xs px-3 py-1.5 rounded-lg transition-colors text-[#527061] hover:text-[#2d3b25] hover:bg-[#EEF5F0]">
-                {he ? 'סיים כתיבה' : 'Finish Document'}
-              </button>
-            )}
+            <p className="text-xs text-[#7a9268]">
+              {he ? `${approvedParagraphs.length} אושרו` : `${approvedParagraphs.length} approved`}
+            </p>
           </div>
         )}
       </div>
@@ -1751,10 +1809,11 @@ export default function AcademicWritingPage() {
 
   /* Config state */
   const [phase,             setPhase]             = useState<'config' | 'writing'>('config');
-  const [wizardInstructions,  setWizardInstructions]  = useState('');
+  const [wizardInstructions,   setWizardInstructions]   = useState('');
   const [wizardPersonalStyle,  setWizardPersonalStyle]  = useState(false);
   const [wizardIncludeSources, setWizardIncludeSources] = useState(false);
   const [wizardPageCount,      setWizardPageCount]      = useState(1);
+  const [wizardSourceType,     setWizardSourceType]     = useState<SourceType | null>(null);
   const [sessions,          setSessions]           = useState<SessionInfo[]>([]);
   const [docs,              setDocs]               = useState<DocInfo[]>([]);
   const [sessionsLoading,   setSessionsLoading]    = useState(true);
@@ -1766,14 +1825,16 @@ export default function AcademicWritingPage() {
   const [uploading,         setUploading]          = useState(false);
   const [uploadError,       setUploadError]        = useState<string | null>(null);
   const [hasDoc,            setHasDoc]             = useState(false);
+  // Stable reference — only recreated when the uploads list actually changes.
+  const activeSourceFileIds = useMemo(() => uploadedFiles.map(f => f.fileId), [uploadedFiles]);
 
   /* User info */
   const [isAdmin]       = useState(() => typeof window !== 'undefined' ? (() => { const tk = localStorage.getItem('levy_ai_token'); if (!tk) return false; return decodeJwtPayload(tk)?.is_admin === true; })() : false);
   const [userEmail]     = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_email')      ?? '') : '');
-  const [userFirstName] = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_first_name') ?? '') : '');
-  const [userLastName]  = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_last_name')  ?? '') : '');
-  const [userGender]    = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_gender')     ?? '') : '');
-  const [userInstitution] = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_institution') ?? '') : '');
+  const [userFirstName,   setUserFirstName]   = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_first_name') ?? '') : '');
+  const [userLastName,    setUserLastName]    = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_last_name')  ?? '') : '');
+  const [userGender]                          = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_gender')     ?? '') : '');
+  const [userInstitution, setUserInstitution] = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_institution') ?? '') : '');
   const userInitials = [userFirstName[0], userLastName[0]].filter(Boolean).join('').toUpperCase() || (userEmail ? userEmail.slice(0, 2).toUpperCase() : '?');
 
   /* Guards */
@@ -1824,6 +1885,23 @@ export default function AcademicWritingPage() {
       })
       .catch(() => { setDocs([]); })
       .finally(() => setDocsLoading(false));
+  }, [authUser]);
+
+  /* Fetch fresh profile data so attribution headers never show stale localStorage values */
+  useEffect(() => {
+    if (!authUser) return;
+    authFetch(`${API}/api/profile`)
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { first_name?: string; last_name?: string; institution?: string } | null) => {
+        if (!data) return;
+        const fn   = (data.first_name  || '').trim();
+        const ln   = (data.last_name   || '').trim();
+        const inst = (data.institution || '').trim();
+        if (fn)   { setUserFirstName(fn);      localStorage.setItem('levy_ai_first_name', fn); }
+        if (ln)   { setUserLastName(ln);       localStorage.setItem('levy_ai_last_name',  ln); }
+        if (inst) { setUserInstitution(inst);  localStorage.setItem('levy_ai_institution', inst); }
+      })
+      .catch(() => {});
   }, [authUser]);
 
   /* Restore uploaded files from the previous session (localStorage) */
@@ -1963,7 +2041,14 @@ export default function AcademicWritingPage() {
             selectedDocId={selectedDocId} onSelectDoc={setSelectedDocId}
             writingType={writingType} onSelectType={setWritingType}
             uploadedFiles={uploadedFiles} uploading={uploading} uploadError={uploadError} onDrop={handleDrop} onRemoveFile={handleRemoveFile}
-            hasDoc={hasDoc} onStart={(ci, ps, is, pc) => { setWizardInstructions(ci); setWizardPersonalStyle(ps); setWizardIncludeSources(is); setWizardPageCount(pc); setPhase('writing'); }}
+            hasDoc={hasDoc}
+            initialStep={wizardSourceType ? 3 : 1}
+            initialSourceType={wizardSourceType}
+            initialCustomInstructions={wizardInstructions}
+            initialUsePersonalStyle={wizardPersonalStyle}
+            initialIncludeSources={wizardIncludeSources}
+            initialPageCount={wizardPageCount}
+            onStart={(ci, ps, is, pc, st) => { setWizardInstructions(ci); setWizardPersonalStyle(ps); setWizardIncludeSources(is); setWizardPageCount(pc); setWizardSourceType(st); setPhase('writing'); }}
           />
         ) : (
           <WritingPanel
@@ -1978,6 +2063,9 @@ export default function AcademicWritingPage() {
             userFirstName={userFirstName}
             userLastName={userLastName}
             userInstitution={userInstitution}
+            sourceType={wizardSourceType}
+            sourceDocId={selectedDocId}
+            sourceUploadFileIds={activeSourceFileIds}
           />
         )}
       </main>

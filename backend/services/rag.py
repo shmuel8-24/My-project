@@ -68,7 +68,8 @@ def hybrid_search(
     query_text: str,
     n_results: int,
     *,
-    file_id: str | None = None,
+    file_id: str | None = None,        # backward-compat single-file filter
+    file_ids: list[str] | None = None, # multi-file filter (preferred)
 ) -> tuple[list[str], list[dict]]:
     col       = get_user_collection(user_id)
     bm25_st   = get_user_bm25(user_id)
@@ -76,14 +77,21 @@ def hybrid_search(
     if doc_count == 0:
         return [], []
 
-    print(f"DEBUG: Running vector search with filter user_id={user_id}")
+    # Normalize: merge single-file (legacy) and multi-file params into one list.
+    # Empty list → no file filter (search whole user collection).
+    _file_ids: list[str] = [f for f in (file_ids or []) if f]
+    if not _file_ids and file_id:
+        _file_ids = [file_id]
+
     n_fetch      = min(n_results * 2, doc_count)
     query_vector = embeddings_model.embed_query(query_text)
 
     _uid_filter = {"user_id": {"$eq": user_id}}
     try:
-        if file_id:
-            where_filter = {"$and": [_uid_filter, {"file_id": {"$eq": file_id}}]}
+        if len(_file_ids) == 1:
+            where_filter: dict = {"$and": [_uid_filter, {"file_id": {"$eq": _file_ids[0]}}]}
+        elif len(_file_ids) > 1:
+            where_filter = {"$and": [_uid_filter, {"file_id": {"$in": _file_ids}}]}
         else:
             where_filter = _uid_filter
         sem_result = col.query(
@@ -119,13 +127,13 @@ def hybrid_search(
             bm25_ids    = [
                 bm25_st["ids"][i] for i in top_indices
                 if scores[i] > 0.0 and (
-                    not file_id
-                    or bm25_st["metadatas"][i].get("file_id") == file_id
+                    not _file_ids
+                    or bm25_st["metadatas"][i].get("file_id") in _file_ids
                 )
             ]
 
     print(f"▶ HYBRID u{user_id}: {len(sem_ids)} semantic | {len(bm25_ids)} bm25"
-          + (f" | file_id={file_id}" if file_id else ""))
+          + (f" | file_ids={_file_ids}" if _file_ids else ""))
 
     if not bm25_ids:
         chunks, metas = sem_chunks[:n_results], sem_metas[:n_results]

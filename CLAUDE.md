@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ├── start.py                # Unified startup: runs Flask + Next.js in parallel
 ├── backend/
 │   ├── app.py              # Entry point: Flask app, CORS, limiter, blueprint registration
-│   ├── extensions.py       # Shared singletons: OpenAI, ChromaDB, limiter, per-user caches
+│   ├── extensions.py       # Shared singletons: OpenAI, limiter, per-user caches, JWT config
 │   ├── models/
 │   │   └── __init__.py     # SQLAlchemy models + DB engine + SessionLocal + migrations
 │   ├── api/
@@ -21,14 +21,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 │   │   ├── professor.py    # Professor Brain Simulator blueprint
 │   │   └── export.py       # Export blueprint (paper, quiz, PDF, DOCX) + all /api/mastery/* routes
 │   ├── services/
-│   │   ├── rag.py          # hybrid_search, BM25, get_user_collection
+│   │   ├── faiss_store.py  # FAISS vector store (FaissCollection — ChromaDB-compatible surface)
+│   │   ├── rag.py          # hybrid_search, BM25, get_user_collection (wraps faiss_store)
+│   │   ├── md_renderer.py  # Markdown → HTML (Python-Markdown + mdx_math + Pygments)
 │   │   ├── security.py     # DLP filter, PII redaction, HTML stripping
 │   │   ├── email.py        # OTP + reset email (SMTP / Resend / terminal)
 │   │   ├── pdf.py          # PPTX text/slide extraction
 │   │   ├── code_runner.py  # Python sandbox (matplotlib Agg backend set here)
 │   │   └── startup.py      # Background backfill threads + orphan session migration
 │   ├── data/               # gitignored persistent storage
-│   │   ├── db/             # ChromaDB vector store
+│   │   ├── faiss/          # FAISS vector store — one subdirectory per user (user_{id}/)
 │   │   └── chat.db         # SQLite (users, sessions, messages)
 │   ├── requirements.txt
 │   ├── .env.example
@@ -37,44 +39,49 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 │       ├── make_admin.py   # Promote user to admin
 │       └── seed_payments.py # Seed test payment data
 └── frontend/
-    ├── middleware.ts                           # Next.js /admin route guard (pass-through; security at Flask layer)
+    ├── middleware.ts        # Active auth guard: hybrid Supabase + Flask-JWT; see frontend/CLAUDE.md
     ├── src/
     │   ├── components/
-    │   │   ├── CoursePill.tsx    # Global course selector pill — self-contained (calls useCourse + useLanguage)
-    │   │   └── NoCourseState.tsx # Fixed-overlay empty state shown when no course is selected
+    │   │   ├── CoursePill.tsx          # Global course selector pill
+    │   │   ├── NoCourseState.tsx       # Fixed-overlay empty state (no course selected)
+    │   │   ├── Sidebar.tsx             # SidebarDocumentsLink nav item (→ /workspace/documents)
+    │   │   ├── AIThinkingIndicator.tsx # Streaming phase indicator (thinking/searching/running)
+    │   │   ├── SelectionPopover.tsx    # Text-selection popover (explain / summarize / quiz)
+    │   │   ├── ScreenTimeChart.tsx     # Study time chart component
+    │   │   ├── CodeBlock.tsx           # Syntax-highlighted code block renderer
+    │   │   ├── AcademicRichEditor.tsx  # @uiw/react-md-editor wrapper — ssr:false required
+    │   │   └── ui/Skeleton.tsx         # Loading skeleton
     │   ├── context/
-    │   │   └── CourseContext.tsx  # Re-export shim for providers/course.tsx
+    │   │   └── CourseContext.tsx        # Re-export shim for providers/course.tsx
     │   └── app/
-    │       ├── page.tsx                        # Landing page + auth modal (WORKSPACE_ROUTE = '/dashboard')
+    │       ├── page.tsx                        # Landing page + auth modal
     │       ├── layout.tsx                      # Root layout: LanguageProvider → CourseProvider → AuthProvider
     │       ├── globals.css                     # Tailwind v4 entry + keyframes + matcha design tokens
-    │       ├── login/page.tsx                  # Login page
-    │       ├── register/page.tsx               # Registration page
-    │       ├── reset-password/page.tsx         # Password reset completion
-    │       ├── onboarding/page.tsx             # Post-registration onboarding form
-    │       ├── dashboard/page.tsx              # Course Hub Home — greeting + hero stat cards + course selector/focus view
-    │       ├── profile/page.tsx                # Profile page
+    │       ├── locales/landing.ts              # He/en copy for landing page only (exception to inline i18n)
+    │       ├── dashboard/page.tsx              # Course Hub Home
+    │       ├── profile/page.tsx                # Profile page (also owns Documents tab logic)
     │       ├── settings/page.tsx               # Settings page
-    │       ├── academic-writing/page.tsx       # AI co-writing feature (paragraph-by-paragraph)
-    │       ├── mastery/page.tsx                # Skill mastery — dynamic topics from RAG + quiz modal + score tracking
+    │       ├── academic-writing/page.tsx       # AI co-writing (~2078 lines, WritingPanel inline)
+    │       ├── mastery/page.tsx                # Skill mastery — quiz modal + score tracking
     │       ├── course-picker/
-    │       │   ├── page.tsx                    # Course list — shows only customCourses; 3-dots menu per card
-    │       │   ├── add/page.tsx                # Add Course wizard (3 steps + optional Step 0 syllabus upload)
-    │       │   └── edit/[id]/page.tsx          # Edit Course wizard (pre-filled; optional syllabus re-upload)
+    │       │   ├── page.tsx                    # Course list (customCourses only; 3-dots menu)
+    │       │   ├── add/page.tsx                # Add Course wizard (steps 0–3)
+    │       │   └── edit/[id]/page.tsx          # Edit Course wizard
     │       ├── workspace/
-    │       │   ├── page.tsx                    # Main RAG workspace (~2500 lines; Sidebar + Home component inline)
-    │       │   ├── UserProfileModal.tsx        # User profile modal (extracted component)
-    │       │   ├── UpgradeModal.tsx            # Plan upgrade modal (Pro/Semester pricing)
-    │       │   └── professor-simulator/
-    │       │       └── page.tsx                # Professor Brain Simulator feature
+    │       │   ├── page.tsx                    # Main RAG workspace (~3017 lines; all inline)
+    │       │   ├── documents/page.tsx          # Route alias → Profile page on Documents tab
+    │       │   ├── UserProfileModal.tsx
+    │       │   ├── UpgradeModal.tsx
+    │       │   └── professor-simulator/page.tsx
     │       ├── admin/
-    │       │   ├── page.tsx                    # Admin dashboard
-    │       │   └── AiAccountantChat.tsx        # CFO AI accountant chat component
-    │       ├── api/flask/[...path]/route.ts    # Server-side Flask proxy (exports GET/POST/PATCH/PUT/DELETE)
+    │       │   ├── page.tsx
+    │       │   └── AiAccountantChat.tsx
+    │       ├── api/flask/[...path]/route.ts    # Server-side Flask proxy
+    │       ├── types/katex.d.ts                # KaTeX type declarations
     │       └── providers/
-    │           ├── auth.tsx                    # Global AuthProvider + useAuth hook
-    │           ├── language.tsx               # Lang context (he/en)
-    │           └── course.tsx                 # Global CourseProvider + useCourse hook + COURSES array
+    │           ├── auth.tsx
+    │           ├── language.tsx
+    │           └── course.tsx
 ```
 
 ## Setup
@@ -116,11 +123,14 @@ Node.js lives at `/usr/local/bin/node` (v24). If `npm`/`npx` are not found, pref
 
 ```bash
 cd frontend
-npm run dev      # dev server with hot reload
+npm run dev      # dev server with hot reload (Turbopack)
 npm run build    # production build
 npm run lint     # ESLint (must pass before committing)
 npx tsc --noEmit # type-check without emitting
+npm run clean    # rm -rf .next — use when Turbopack cache misbehaves
 ```
+
+No test suite is configured (no `*.test.*`/`*.spec.*` files).
 
 ## Environment variables
 
@@ -137,7 +147,7 @@ All secrets live in `backend/.env` (gitignored). `backend/.env.example` is the c
 | `FRONTEND_URL` | Base URL used in password-reset email links | `http://localhost:3000` |
 | `MAIL_SERVER` | SMTP host; enables email delivery when set | — |
 | `RESEND_API_KEY` | Alternative to SMTP (ignored if `MAIL_SERVER` is set) | — |
-| `RESET_DB` | Set to `1` to perform a full data wipe on next startup (drops + recreates SQLite tables and all ChromaDB collections), then exits | — |
+| `RESET_DB` | Set to `1` to perform a full data wipe on next startup (drops + recreates SQLite tables and all FAISS stores), then exits | — |
 
 Frontend env lives in `frontend/.env.local`:
 
@@ -159,16 +169,18 @@ Full-stack RAG app branded **U-Note** for Hebrew-speaking university students. S
 | Singleton | Purpose |
 |---|---|
 | `client` | `openai.OpenAI` — chat completions (`gpt-4o-mini`) |
-| `chroma_client` | `chromadb.PersistentClient` — writes to `./data/db/` |
 | `tavily_client` | `TavilyClient` or `None` when `TAVILY_API_KEY` absent |
 | `embeddings_model` | LangChain `OpenAIEmbeddings` (`text-embedding-3-small`) |
 | `text_splitter` | `RecursiveCharacterTextSplitter` (chunk 1500, overlap 300) |
 | `limiter` | Flask-Limiter (lazy — bound to Flask app via `limiter.init_app(app)`) |
+| `TOP_K` / `RRF_K` | Retrieval constants: 8 results, RRF constant 60 |
 
-Per-user state is managed lazily via three `dict` caches in `extensions.py` (keyed by `user_id`):
-- `_collection_map` → ChromaDB collection (`documents_u{user_id}`)
-- `_bm25_map` → BM25 index (rebuilt from ChromaDB on first access or after upload)
+Per-user state in `extensions.py` (keyed by `user_id`):
+- `_bm25_map` → BM25 index (rebuilt from FAISS on first access or after upload)
 - `_images_map` → `{filename: {base64, mime}}`; cleared on server restart
+
+**Vector store (`services/faiss_store.py`):**
+FAISS replaces ChromaDB. `FaissCollection` exposes a ChromaDB-compatible surface (`upsert`, `delete`, `count`, `get`, `query`) so all call sites work unchanged. Data lives in `backend/data/faiss/user_{id}/` (3 files: `index.faiss`, `vecs.npy`, `meta.json`). `get_user_store(user_id)` is the entry point; an in-process cache (`_user_stores`) avoids repeated disk loads.
 
 **User model fields** (`models/__init__.py`):
 Core: `email`, `password_hash`, `first_name`, `last_name`, `role`, `plan_type`, `subscription_end_date`.
@@ -179,12 +191,12 @@ Onboarding: `country`, `institution`, `degree_type`, `primary_major`, `secondary
 - `Payment` — financial transactions (ILS). Fields: `user_id`, `amount`, `currency`, `plan_type` (`'monthly'`|`'semester'`), `status` (`'completed'`|`'failed'`|`'refunded'`|`'pending'`), `payment_date`, `description`.
 - `CfoNotification` — proactive CFO alerts. Fields: `title`, `message`, `type` (`'info'`|`'warning'`|`'critical'`), `is_read`, `created_at`.
 - `TopicMastery` — per-user mastery score per uploaded document. Fields: `user_id`, `file_id` (MD5 hex from `UserDocument`), `topic`, `mastery_pct` (0–100 float), `quiz_count`, `last_updated`. Unique on `(user_id, file_id)`. All mastery routes live in `api/export.py`.
-- `CustomCourse` — user-created course with optional syllabus for RAG. Fields: `user_id`, `course_name`, `lecturer_name`, `has_tirgul` (bool), `ta_name`, `semester` (`'a'`|`'b'`|`'summer'`), `color`, `full_syllabus_text` (Text), `syllabus_file_id` (16-char MD5 linking to `UserDocument` + ChromaDB). Course name is the identity key used in all backend operations — do not rename it without also renaming the ChromaDB chunks.
+- `CustomCourse` — user-created course with optional syllabus for RAG. Fields: `user_id`, `course_name`, `lecturer_name`, `has_tirgul` (bool), `ta_name`, `semester` (`'a'`|`'b'`|`'summer'`), `color`, `full_syllabus_text` (Text), `syllabus_file_id` (16-char MD5 linking to `UserDocument` + FAISS). Course name is the identity key used in all backend operations — do not rename it without also renaming the FAISS chunks.
 
 **Schema migrations** are idempotent `ALTER TABLE` statements at the bottom of `models/__init__.py`. Every new column added to the `User` class must also get a corresponding migration statement there — the `try/except` silently skips columns that already exist. New tables are created automatically by `_Base.metadata.create_all()`.
 
 **Document isolation model:**
-Each user owns a separate ChromaDB collection (`documents_u{user_id}`). File IDs are MD5 hex of the filename. The `UserDocument` SQL table is the authoritative ownership registry — every vector query validates ownership there before touching ChromaDB (defence-in-depth).
+Each user owns a separate FAISS store directory (`data/faiss/user_{id}/`). File IDs are MD5 hex of the filename. The `UserDocument` SQL table is the authoritative ownership registry — every vector query validates ownership there before touching FAISS (defence-in-depth).
 
 **Auth (`@token_required` / `@admin_required`):**
 JWT HS256, 24 h TTL, `SECRET_KEY` from env. Two decorators inject `user_id` as the first function argument. Dual login modes: 6-digit OTP magic link and password. Rate limiting via Flask-Limiter (bucketed by `user_id` for auth'd requests, IP otherwise; `storage_uri="memory://"` — not distributed).
@@ -193,15 +205,15 @@ JWT HS256, 24 h TTL, `SECRET_KEY` from env. Two decorators inject `user_id` as t
 `role`: `'user'` | `'admin'`. `plan_type`: `'basic'` | `'pro'` | `'semester'`. Monthly counters reset automatically when the month key changes. `ADMIN_EMAIL` env var auto-promotes that account on every login.
 
 **File upload pipeline (`/upload-pdf`):**
-Accepts PDF, PPTX, PNG/JPG/JPEG. PDFs → PyMuPDF (`fitz`) in-memory (preserves Hebrew logical order). PPTX → `extract_pptx_text()`, slides prefixed `[שקופית N]`. Images → base64 in `_user_images_map` (not indexed). Text chunks → embedded → upserted into ChromaDB; old chunks for the same file purged first.
+Accepts PDF, PPTX, PNG/JPG/JPEG. PDFs → PyMuPDF (`fitz`) in-memory (preserves Hebrew logical order). PPTX → `extract_pptx_text()`, slides prefixed `[שקופית N]`. Images → base64 in `_images_map` (not indexed). Text chunks → embedded → upserted into FAISS; old chunks for the same file purged first.
 
 **Syllabus indexing (`api/courses.py`):**
-`_reindex_syllabus_for_course(user_id, course_name, full_text)` is the shared helper used by both `save_course` and `update_course_syllabus`. It: deletes existing ChromaDB chunks by `file_id`, re-embeds and upserts, rebuilds BM25, upserts the `UserDocument` ownership record, and updates `full_syllabus_text` + `syllabus_file_id` on the `CustomCourse` row. The `syllabus_file_id` is always `md5(f"syllabus_{user_id}_{course_name}").hexdigest()[:16]`.
+`_reindex_syllabus_for_course(user_id, course_name, full_text)` is the shared helper used by both `save_course` and `update_course_syllabus`. It: deletes existing FAISS chunks by `file_id`, re-embeds and upserts, rebuilds BM25, upserts the `UserDocument` ownership record, and updates `full_syllabus_text` + `syllabus_file_id` on the `CustomCourse` row. The `syllabus_file_id` is always `md5(f"syllabus_{user_id}_{course_name}").hexdigest()[:16]`.
 
 The `update_course_syllabus` endpoint additionally runs LLM extraction on the new PDF (same `_EXTRACTION_SYSTEM` prompt as `parse_syllabus`), diffs old vs new fields (lecturer, has_tirgul, ta, semester), updates those fields in the DB, and returns `{ success, changes: [Hebrew diff strings] }`. `course_name` is never auto-renamed by syllabus update.
 
 **Retrieval (`hybrid_search`):**
-Combines ChromaDB cosine similarity and BM25 via Reciprocal Rank Fusion (RRF constant 60). `tokenize_hebrew()` strips niqqud/cantillation before BM25. Returns `TOP_K=8` chunks. Accepts optional `file_id` to restrict to a single document.
+Combines FAISS L2 similarity and BM25 via Reciprocal Rank Fusion (RRF constant 60). `tokenize_hebrew()` strips niqqud/cantillation before BM25. Returns `TOP_K=8` chunks. Accepts optional `file_id` to restrict to a single document.
 
 **Q&A flow (`/ask`) — SSE stream:**
 1. Create/resume `ChatSession` in SQLite; save user message.
@@ -209,11 +221,17 @@ Combines ChromaDB cosine similarity and BM25 via Reciprocal Rank Fusion (RRF con
 3. `hybrid_search` retrieves chunks.
 4. LLM call with two OpenAI tools: `code_interpreter` and `search_web` (Tavily).
 5. `code_interpreter` → `execute_python_code()` in daemon thread (25 s timeout); captures stdout + matplotlib figures as base64 PNG.
-6. Non-empty `_user_images_map` → message sent as OpenAI multi-part array (text + image_url), activating vision.
+6. Non-empty `_images_map` → message sent as OpenAI multi-part array (text + image_url), activating vision.
 7. Events: `{type:"status", phase}` → `{type:"result", ...}` | `{type:"error"}`.
 
+**Academic paper generation (`/generate-paper`) — SSE stream:**
+Stateless per-call — no conversation history stored. The frontend accumulates approved sections and sends the full `previousContent` on each subsequent call. An anti-repetition engine in the system prompt forces the model to catalog already-mentioned authors/cases/arguments and produce new material. Pacing is chunk-indexed: `CHUNKS_PER_PAGE=4`, `maxChunks = pageCount * 4`. The final chunk is flagged `isFinalSection=true` and writes `## סיכום`. Prompt text is sanitized via `_sanitize()` to avoid homework-filter refusals.
+
+**Markdown rendering (`services/md_renderer.py`):**
+`render_markdown_html(text)` — Python-Markdown with `mdx_math` (→ `<script type="math/tex">` tags for client-side KaTeX), `fenced_code`, and `CodeHiliteExtension` (Pygments inline CSS). Used by `/generate-paper` SSE result and `/export-pdf`.
+
 **Export routes:**
-- `/export-pdf` — `markdown` lib → HTML → WeasyPrint (requires system `pango`). Hebrew RTL styling.
+- `/export-pdf` — `render_markdown_html` → full HTML → WeasyPrint (requires system `pango`). Hebrew RTL styling.
 - `/export-docx` — custom Markdown+LaTeX → python-docx. `$$...$$` blocks pre-processed to sentinel markers. Inline math in Cambria Math (blue), block equations centred. `w:bidi` on all paragraphs for RTL.
 
 **Mastery system (`api/export.py`):**
@@ -233,7 +251,7 @@ Combines ChromaDB cosine similarity and BM25 via Reciprocal Rank Fusion (RRF con
 
 | Route | Method | Auth | Purpose |
 |---|---|---|---|
-| `/health` | GET | — | Liveness; reports ChromaDB chunk count |
+| `/health` | GET | — | Liveness; reports FAISS chunk count |
 | `/api/check-email` | POST | — | Check if email is registered |
 | `/api/send-otp` | POST | — | Send 6-digit OTP for magic-link login |
 | `/api/verify-otp` | POST | — | Verify OTP → issue JWT |
@@ -253,7 +271,7 @@ Combines ChromaDB cosine similarity and BM25 via Reciprocal Rank Fusion (RRF con
 | `/ask` | POST | user | RAG Q&A, SSE stream |
 | `/sessions` | GET | user | List chat sessions |
 | `/sessions/<id>` | GET, DELETE | user | Fetch / delete session |
-| `/generate-paper` | POST | user | Write academic paper from docs |
+| `/generate-paper` | POST | user | Write academic paper from docs (SSE, chunk-by-chunk) |
 | `/api/generate-quiz` | POST | user | Generate quiz from docs |
 | `/export-pdf` | POST | user | Markdown → PDF |
 | `/export-docx` | POST | user | Markdown+LaTeX → DOCX |
@@ -262,10 +280,10 @@ Combines ChromaDB cosine similarity and BM25 via Reciprocal Rank Fusion (RRF con
 | `/api/mastery/submit-results` | POST | user | Save quiz score; weighted mastery update |
 | `/api/mastery/scores` | GET | user | Raw mastery records |
 | `/api/courses/parse-syllabus` | POST | user | Parse PDF → LLM metadata + full text (multipart) |
-| `/api/courses` | POST | user | Save CustomCourse + index syllabus to ChromaDB |
+| `/api/courses` | POST | user | Save CustomCourse + index syllabus to FAISS |
 | `/api/courses/details` | GET | user | Fetch course metadata by `?name=` |
 | `/api/courses/update` | PATCH | user | Update course fields; re-indexes if `full_syllabus_text` supplied |
-| `/api/courses/delete` | POST | user | Delete course + purge ChromaDB chunks + UserDocument |
+| `/api/courses/delete` | POST | user | Delete course + purge FAISS chunks + UserDocument |
 | `/api/courses/update-syllabus` | POST | user | Re-parse PDF, diff fields, return Hebrew change log |
 | `/api/admin/users` | GET | admin | List all users |
 | `/api/admin/users/<id>/gift-pro` | PATCH | admin | Grant pro plan |
@@ -283,6 +301,8 @@ Combines ChromaDB cosine similarity and BM25 via Reciprocal Rank Fusion (RRF con
 Next.js 16 · React 19 · TypeScript · Tailwind CSS v4 · `react-dropzone` v15 · `framer-motion` v12
 
 > **Warning:** This Next.js version has breaking changes from older releases. Read `node_modules/next/dist/docs/` before writing Next.js-specific code.
+
+**`middleware.ts`** actively guards `/admin/*` and `/dashboard/*` with a hybrid Supabase + Flask-JWT auth check. It also sets security headers on every response. See `frontend/CLAUDE.md` for the full details — the pass-through description in older notes is stale.
 
 **Post-login redirect:** After successful login/OTP, `page.tsx` routes to `WORKSPACE_ROUTE = '/dashboard'` (the Course Hub Home, not `/workspace`).
 
@@ -322,6 +342,15 @@ Exit protection: `isDirty = step >= 1 && !hasSaved` controls both a `beforeunloa
 **Edit Course wizard (`course-picker/edit/[id]/page.tsx`):**
 URL param `[id]` is the localStorage Course ID (string like `custom_${Date.now()}`). On mount: finds course in `customCourses` by ID → pre-fills name+color from localStorage, then fetches remaining fields from `GET /api/courses/details?name=`. Has an optional syllabus re-upload zone at the top of the form card (using `react-dropzone`) that calls `parse-syllabus` and auto-fills all fields. On save: calls `PATCH /api/courses/update`; if `syllabusText` was re-uploaded, includes it in the body to trigger re-indexing.
 
+**Academic writing (`academic-writing/page.tsx`):**
+~2078 lines. `WritingPanel` drives a co-writing SSE loop: `generateParagraph(paragraphNum, approved[], feedback)` sends `previousContent` (raw concatenated approved text — no UI labels), `currentChunkIndex`, `maxChunks`, `isFinalSection`, `fileIds`. `CHUNKS_PER_PAGE=4`; `maxChunks = pageCount * 4`. Approved sections accumulate in `approvedParagraphs[]` (pure LLM text only — never UI strings). `resetSession()` zeroes all state including `chunkIndexRef` for a clean new paper.
+
+**`workspace/page.tsx` structure:**
+Very large (~3017 lines). Inline components in order: `CodeExecutionBlock` → `QuizModal` → `LogoutConfirmModal` → `Sidebar` → `Home`. Every logout entry point must call `setShowLogoutModal(true)` — never `handleLogout()` directly. No shared `<Sidebar>` shell exists in this codebase — each page owns its own sidebar.
+
+**`/workspace/documents` route:**
+Thin alias at `workspace/documents/page.tsx` — renders `<ProfilePageInner>` which opens directly on the Documents tab (detected via `pathname === '/workspace/documents'`). All document fetch/list/delete logic lives in `profile/page.tsx`.
+
 **Onboarding flow:**
 After registration, users land on `/onboarding`. Onboarding data saved via `POST /api/user/onboarding` and mirrored into localStorage.
 
@@ -336,9 +365,10 @@ After registration, users land on `/onboarding`. Onboarding data saved via `POST
   - Accent green: `#517B3E` / `#2A3B22`
   - `globals.css` defines `@theme inline` tokens `--color-matcha-50` through `--color-matcha-950` and utility classes `.animate-mastery-pulse`, `.animate-jewel-glow`, etc.
 - **framer-motion** — installed (`v12`). Use `AnimatePresence mode="popLayout"` for list items, `mode="wait"` for step transitions. The `layout` prop on containers animates height changes. Use `position: fixed` dropdowns to escape `overflow` constraints.
-- **KaTeX** — `katex/dist/katex.min.css` imported in `layout.tsx`. Workspace uses `remark-math` + `rehype-katex`.
+- **KaTeX** — `katex/dist/katex.min.css` imported in `layout.tsx`. Workspace uses `remark-math` + `rehype-katex`. Academic writing uses `mathtex-script-type` (from backend HTML) plus auto-render fallback.
+- **`AcademicRichEditor`** — must always be loaded `dynamic(() => import(...), { ssr: false })` — `@uiw/react-md-editor` touches `window` at module evaluation time.
 - **Workspace tab persistence** — both `ChatInterface` and `PaperWriter` are always mounted; inactive tab hidden with `hidden`.
-- **i18n** — The idiomatic pattern is `const he = lang === 'he'` then `he ? 'hebrew' : 'english'`. Never hardcode Hebrew strings in JSX outside translation objects. RAG, ChromaDB, and other technical terms must NEVER appear in user-facing UI strings.
+- **i18n** — The idiomatic pattern is `const he = lang === 'he'` then `he ? 'hebrew' : 'english'`. Never hardcode Hebrew strings in JSX outside translation objects. `locales/landing.ts` is the only exception (landing page only — large static copy). RAG, ChromaDB, FAISS, and other technical terms must NEVER appear in user-facing UI strings.
 
 **Dashboard (`dashboard/page.tsx`):**
 - Owl mascot (`/assets/mascot/charley.PNG`) displayed beside the greeting header
@@ -346,9 +376,6 @@ After registration, users land on `/onboarding`. Onboarding data saved via `POST
 - `D` design-token object at the top centralises all colours
 - **Course Selector view** (when `selectedCourse === null`): uses `COURSES` + `customCourses` from the provider
 - **Course Focus view** (when course selected): `CrystalCard` quick actions + `MaterialRow` list
-
-**`workspace/page.tsx` structure:**
-Very large (~2500 lines). Inline components in order: `CodeExecutionBlock` → `QuizModal` → `LogoutConfirmModal` → `Sidebar` → `Home`. Every logout entry point must call `setShowLogoutModal(true)` — never `handleLogout()` directly.
 
 **z-index layering (wizard exit modals / dropdowns):**
 
@@ -378,14 +405,14 @@ Promise.resolve(localStorage.getItem('key'))
 
 | Store | Location | Contents | Cleared by |
 |---|---|---|---|
-| ChromaDB | `backend/data/db/` | Per-user text chunks + embeddings (including syllabus chunks) | Manual deletion or re-upload |
+| FAISS | `backend/data/faiss/user_{id}/` | Per-user text chunks + embeddings (3 files per user: index.faiss, vecs.npy, meta.json) | Manual deletion or re-upload |
 | SQLite | `backend/data/chat.db` | Users, sessions, messages, OTP codes, reset tokens, document ownership, payments, CFO notifications, mastery scores, custom courses | Manual deletion or `RESET_DB=1` |
-| BM25 index | Memory | Per-user; rebuilt from ChromaDB on first access | Server restart |
+| BM25 index | Memory | Per-user; rebuilt from FAISS on first access | Server restart |
 | Images | Memory | Per-user base64 uploads | Server restart |
 | Active course | `localStorage('levy_ai_course')` | `{id, name, icon, color}` JSON | User clears or `setSelectedCourse(null)` |
 | Custom courses | `localStorage('levy_ai_custom_courses')` | `Course[]` JSON | `removeCustomCourse` or manual clear |
 
-To fully wipe all data: delete `backend/data/` then recreate `backend/data/db/` (empty). The app recreates `chat.db` on next startup.
+To fully wipe all data: delete `backend/data/` then recreate `backend/data/faiss/` (empty directory). The app recreates `chat.db` and per-user FAISS stores on next startup.
 
 ### Utility scripts
 

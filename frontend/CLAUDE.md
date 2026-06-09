@@ -32,11 +32,8 @@ browser client exists; this looks like in-progress migration scaffolding at the 
 
 ## Scale note
 
-`workspace/page.tsx` has grown to 3017 lines (root CLAUDE.md says ~2500) — same inline-component
-structure (`CodeExecutionBlock` → `QuizModal` → `LogoutConfirmModal` → `Sidebar` → `Home`).
-`academic-writing/page.tsx` has grown to ~2000 lines on the same single-file, inline-everything
-pattern (the `WritingPanel` component plus the paragraph-by-paragraph SSE co-writing flow all live
-in this one file).
+`workspace/page.tsx`: 3017 lines. `academic-writing/page.tsx`: ~2078 lines. Both follow the
+same single-file, inline-everything pattern — the root CLAUDE.md has the up-to-date counts.
 
 ## Empty scaffold directories — ignore
 
