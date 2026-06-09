@@ -61,7 +61,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     │       ├── dashboard/page.tsx              # Course Hub Home
     │       ├── profile/page.tsx                # Profile page (also owns Documents tab logic)
     │       ├── settings/page.tsx               # Settings page
-    │       ├── academic-writing/page.tsx       # AI co-writing (~2078 lines, WritingPanel inline)
+    │       ├── academic-writing/page.tsx       # AI co-writing (~2094 lines, WritingPanel inline)
     │       ├── mastery/page.tsx                # Skill mastery — quiz modal + score tracking
     │       ├── course-picker/
     │       │   ├── page.tsx                    # Course list (customCourses only; 3-dots menu)
@@ -225,7 +225,7 @@ Combines FAISS L2 similarity and BM25 via Reciprocal Rank Fusion (RRF constant 6
 7. Events: `{type:"status", phase}` → `{type:"result", ...}` | `{type:"error"}`.
 
 **Academic paper generation (`/generate-paper`) — SSE stream:**
-Stateless per-call — no conversation history stored. The frontend accumulates approved sections and sends the full `previousContent` on each subsequent call. An anti-repetition engine in the system prompt forces the model to catalog already-mentioned authors/cases/arguments and produce new material. Pacing is chunk-indexed: `CHUNKS_PER_PAGE=4`, `maxChunks = pageCount * 4`. The final chunk is flagged `isFinalSection=true` and writes `## סיכום`. Prompt text is sanitized via `_sanitize()` to avoid homework-filter refusals.
+Stateless per-call — no conversation history stored. The frontend accumulates approved sections and sends the full `previousContent` on each subsequent call. An anti-repetition engine in the system prompt forces the model to catalog already-mentioned authors/cases/arguments and produce new material. Pacing is chunk-indexed: `CHUNKS_PER_PAGE=4`, `maxChunks = pageCount * 4`. The final chunk is flagged `isFinalSection=true` and writes `## סיכום`. Prompt text is sanitized via `_sanitize()` to avoid homework-filter refusals. **RAG diversity**: the FAISS query is enriched per chunk with a chapter-specific angle phrase from `_CHUNK_ANGLES` (e.g. intro → theory → examples → findings), so each generation call retrieves topically-distinct document sections rather than the same TOP_K chunks repeated every call.
 
 **Markdown rendering (`services/md_renderer.py`):**
 `render_markdown_html(text)` — Python-Markdown with `mdx_math` (→ `<script type="math/tex">` tags for client-side KaTeX), `fenced_code`, and `CodeHiliteExtension` (Pygments inline CSS). Used by `/generate-paper` SSE result and `/export-pdf`.
@@ -343,7 +343,7 @@ Exit protection: `isDirty = step >= 1 && !hasSaved` controls both a `beforeunloa
 URL param `[id]` is the localStorage Course ID (string like `custom_${Date.now()}`). On mount: finds course in `customCourses` by ID → pre-fills name+color from localStorage, then fetches remaining fields from `GET /api/courses/details?name=`. Has an optional syllabus re-upload zone at the top of the form card (using `react-dropzone`) that calls `parse-syllabus` and auto-fills all fields. On save: calls `PATCH /api/courses/update`; if `syllabusText` was re-uploaded, includes it in the body to trigger re-indexing.
 
 **Academic writing (`academic-writing/page.tsx`):**
-~2078 lines. `WritingPanel` drives a co-writing SSE loop: `generateParagraph(paragraphNum, approved[], feedback)` sends `previousContent` (raw concatenated approved text — no UI labels), `currentChunkIndex`, `maxChunks`, `isFinalSection`, `fileIds`. `CHUNKS_PER_PAGE=4`; `maxChunks = pageCount * 4`. Approved sections accumulate in `approvedParagraphs[]` (pure LLM text only — never UI strings). `resetSession()` zeroes all state including `chunkIndexRef` for a clean new paper.
+~2094 lines. `WritingPanel` drives a co-writing SSE loop: `generateParagraph(paragraphNum, approved[], feedback)` sends `previousContent` (raw concatenated approved text — no UI labels), `currentChunkIndex`, `maxChunks`, `isFinalSection`, `fileIds`. `CHUNKS_PER_PAGE=4`; `maxChunks = pageCount * 4`. Approved sections accumulate in `approvedParagraphs[]` (pure LLM text only — never UI strings). `resetSession()` zeroes all state including `chunkIndexRef` for a clean new paper. `handleNextStep` is the single unified approve callback: it appends the current draft to `approvedParagraphs[]`, then either finalizes (`setIsFinished(true)`) when `next.length >= maxChunks`, or advances `chunkIndexRef` and calls `generateParagraph` — the `next.length >= maxChunks` check is the hard page-count enforcement and is evaluated synchronously against the just-built array (not stale React state).
 
 **`workspace/page.tsx` structure:**
 Very large (~3017 lines). Inline components in order: `CodeExecutionBlock` → `QuizModal` → `LogoutConfirmModal` → `Sidebar` → `Home`. Every logout entry point must call `setShowLogoutModal(true)` — never `handleLogout()` directly. No shared `<Sidebar>` shell exists in this codebase — each page owns its own sidebar.

@@ -117,8 +117,25 @@ def generate_paper(user_id: int):
     if doc_count == 0:
         return jsonify({"error": "no documents in the knowledge base — upload a PDF first"}), 400
 
+    # Enrich the RAG query per chunk to force diversity in retrieved context.
+    # Each generation call uses a topically-distinct search angle so FAISS returns
+    # different document sections rather than the same TOP_K chunks every call.
+    # Both Hebrew and English terms are included for bilingual collection support.
+    _CHUNK_ANGLES = [
+        "מבוא הגדרות עקרונות background introduction principles definitions",
+        "תיאוריה מושגים ניתוח theory analysis concepts framework",
+        "דוגמאות יישומים עדויות examples applications evidence case studies",
+        "גישות שיטות ביקורת approaches methods critique perspectives",
+        "ממצאים תוצאות השלכות findings results implications outcomes",
+        "השוואה ניגוד contrast comparison alternative views",
+        "עומק מורכבות complexity depth nuance further analysis",
+        "סיכום מסקנות conclusions final arguments closing",
+    ]
+    _angle = _CHUNK_ANGLES[min(current_chunk_index, len(_CHUNK_ANGLES) - 1)]
+    _rag_query = f"{topic} {_angle}"
+
     chunks, metadatas = hybrid_search(
-        user_id, topic, min(20, doc_count),
+        user_id, _rag_query, min(20, doc_count),
         file_ids=req_file_ids or None,
     )
     if not chunks:

@@ -319,7 +319,7 @@ const TR = {
     wordErr:              'Error exporting Word',
     backToConfig:         'Back to Setup',
     customInstructionsPh: 'Additional AI instructions (e.g. emphasis, desired structure, word limit)...',
-    personalStyleLabel:   'Write in your name',
+    personalStyleLabel:   'Write as you',
     navHome:         'Home',
     navStudyLab:     'StudyLab',
     navProfSim:      "Professor's Brain",
@@ -1309,26 +1309,12 @@ function WritingPanel({
     finally { setLoading(false); setIsStreamingDraft(false); }
   }, [topic, hasDoc, writingType, wtLabel, he, usePersonalStyle, includeSources, wizardInstructions, pageCount, selectedCourse, t, userFirstName, userLastName, sourceType, sourceDocId, sourceUploadFileIds]);
 
-  // Called when the user approves the FINAL chunk — assembles and closes the document.
-  const handleFinalizeDocument = () => {
-    if (!currentDraft) return;
-    const final     = [...approvedParagraphs,     currentDraft];
-    const finalHtml = [...approvedParagraphsHtml, currentDraftHtml ?? ''];
-    setApprovedParagraphs(final);
-    setApprovedParagraphsHtml(finalHtml);
-    setCurrentDraft(null);
-    setCurrentDraftHtml(null);
-    setWaitingForFeedback(false);
-    setEditedContent(final.join('\n\n'));
-    setPaperFullHtml(finalHtml.filter(Boolean).join('\n') || null);
-    setIsFinished(true);
-    setEditMode(false);
-  };
-
-  // Called when the user approves an intermediate chunk — increments counter and
-  // generates the next section. chunkIndexRef is updated before the state setter so
-  // the new value is immediately readable by any code in the same synchronous tick.
-  const handleApproveAndContinue = () => {
+  // Unified approve action — the ONLY entry point for advancing the generation loop.
+  // Routing is decided programmatically: if adding this chunk fills the quota
+  // (next.length >= maxChunks) the document is finalized immediately and the loop
+  // terminates. Otherwise the next chunk is generated. The LLM never decides when
+  // the paper ends — this function does, based purely on chunk arithmetic.
+  const handleNextStep = useCallback(() => {
     if (!currentDraft) return;
     const next     = [...approvedParagraphs,     currentDraft];
     const nextHtml = [...approvedParagraphsHtml, currentDraftHtml ?? ''];
@@ -1337,10 +1323,21 @@ function WritingPanel({
     setCurrentDraft(null);
     setCurrentDraftHtml(null);
     setWaitingForFeedback(false);
-    chunkIndexRef.current += 1;
-    setCurrentChunkIndex(chunkIndexRef.current);
-    generateParagraph(next.length, next, '');
-  };
+
+    // Hard stop: evaluated against next.length (post-approval count), not state.
+    // This is the authoritative page-count enforcement — no other code path can
+    // generate beyond this limit.
+    if (next.length >= maxChunks) {
+      setEditedContent(next.join('\n\n'));
+      setPaperFullHtml(nextHtml.filter(Boolean).join('\n') || null);
+      setIsFinished(true);
+      setEditMode(false);
+    } else {
+      chunkIndexRef.current += 1;
+      setCurrentChunkIndex(chunkIndexRef.current);
+      generateParagraph(next.length, next, '');
+    }
+  }, [currentDraft, approvedParagraphs, approvedParagraphsHtml, currentDraftHtml, maxChunks, generateParagraph]);
 
   const regenerateWithFeedback = () => {
     generateParagraph(approvedParagraphs.length, approvedParagraphs, userFeedback);
@@ -1434,11 +1431,11 @@ function WritingPanel({
             <p className="font-semibold text-[#2A3B22] text-sm">{t.paperTitle}</p>
             <p className="text-xs text-[#7a9268]">
               {isFinished
-                ? (he ? `✅ ${approvedParagraphs.length} פסקאות · מוכן` : `✅ ${approvedParagraphs.length} paragraphs · Ready`)
+                ? (he ? `✅ ${approvedParagraphs.length} חלקים · מסמך מוכן` : `✅ ${approvedParagraphs.length} parts · Document ready`)
                 : waitingForFeedback
-                  ? (he ? `סוקר פסקה ${approvedParagraphs.length + 1}` : `Reviewing paragraph ${approvedParagraphs.length + 1}`)
+                  ? (he ? `סוקר חלק ${approvedParagraphs.length + 1} מתוך ${maxChunks}` : `Reviewing part ${approvedParagraphs.length + 1} of ${maxChunks}`)
                   : loading
-                    ? (he ? `כותב פסקה ${approvedParagraphs.length + 1}...` : `Writing paragraph ${approvedParagraphs.length + 1}…`)
+                    ? (he ? `כותב חלק ${approvedParagraphs.length + 1} מתוך ${maxChunks}...` : `Writing part ${approvedParagraphs.length + 1} of ${maxChunks}…`)
                     : he ? 'מצב כתיבה משותפת' : 'Co-Writer mode'}
             </p>
           </div>
@@ -1575,14 +1572,33 @@ function WritingPanel({
           {waitingForFeedback && currentDraft && (
             <div ref={reviewRef} className="rounded-xl overflow-hidden"
               style={{ border: '2px solid rgba(81,123,62,0.5)', background: 'rgba(255,255,255,0.96)', boxShadow: '0 4px 20px rgba(81,123,62,0.12)' }}>
-              <div className="px-4 py-3 flex items-center gap-2"
+              <div className="px-4 py-2.5 flex flex-col gap-2"
                 style={{ background: 'rgba(81,123,62,0.08)', borderBottom: '1px solid rgba(81,123,62,0.18)' }}>
-                <div className="w-2 h-2 rounded-full bg-[#517B3E] animate-pulse" />
-                <p className="text-xs font-bold text-[#517B3E] uppercase tracking-wider">
-                  {isStreamingDraft
-                    ? (he ? `✨ פסקה ${approvedParagraphs.length + 1} — ה-AI מקליד...` : `✨ Paragraph ${approvedParagraphs.length + 1} — AI is typing…`)
-                    : (he ? `פסקה ${approvedParagraphs.length + 1} — ממתינה לאישורך` : `Paragraph ${approvedParagraphs.length + 1} — Awaiting your review`)}
-                </p>
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-[#517B3E] animate-pulse shrink-0" />
+                  <p className="text-xs font-bold text-[#517B3E] uppercase tracking-wider flex-1">
+                    {isStreamingDraft
+                      ? (he ? `✨ חלק ${approvedParagraphs.length + 1} — ה-AI מקליד...` : `✨ Part ${approvedParagraphs.length + 1} — AI is typing…`)
+                      : isLastChunk
+                        ? (he ? `חלק ${approvedParagraphs.length + 1} — פרק אחרון, אשר כדי לסיים` : `Part ${approvedParagraphs.length + 1} — Final part, approve to finish`)
+                        : (he ? `חלק ${approvedParagraphs.length + 1} — ממתין לאישורך` : `Part ${approvedParagraphs.length + 1} — Awaiting your review`)}
+                  </p>
+                  <span className="text-[11px] font-mono font-bold shrink-0" style={{ color: '#517B3E', opacity: 0.8 }}>
+                    {approvedParagraphs.length + 1}/{maxChunks}
+                  </span>
+                </div>
+                {/* Hard progress bar — purely chunk-count driven, not LLM-reported */}
+                <div className="h-1 rounded-full overflow-hidden" style={{ background: 'rgba(81,123,62,0.15)' }}>
+                  <div
+                    className="h-1 rounded-full transition-all duration-500 ease-out"
+                    style={{
+                      width: `${Math.min(100, ((approvedParagraphs.length + 1) / maxChunks) * 100)}%`,
+                      background: isLastChunk
+                        ? 'linear-gradient(90deg, #517B3E, #2A3B22)'
+                        : 'linear-gradient(90deg, #9DC08B, #517B3E)',
+                    }}
+                  />
+                </div>
               </div>
               <div dir="rtl" className="px-6 py-5">
                 {currentDraftHtml
@@ -1611,14 +1627,14 @@ function WritingPanel({
                   style={{ border: '1px solid rgba(157,192,139,0.4)', background: 'rgba(255,255,255,0.80)', color: '#2A3B22' }} />
                 <div className="flex flex-col sm:flex-row gap-2">
                   <button
-                    onClick={isLastChunk ? handleFinalizeDocument : handleApproveAndContinue}
+                    onClick={handleNextStep}
                     disabled={isStreamingDraft}
                     className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-white text-sm font-bold transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
                     style={{ background: 'linear-gradient(135deg,#517B3E,#2A3B22)', boxShadow: '0 3px 14px rgba(81,123,62,0.32)' }}>
                     <IconCheck className="w-4 h-4" />
                     {isLastChunk
-                      ? (he ? '✅ סיום עבודה' : '✅ Finish Writing')
-                      : (he ? 'אשר והמשך לפסקה הבאה' : 'Approve & Continue')}
+                      ? (he ? '✅ סיים ושמור מסמך' : '✅ Finish & Save')
+                      : (he ? 'אשר והמשך' : 'Approve & Continue')}
                   </button>
                   <button onClick={regenerateWithFeedback} disabled={isStreamingDraft}
                     className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
