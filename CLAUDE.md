@@ -365,6 +365,9 @@ URL param `[id]` is the localStorage Course ID (string like `custom_${Date.now()
 **`workspace/page.tsx` structure:**
 Very large (~3087 lines). Inline components in order: `CodeExecutionBlock` → `QuizModal` → `LogoutConfirmModal` → `Sidebar` → `Home`. Every logout entry point must call `setShowLogoutModal(true)` — never `handleLogout()` directly. No shared `<Sidebar>` shell exists in this codebase — each page owns its own sidebar.
 
+**Full-nav sidebar pattern (`mastery/page.tsx`, `presentation/page.tsx`, `presentation-generator/page.tsx`):**
+Each page has its own copy-pasted hamburger-triggered sidebar (`MasterySidebar` / local `Sidebar` — unrelated to `components/Sidebar.tsx`, which is a different, smaller component): backdrop (`z-40`) + slide-in `<aside>` panel (`z-50`, `translateClass` for RTL/LTR direction), nav links (Home/StudyLab/Academic Writing/Create Presentation/Professor's Brain/Mastery/Settings/Collaboration "Soon"), an active-course indicator via `useCourse()`, an admin-only "Admin CT" section gated on `isAdmin` (decoded from the JWT via `decodeJwtPayload`), and a bottom Logout button wired to `LogoutConfirmModal`. The header also carries a profile-avatar popover (`AvatarContent`, name/email, Logout). `mastery/page.tsx`'s `MasterySidebar` is the canonical reference — copy it verbatim (including `AvatarContent`/`IconShield`/`LogoutConfirmModal`/`decodeJwtPayload` helpers) when adding this shell to a new page rather than re-deriving it.
+
 **`/workspace/documents` route:**
 Thin alias at `workspace/documents/page.tsx` — renders `<ProfilePageInner>` which opens directly on the Documents tab (detected via `pathname === '/workspace/documents'`). All document fetch/list/delete logic lives in `profile/page.tsx`.
 
@@ -393,6 +396,7 @@ After registration, users land on `/onboarding`. Onboarding data saved via `POST
 - `D` design-token object at the top centralises all colours
 - **Course Selector view** (when `selectedCourse === null`): uses `COURSES` + `customCourses` from the provider
 - **Course Focus view** (when course selected): `CrystalCard` quick actions + `MaterialRow` list
+- The "Create Presentation" `CrystalCard` routes to `/presentation-generator` (single screen: topic input + drag-and-drop upload + Generate). `/presentation` (RAG deck from already-indexed docs, topic-only, no upload) is a separate, intentionally distinct feature and is not linked from the dashboard.
 
 **z-index layering (wizard exit modals / dropdowns):**
 

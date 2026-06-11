@@ -511,7 +511,7 @@ export default function DashboardPage() {
                   <CrystalCard title={he ? 'הראש של המרצה'   : "Prof's Brain"}     subtitle={he ? 'סימולציית מבחן'                  : 'Exam simulation'}              onClick={() => router.push('/workspace/professor-simulator')} />
                   <CrystalCard title={he ? 'שליטה בחומר'     : 'Mastery'}          subtitle={he ? 'חידונים ומעקב'                   : 'Quizzes & tracking'}           onClick={() => router.push(`/mastery?course=${selectedCourse.id}`)} />
                   <CrystalCard title={he ? 'כתיבה אקדמית'    : 'Academic Writing'} subtitle={he ? 'כתיבת עבודות בסגנון האישי שלך'  : 'Write papers in your style'}   onClick={() => router.push('/academic-writing')} />
-                  <CrystalCard title={he ? 'צור מצגת'        : 'Create Presentation'} subtitle={he ? 'מצגת מקצועית מהחומר שלך'      : 'A professional deck from your materials'} onClick={() => router.push('/presentation')} />
+                  <CrystalCard title={he ? 'צור מצגת'        : 'Create Presentation'} subtitle={he ? 'מצגת מקצועית מהחומר שלך'      : 'A professional deck from your materials'} onClick={() => router.push('/presentation-generator')} />
                 </div>
               </div>
             </>
