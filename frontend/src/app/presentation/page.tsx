@@ -125,12 +125,15 @@ export default function PresentationPage() {
             <button
               onClick={() => router.push('/dashboard')}
               aria-label={he ? 'חזרה ללוח הבקרה' : 'Back to dashboard'}
-              className="p-2 rounded-lg hover:bg-[#EEF5F0] transition-colors text-[#1C3329] shrink-0"
+              className="flex items-center gap-1.5 px-2.5 py-2 rounded-lg hover:bg-[#EEF5F0] transition-colors text-[#1C3329] shrink-0"
             >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round"
                   d="M2.25 12 11.204 3.045a1.125 1.125 0 0 1 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
               </svg>
+              <span className="hidden sm:inline text-sm font-semibold whitespace-nowrap">
+                {he ? 'חזרה ללוח הבקרה' : 'Back to Dashboard'}
+              </span>
             </button>
             <LogoMark size={32} />
           </div>

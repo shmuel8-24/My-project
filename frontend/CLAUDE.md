@@ -32,7 +32,7 @@ browser client exists; this looks like in-progress migration scaffolding at the 
 
 ## Scale note
 
-`workspace/page.tsx`: 3017 lines. `academic-writing/page.tsx`: ~2078 lines. Both follow the
+`workspace/page.tsx`: ~3087 lines. `academic-writing/page.tsx`: ~2125 lines. Both follow the
 same single-file, inline-everything pattern — the root CLAUDE.md has the up-to-date counts.
 
 ## Empty scaffold directories — ignore
