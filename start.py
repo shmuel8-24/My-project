@@ -8,6 +8,7 @@ import sys
 import threading
 from pathlib import Path
 
+
 BLUE  = "\033[94m"
 GREEN = "\033[92m"
 BOLD  = "\033[1m"

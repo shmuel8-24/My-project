@@ -260,8 +260,8 @@ function ServerStatus({ token }: { token: string | null }) {
         ))}
       </div>
 
-      {/* Offline guidance */}
-      {ping === 'offline' && (
+      {/* Offline guidance — local-dev only; in production an admin can't "start a terminal" */}
+      {ping === 'offline' && process.env.NODE_ENV === 'development' && (
         <div className="mx-4 mb-4 mt-1 rounded-xl px-4 py-3 text-xs"
           style={{ background: 'rgba(220,38,38,0.05)', border: '1px solid rgba(220,38,38,0.15)', color: '#7f1d1d' }}>
           <p className="font-bold mb-1.5">Flask server is not running. Start it with:</p>

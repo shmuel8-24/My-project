@@ -19,15 +19,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 │   │   ├── documents.py    # Documents/RAG blueprint (upload, ask, sessions)
 │   │   ├── admin.py        # Admin blueprint + CFO agent + proactive scheduler
 │   │   ├── professor.py    # Professor Brain Simulator blueprint
-│   │   └── export.py       # Export blueprint (paper, quiz, PDF, DOCX) + all /api/mastery/* routes
+│   │   ├── presentation_agent.py # Presentation Agent blueprint: multi-tool file→deck generation
+│   │   └── export.py       # Export blueprint (paper, quiz, PDF, DOCX, slides) + all /api/mastery/* routes
 │   ├── services/
 │   │   ├── faiss_store.py  # FAISS vector store (FaissCollection — ChromaDB-compatible surface)
 │   │   ├── rag.py          # hybrid_search, BM25, get_user_collection (wraps faiss_store)
 │   │   ├── md_renderer.py  # Markdown → HTML (Python-Markdown + mdx_math + Pygments)
-│   │   ├── security.py     # DLP filter, PII redaction, HTML stripping
+│   │   ├── security.py     # DLP filter, PII redaction, HTML stripping, prompt sanitization (_sanitize)
 │   │   ├── email.py        # OTP + reset email (SMTP / Resend / terminal)
 │   │   ├── pdf.py          # PPTX text/slide extraction
 │   │   ├── code_runner.py  # Python sandbox (matplotlib Agg backend set here)
+│   │   ├── slides.py       # Slide-deck generation: generate_slide_deck (RAG) + generate_deck_via_agent (agent)
 │   │   └── startup.py      # Background backfill threads + orphan session migration
 │   ├── data/               # gitignored persistent storage
 │   │   ├── faiss/          # FAISS vector store — one subdirectory per user (user_{id}/)
@@ -50,6 +52,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     │   │   ├── ScreenTimeChart.tsx     # Study time chart component
     │   │   ├── CodeBlock.tsx           # Syntax-highlighted code block renderer
     │   │   ├── AcademicRichEditor.tsx  # @uiw/react-md-editor wrapper — ssr:false required
+    │   │   ├── SlideLayouts.tsx        # RAG deck renderer (Title_Slide/Image_Right/Big_Metric) — /presentation
+    │   │   ├── SlideViewer.tsx         # Agent deck renderer (title/bullets/metric) — /presentation-generator
     │   │   └── ui/Skeleton.tsx         # Loading skeleton
     │   ├── context/
     │   │   └── CourseContext.tsx        # Re-export shim for providers/course.tsx
@@ -61,14 +65,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     │       ├── dashboard/page.tsx              # Course Hub Home
     │       ├── profile/page.tsx                # Profile page (also owns Documents tab logic)
     │       ├── settings/page.tsx               # Settings page
-    │       ├── academic-writing/page.tsx       # AI co-writing (~2094 lines, WritingPanel inline)
+    │       ├── academic-writing/page.tsx       # AI co-writing (~2125 lines, WritingPanel inline)
+    │       ├── presentation/page.tsx           # RAG slide deck from own documents → SlideLayouts
+    │       ├── presentation-generator/page.tsx # Agent-based one-shot deck from uploaded files → SlideViewer
     │       ├── mastery/page.tsx                # Skill mastery — quiz modal + score tracking
     │       ├── course-picker/
     │       │   ├── page.tsx                    # Course list (customCourses only; 3-dots menu)
     │       │   ├── add/page.tsx                # Add Course wizard (steps 0–3)
     │       │   └── edit/[id]/page.tsx          # Edit Course wizard
     │       ├── workspace/
-    │       │   ├── page.tsx                    # Main RAG workspace (~3017 lines; all inline)
+    │       │   ├── page.tsx                    # Main RAG workspace (~3087 lines; all inline)
     │       │   ├── documents/page.tsx          # Route alias → Profile page on Documents tab
     │       │   ├── UserProfileModal.tsx
     │       │   ├── UpgradeModal.tsx
@@ -225,7 +231,9 @@ Combines FAISS L2 similarity and BM25 via Reciprocal Rank Fusion (RRF constant 6
 7. Events: `{type:"status", phase}` → `{type:"result", ...}` | `{type:"error"}`.
 
 **Academic paper generation (`/generate-paper`) — SSE stream:**
-Stateless per-call — no conversation history stored. The frontend accumulates approved sections and sends the full `previousContent` on each subsequent call. An anti-repetition engine in the system prompt forces the model to catalog already-mentioned authors/cases/arguments and produce new material. Pacing is chunk-indexed: `CHUNKS_PER_PAGE=4`, `maxChunks = pageCount * 4`. The final chunk is flagged `isFinalSection=true` and writes `## סיכום`. Prompt text is sanitized via `_sanitize()` to avoid homework-filter refusals. **RAG diversity**: the FAISS query is enriched per chunk with a chapter-specific angle phrase from `_CHUNK_ANGLES` (e.g. intro → theory → examples → findings), so each generation call retrieves topically-distinct document sections rather than the same TOP_K chunks repeated every call.
+Stateless per-call — no conversation history stored. The frontend accumulates approved sections and sends the full `previousContent` on each subsequent call. An anti-repetition engine in the system prompt forces the model to catalog already-mentioned authors/cases/arguments and produce new material. Prompt text is sanitized via `_sanitize()` (lives in `services/security.py`, shared with `services/slides.py`) to avoid homework-filter refusals. **RAG diversity**: the FAISS query is enriched per chunk with a chapter-specific angle phrase from `_CHUNK_ANGLES` (e.g. intro → theory → examples → findings), so each generation call retrieves topically-distinct document sections rather than the same TOP_K chunks repeated every call.
+
+**Word-count-driven pacing** (replaces the older pure chunk-count model): the frontend (`academic-writing/page.tsx`) is the single source of truth for document length — `targetWordCount = pageCount * WORDS_PER_PAGE` (`WORDS_PER_PAGE=300`) is sent to the backend on every call. `CHUNKS_PER_PAGE=1.5` only derives `maxChunks` as a generous upper-bound safety net so the loop always terminates, not the real stopping condition. Each chunk is paced to `chunk_word_min=250`–`chunk_word_max=300` words (`max_tokens=800` fixed ceiling, since a chunk no longer scales with total document length). The frontend computes `isFinalSection = wordsSoFar >= targetWords || paragraphNum + 1 >= chunkTotal` and sends it as `isFinalSection`/`targetWordCount` — the backend reads these directly rather than deriving them. The final chunk writes `## סיכום`. A new **academic-rigor / anti-templating engine** (applies to every chunk; the forward-flow/lead-with-substance rules apply only to non-final chunks) bans repetitive paragraph-opening templates, requires 3-4 sentences of critical analysis per named author/case from the source material, and requires non-final chunks to end with a forward-looking transition and open with substance (a name/case/ruling) rather than a generic framing sentence.
 
 **Markdown rendering (`services/md_renderer.py`):**
 `render_markdown_html(text)` — Python-Markdown with `mdx_math` (→ `<script type="math/tex">` tags for client-side KaTeX), `fenced_code`, and `CodeHiliteExtension` (Pygments inline CSS). Used by `/generate-paper` SSE result and `/export-pdf`.
@@ -233,6 +241,12 @@ Stateless per-call — no conversation history stored. The frontend accumulates 
 **Export routes:**
 - `/export-pdf` — `render_markdown_html` → full HTML → WeasyPrint (requires system `pango`). Hebrew RTL styling.
 - `/export-docx` — custom Markdown+LaTeX → python-docx. `$$...$$` blocks pre-processed to sentinel markers. Inline math in Cambria Math (blue), block equations centred. `w:bidi` on all paragraphs for RTL.
+
+**Slide deck generation (`services/slides.py`) — two independent flows, two slide shapes:**
+- `generate_slide_deck(client, topic, context, course_name)` — RAG-based. Used by `POST /api/generate-slides` (`api/export.py`): retrieves `hybrid_search` chunks from the user's own FAISS knowledge base (query enriched with "מושגים מרכזיים נתונים מספרים ומסקנות key concepts data statistics findings conclusions"), optionally restricted to `fileIds`. Returns 10 slides shaped `{title, content, layoutType, imageQuery}` with `layoutType ∈ {Title_Slide, Image_Right, Big_Metric}`. `imageQuery` is a short descriptive phrase only — never resolved to a real image.
+- `generate_deck_via_agent(client, topic, context)` — agent-based. Used by `POST /api/generate-presentation` (`api/presentation_agent.py`): a 4-tool OpenAI function-calling agent (`parse_document` for PDF/DOCX/PPTX, `transcribe_media` via Whisper for audio/video, `analyze_image` via vision, plus a forced final `build_presentation` tool call) processes freshly-uploaded files **in-memory only — never persisted to FAISS or the user's document set**. Returns 10 slides shaped `{title, layout, content}` with `layout ∈ {title, bullets, metric}`.
+
+Both entry points share `_sanitize()` and the 10-slide McKinsey/BCG-style system prompt convention, but `_validate_slides`/`VALID_SLIDE_LAYOUTS` (RAG shape) and `_validate_deck_slides`/`DECK_LAYOUTS` (agent shape) are separate validators — the two slide shapes are intentionally different and rendered by different frontend components (`SlideLayouts.tsx` vs `SlideViewer.tsx`). Don't conflate them.
 
 **Mastery system (`api/export.py`):**
 - `GET /api/mastery/topics` — joins `UserDocument` + `TopicMastery`; returns `[{file_id, topic, icon, mastery_pct|null, quiz_count}]`.

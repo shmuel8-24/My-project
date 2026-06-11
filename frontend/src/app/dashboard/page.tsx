@@ -117,14 +117,6 @@ function CourseOptionCard({ course, he, onSelect }: { course: Course; he: boolea
           {he ? 'לחץ לבחירת קורס' : 'Click to select'}
         </p>
       </div>
-      <div className="w-full flex flex-col gap-1.5">
-        <div style={{ height: 5, borderRadius: 9999, overflow: 'hidden', background: 'rgba(255,255,255,0.09)' }}>
-          <div style={{ width: '0%', height: '100%', borderRadius: 9999, background: 'linear-gradient(90deg, rgba(74,222,128,0.55), #4ADE80)' }} />
-        </div>
-        <p style={{ color: 'rgba(221,229,219,0.30)', fontSize: '0.625rem' }}>
-          {he ? 'אין נתוני שליטה עדיין' : 'No mastery data yet'}
-        </p>
-      </div>
     </button>
   );
 }
@@ -221,6 +213,10 @@ function DashboardSidebar({ isOpen, onClose, isAdmin, lang, userFirstName, userL
             <button onClick={() => { router.push('/academic-writing'); onClose(); }}
               className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-[#527061] transition-all duration-150 hover:bg-[#EEF5F0] hover:text-[#1C3329]">
               <span className="text-base leading-none shrink-0">✍️</span>{he ? 'כתיבה אקדמית' : 'Academic Writing'}
+            </button>
+            <button onClick={() => { router.push('/presentation-generator'); onClose(); }}
+              className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-[#527061] transition-all duration-150 hover:bg-[#EEF5F0] hover:text-[#1C3329]">
+              <span className="text-base leading-none shrink-0">🎬</span>{he ? 'יצירת מצגת' : 'Create Presentation'}
             </button>
             <button onClick={() => { router.push('/workspace/professor-simulator'); onClose(); }}
               className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-[#527061] transition-all duration-150 hover:bg-[#EEF5F0] hover:text-[#1C3329]">
@@ -515,6 +511,7 @@ export default function DashboardPage() {
                   <CrystalCard title={he ? 'הראש של המרצה'   : "Prof's Brain"}     subtitle={he ? 'סימולציית מבחן'                  : 'Exam simulation'}              onClick={() => router.push('/workspace/professor-simulator')} />
                   <CrystalCard title={he ? 'שליטה בחומר'     : 'Mastery'}          subtitle={he ? 'חידונים ומעקב'                   : 'Quizzes & tracking'}           onClick={() => router.push(`/mastery?course=${selectedCourse.id}`)} />
                   <CrystalCard title={he ? 'כתיבה אקדמית'    : 'Academic Writing'} subtitle={he ? 'כתיבת עבודות בסגנון האישי שלך'  : 'Write papers in your style'}   onClick={() => router.push('/academic-writing')} />
+                  <CrystalCard title={he ? 'צור מצגת'        : 'Create Presentation'} subtitle={he ? 'מצגת מקצועית מהחומר שלך'      : 'A professional deck from your materials'} onClick={() => router.push('/presentation')} />
                 </div>
               </div>
             </>

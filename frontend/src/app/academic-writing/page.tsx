@@ -1071,9 +1071,15 @@ function Wizard({
   );
 }
 
-// 1 page ≈ 4 chunks of ~10-15 lines each ≈ ~350 words/page
-// maxChunks = pageCount * CHUNKS_PER_PAGE  (e.g. 3 pages → 12 chunks)
-const CHUNKS_PER_PAGE = 4;
+// maxChunks = pageCount * CHUNKS_PER_PAGE — a generous upper-bound safety net so the
+// loop always terminates; the real stopping condition is the word-count target below.
+const CHUNKS_PER_PAGE = 1.5;
+// Absolute word-count target — single source of truth for "how long is this document?".
+// targetWordCount = pageCount * WORDS_PER_PAGE is sent to the backend so both sides
+// agree, and drives isFinalSection in generateParagraph: the loop keeps fetching body
+// chunks until the accumulated word count reaches this target.
+const WORDS_PER_PAGE = 300;
+const countWords = (text: string) => (text.trim() ? text.trim().split(/\s+/).length : 0);
 
 /* ─── Writing panel — Co-Writer mode (paragraph-by-paragraph) ───────────── */
 function WritingPanel({
@@ -1118,19 +1124,31 @@ function WritingPanel({
   const [approvedParagraphsHtml, setApprovedParagraphsHtml] = useState<string[]>([]);
   const [currentDraftHtml,       setCurrentDraftHtml]       = useState<string | null>(null);
   const [paperFullHtml,          setPaperFullHtml]           = useState<string | null>(null);
-  // 1-based chunk counter. chunkIndexRef holds the always-current value used by
-  // event handlers; currentChunkIndex (state) drives the rendered UI. Both are
-  // kept in sync — ref is written first so event handlers never see stale state.
-  const [currentChunkIndex,    setCurrentChunkIndex]    = useState(1);
+  // 1-based chunk counter, kept in case future logic needs to read the current
+  // chunk number — no longer displayed in the UI. chunkIndexRef holds the
+  // always-current value used by event handlers; the state setter keeps a
+  // mirror in sync (ref written first so event handlers never see stale state).
+  const [, setCurrentChunkIndex] = useState(1);
   const chunkIndexRef = useRef(1);
   const reviewRef = useRef<HTMLDivElement>(null);
+  // Whether the currently-displayed draft was generated as the FINAL/conclusion
+  // chunk — set inside generateParagraph from isFinalSection (word-count OR
+  // chunk-count driven). Drives the "approve to finish" UI + handleNextStep.
+  const [draftIsFinal, setDraftIsFinal] = useState(false);
+  // Word-count progress toward the document's target length — set inside
+  // generateParagraph alongside draftIsFinal, surfaced as a progress bar/badge
+  // in the review card so the user has a sense of how much is left.
+  const [wordsSoFar,  setWordsSoFar]  = useState(0);
+  const [targetWords, setTargetWords] = useState(0);
 
   const wtLabel = writingType
     ? (he ? WRITING_TYPES.find(w => w.id === writingType)?.he : WRITING_TYPES.find(w => w.id === writingType)?.en) ?? ''
     : '';
 
   const maxChunks   = (pageCount || 1) * CHUNKS_PER_PAGE;
-  const isLastChunk = currentChunkIndex >= maxChunks;
+  // True once the currently-reviewed draft was generated as the final/
+  // conclusion chunk (see generateParagraph's isFinalSection derivation).
+  const isLastChunk = draftIsFinal;
 
   const isStarted = approvedParagraphs.length > 0 || waitingForFeedback || loading || isFinished;
 
@@ -1173,7 +1191,16 @@ function WritingPanel({
 
     const isFirstSection  = approved.length === 0;
     const chunkTotal      = (pageCount || 1) * CHUNKS_PER_PAGE;
-    const isFinalSection  = paragraphNum + 1 >= chunkTotal;
+    const wordsSoFar      = countWords(approved.join(' '));
+    const targetWords     = (pageCount || 1) * WORDS_PER_PAGE;
+    // Final once EITHER the accumulated word count already hits the target
+    // (the loop keeps fetching body chunks until this is true) OR the
+    // chunk-count ceiling is reached (last-resort safety net so the loop still
+    // terminates if chunks badly undershoot).
+    const isFinalSection  = wordsSoFar >= targetWords || paragraphNum + 1 >= chunkTotal;
+    setDraftIsFinal(isFinalSection);
+    setWordsSoFar(wordsSoFar);
+    setTargetWords(targetWords);
 
     // Restrict RAG retrieval to the exact document(s) the user selected in Step 1.
     // This prevents context leakage from other documents in the user's collection.
@@ -1219,8 +1246,8 @@ function WritingPanel({
         ? `The user requested this revision to the previous draft: "${feedback.trim()}". Address this feedback carefully.`
         : '',
       isFinalSection
-        ? `CRITICAL PACING INSTRUCTION: This is chunk ${paragraphNum + 1} of ${chunkTotal} (the FINAL chunk) for a ${pageCount}-page paper. You MUST formally conclude the document now. Use '## סיכום', summarize all key arguments, and formally close the paper.`
-        : `CRITICAL PACING INSTRUCTION: This is chunk ${paragraphNum + 1} of ${chunkTotal} for a ${pageCount}-page paper. ${chunkTotal - paragraphNum - 1} chunk(s) still follow. Write BODY content only — DO NOT use '## סיכום' or any closing/summary language. End mid-flow so the next chunk continues naturally.`,
+        ? `CRITICAL PACING INSTRUCTION: The document has reached ~${wordsSoFar} of the ~${targetWords}-word target for this ${pageCount}-page paper (chunk ${paragraphNum + 1} of up to ${chunkTotal}). You MUST formally conclude the document now. Use '## סיכום', summarize all key arguments, and formally close the paper.`
+        : `CRITICAL PACING INSTRUCTION: The document has reached ~${wordsSoFar} of the ~${targetWords}-word target for this ${pageCount}-page paper (chunk ${paragraphNum + 1} of up to ${chunkTotal}). Write BODY content only — DO NOT use '## סיכום' or any closing/summary language. End mid-flow so the next chunk continues naturally.`,
       includeSources
         ? 'When relevant, briefly note which source file a claim comes from, e.g. (Source: filename.pdf).'
         : 'CRITICAL: DO NOT include any references, citations, or source file names anywhere in the text. Output ONLY clean prose.',
@@ -1241,6 +1268,7 @@ function WritingPanel({
           isFinalSection,
           currentChunkIndex: paragraphNum,
           maxChunks: chunkTotal,
+          targetWordCount: targetWords,
           studentName: [userFirstName, userLastName].filter(Boolean).join(' ') || null,
           fileIds: fileIds.length > 0 ? fileIds : null,
           courseId:   selectedCourse?.id   ?? null,
@@ -1310,10 +1338,12 @@ function WritingPanel({
   }, [topic, hasDoc, writingType, wtLabel, he, usePersonalStyle, includeSources, wizardInstructions, pageCount, selectedCourse, t, userFirstName, userLastName, sourceType, sourceDocId, sourceUploadFileIds]);
 
   // Unified approve action — the ONLY entry point for advancing the generation loop.
-  // Routing is decided programmatically: if adding this chunk fills the quota
-  // (next.length >= maxChunks) the document is finalized immediately and the loop
-  // terminates. Otherwise the next chunk is generated. The LLM never decides when
-  // the paper ends — this function does, based purely on chunk arithmetic.
+  // Routing is decided programmatically: the document is finalized once EITHER
+  // the just-approved draft was generated as the final/conclusion chunk
+  // (draftIsFinal — word-count OR chunk-count driven, see generateParagraph),
+  // OR the chunk-count ceiling is hit as a last-resort safety net. Otherwise the
+  // next chunk is generated. The LLM never decides when the paper ends — this
+  // function does.
   const handleNextStep = useCallback(() => {
     if (!currentDraft) return;
     const next     = [...approvedParagraphs,     currentDraft];
@@ -1324,10 +1354,7 @@ function WritingPanel({
     setCurrentDraftHtml(null);
     setWaitingForFeedback(false);
 
-    // Hard stop: evaluated against next.length (post-approval count), not state.
-    // This is the authoritative page-count enforcement — no other code path can
-    // generate beyond this limit.
-    if (next.length >= maxChunks) {
+    if (draftIsFinal || next.length >= maxChunks) {
       setEditedContent(next.join('\n\n'));
       setPaperFullHtml(nextHtml.filter(Boolean).join('\n') || null);
       setIsFinished(true);
@@ -1337,7 +1364,7 @@ function WritingPanel({
       setCurrentChunkIndex(chunkIndexRef.current);
       generateParagraph(next.length, next, '');
     }
-  }, [currentDraft, approvedParagraphs, approvedParagraphsHtml, currentDraftHtml, maxChunks, generateParagraph]);
+  }, [currentDraft, approvedParagraphs, approvedParagraphsHtml, currentDraftHtml, draftIsFinal, maxChunks, generateParagraph]);
 
   const regenerateWithFeedback = () => {
     generateParagraph(approvedParagraphs.length, approvedParagraphs, userFeedback);
@@ -1352,6 +1379,8 @@ function WritingPanel({
     setError(null); setUserFeedback('');
     chunkIndexRef.current = 1;
     setCurrentChunkIndex(1);
+    setWordsSoFar(0);
+    setTargetWords(0);
   };
 
   const safeTitle = () => topic.trim().slice(0, 40).replace(/[^\w֐-׿\s-]/g, '') || 'paper';
@@ -1361,12 +1390,14 @@ function WritingPanel({
      header the student sees in the preview. Built deterministically (never by
      the LLM) so the name/course/date are always 100% accurate. */
   const buildAttributionHeader = () => {
-    const displayName = [userFirstName, userLastName].filter(Boolean).join(' ');
+    // Name/Institution only appear when "כתוב בשמך" (Write as you) is ON — otherwise
+    // the document isn't claimed to be personally authored by this student.
+    const displayName = usePersonalStyle ? [userFirstName, userLastName].filter(Boolean).join(' ') : '';
     if (!displayName && !selectedCourse?.name) return '';
     const lines: string[] = [];
-    if (displayName)          lines.push(he ? `**מאת:** ${displayName}`           : `**By:** ${displayName}`);
-    if (userInstitution)      lines.push(he ? `**מוסד לימודים:** ${userInstitution}` : `**Institution:** ${userInstitution}`);
-    if (selectedCourse?.name) lines.push(he ? `**קורס:** ${selectedCourse.name}`   : `**Course:** ${selectedCourse.name}`);
+    if (displayName)                    lines.push(he ? `**מאת:** ${displayName}`           : `**By:** ${displayName}`);
+    if (displayName && userInstitution) lines.push(he ? `**מוסד לימודים:** ${userInstitution}` : `**Institution:** ${userInstitution}`);
+    if (selectedCourse?.name)           lines.push(he ? `**קורס:** ${selectedCourse.name}`   : `**Course:** ${selectedCourse.name}`);
     lines.push(he ? `**תאריך:** ${formattedDate}` : `**Date:** ${formattedDate}`);
     lines.push(he ? `**נושא:** ${topic}` : `**Topic:** ${topic}`);
     return `${lines.join('  \n')}\n\n---\n\n`;
@@ -1406,6 +1437,10 @@ function WritingPanel({
     finally { setDownloadingWord(false); }
   };
 
+  // Running word count including the currently-displayed draft (if any) —
+  // drives the header subtitle and the review-card progress bar.
+  const reviewWordCount = wordsSoFar + countWords(currentDraft ?? '');
+
   return (
     <div className="flex flex-col flex-1 min-h-[600px] w-full max-w-4xl mx-auto px-4 md:px-8 py-6 md:py-8">
       <div className="rounded-2xl flex flex-col flex-1" style={{
@@ -1431,11 +1466,15 @@ function WritingPanel({
             <p className="font-semibold text-[#2A3B22] text-sm">{t.paperTitle}</p>
             <p className="text-xs text-[#7a9268]">
               {isFinished
-                ? (he ? `✅ ${approvedParagraphs.length} חלקים · מסמך מוכן` : `✅ ${approvedParagraphs.length} parts · Document ready`)
+                ? (he ? '✅ מסמך מוכן' : '✅ Document ready')
                 : waitingForFeedback
-                  ? (he ? `סוקר חלק ${approvedParagraphs.length + 1} מתוך ${maxChunks}` : `Reviewing part ${approvedParagraphs.length + 1} of ${maxChunks}`)
+                  ? (targetWords > 0
+                      ? (he ? `סוקר טיוטה — כ-${reviewWordCount} מתוך ${targetWords} מילים` : `Reviewing draft — ~${reviewWordCount} of ${targetWords} words`)
+                      : (he ? 'סוקר חלק' : 'Reviewing draft'))
                   : loading
-                    ? (he ? `כותב חלק ${approvedParagraphs.length + 1} מתוך ${maxChunks}...` : `Writing part ${approvedParagraphs.length + 1} of ${maxChunks}…`)
+                    ? (targetWords > 0
+                        ? (he ? `כותב... (כ-${wordsSoFar} מתוך ${targetWords} מילים)` : `Writing… (~${wordsSoFar} of ${targetWords} words)`)
+                        : (he ? 'כותב...' : 'Writing…'))
                     : he ? 'מצב כתיבה משותפת' : 'Co-Writer mode'}
             </p>
           </div>
@@ -1522,7 +1561,8 @@ function WritingPanel({
 
           {/* Error */}
           {error && (
-            <div className="flex items-center gap-2 bg-red-950/50 border border-red-500/30 text-red-400 rounded-xl px-4 py-3 text-sm">
+            <div className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm"
+              style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#dc2626' }}>
               <IconX className="w-4 h-4 shrink-0" />{error}
               <button onClick={() => setError(null)} className="ms-auto opacity-60 hover:opacity-100"><IconX className="w-3.5 h-3.5" /></button>
             </div>
@@ -1534,7 +1574,7 @@ function WritingPanel({
               <div className="mb-5">
                 <div className="bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-sm font-medium inline-flex items-center gap-2 border border-emerald-100">
                   <IconCheck className="w-3.5 h-3.5" />
-                  {he ? `${approvedParagraphs.length} פסקאות אושרו` : `${approvedParagraphs.length} approved paragraph${approvedParagraphs.length > 1 ? 's' : ''}`}
+                  {he ? 'פסקאות שאושרו' : 'Approved paragraphs'}
                 </div>
               </div>
               {approvedParagraphs.map((para, i) => (
@@ -1578,27 +1618,30 @@ function WritingPanel({
                   <div className="w-2 h-2 rounded-full bg-[#517B3E] animate-pulse shrink-0" />
                   <p className="text-xs font-bold text-[#517B3E] uppercase tracking-wider flex-1">
                     {isStreamingDraft
-                      ? (he ? `✨ חלק ${approvedParagraphs.length + 1} — ה-AI מקליד...` : `✨ Part ${approvedParagraphs.length + 1} — AI is typing…`)
+                      ? (he ? `✨ ה-AI מקליד...` : `✨ AI is typing…`)
                       : isLastChunk
-                        ? (he ? `חלק ${approvedParagraphs.length + 1} — פרק אחרון, אשר כדי לסיים` : `Part ${approvedParagraphs.length + 1} — Final part, approve to finish`)
-                        : (he ? `חלק ${approvedParagraphs.length + 1} — ממתין לאישורך` : `Part ${approvedParagraphs.length + 1} — Awaiting your review`)}
+                        ? (he ? `פרק אחרון — אשר כדי לסיים` : `Final part — approve to finish`)
+                        : (he ? `ממתין לאישורך` : `Awaiting your review`)}
                   </p>
-                  <span className="text-[11px] font-mono font-bold shrink-0" style={{ color: '#517B3E', opacity: 0.8 }}>
-                    {approvedParagraphs.length + 1}/{maxChunks}
-                  </span>
+                  {targetWords > 0 && (
+                    <span className="text-[11px] font-mono font-bold shrink-0" style={{ color: '#517B3E', opacity: 0.8 }}>
+                      ~{reviewWordCount}/{targetWords}
+                    </span>
+                  )}
                 </div>
-                {/* Hard progress bar — purely chunk-count driven, not LLM-reported */}
-                <div className="h-1 rounded-full overflow-hidden" style={{ background: 'rgba(81,123,62,0.15)' }}>
-                  <div
-                    className="h-1 rounded-full transition-all duration-500 ease-out"
-                    style={{
-                      width: `${Math.min(100, ((approvedParagraphs.length + 1) / maxChunks) * 100)}%`,
-                      background: isLastChunk
-                        ? 'linear-gradient(90deg, #517B3E, #2A3B22)'
-                        : 'linear-gradient(90deg, #9DC08B, #517B3E)',
-                    }}
-                  />
-                </div>
+                {targetWords > 0 && (
+                  <div className="h-1 rounded-full overflow-hidden" style={{ background: 'rgba(81,123,62,0.15)' }}>
+                    <div
+                      className="h-1 rounded-full transition-all duration-500 ease-out"
+                      style={{
+                        width: `${Math.min(100, (reviewWordCount / targetWords) * 100)}%`,
+                        background: isLastChunk
+                          ? 'linear-gradient(90deg, #517B3E, #2A3B22)'
+                          : 'linear-gradient(90deg, #9DC08B, #517B3E)',
+                      }}
+                    />
+                  </div>
+                )}
               </div>
               <div dir="rtl" className="px-6 py-5">
                 {currentDraftHtml
@@ -1714,7 +1757,9 @@ function WritingPanel({
                         LLM) so author attribution is always present, accurate, and never
                         duplicated inside the generated Markdown body. */}
                     {(() => {
-                      const displayName = [userFirstName, userLastName].filter(Boolean).join(' ');
+                      // Name/Institution only appear when "כתוב בשמך" (Write as you) is ON —
+                      // otherwise the document isn't claimed to be personally authored by this student.
+                      const displayName = usePersonalStyle ? [userFirstName, userLastName].filter(Boolean).join(' ') : '';
                       if (!displayName && !selectedCourse?.name) return null;
                       return (
                         <div className="border-b-2 border-slate-800 pb-4 mb-10">
@@ -1723,7 +1768,7 @@ function WritingPanel({
                               {he ? `מאת: ${displayName}` : `By: ${displayName}`}
                             </p>
                           )}
-                          {userInstitution && (
+                          {displayName && userInstitution && (
                             <p className="text-right font-bold text-slate-900 mb-2 leading-[1.8]">
                               {he ? `מוסד לימודים: ${userInstitution}` : `Institution: ${userInstitution}`}
                             </p>
@@ -1790,20 +1835,6 @@ function WritingPanel({
           )}
         </div>
 
-        {/* Footer: progress indicator while writing, hidden when finished */}
-        {isStarted && !isFinished && !loading && !waitingForFeedback && (
-          <div className="px-5 pb-3 pt-2 shrink-0 flex items-center justify-between"
-            style={{ borderTop: '1px solid rgba(157,192,139,0.3)' }}>
-            <p className="text-xs text-[#7a9268]">
-              {he
-                ? `פסקה ${currentChunkIndex} מתוך ${maxChunks}`
-                : `Chunk ${currentChunkIndex} of ${maxChunks}`}
-            </p>
-            <p className="text-xs text-[#7a9268]">
-              {he ? `${approvedParagraphs.length} אושרו` : `${approvedParagraphs.length} approved`}
-            </p>
-          </div>
-        )}
       </div>
     </div>
   );

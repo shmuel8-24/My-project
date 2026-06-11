@@ -1,5 +1,4 @@
 import json
-import re
 from datetime import datetime, timezone
 
 import markdown
@@ -11,49 +10,16 @@ from extensions import client, limiter
 from models import SessionLocal, TopicMastery, User, UserDocument
 from services.md_renderer import render_markdown_html
 from services.rag import get_user_collection, hybrid_search
+from services.slides import generate_slide_deck
 from services.security import (
     SECURITY_SYSTEM_INSTRUCTION,
     _DLP_FALLBACK,
+    _sanitize,
     is_safe_output,
     strip_html,
 )
 
 export_bp = Blueprint("export", __name__)
-
-# ---------------------------------------------------------------------------
-# Prompt sanitization — strip phrases that trip the model's homework-help
-# safety filter before they ever reach the API.  Replacements are semantic
-# synonyms so the LLM output quality is unaffected.
-# ---------------------------------------------------------------------------
-_SANITIZE_RULES: list[tuple[re.Pattern, str]] = [
-    # ── Hebrew trigger words ──────────────────────────────────────────────
-    (re.compile(r'עבודה\s+אקדמית',               re.IGNORECASE), 'מסמך מקצועי'),
-    (re.compile(r'עבודה\s+(?:גמר|סיום|סמינריון|סמינר)', re.IGNORECASE), 'פרויקט'),
-    (re.compile(r'\bעבודה\b',                     re.IGNORECASE), 'מסמך'),
-    (re.compile(r'\bאקדמי(?:ת|ים|ות)?\b',         re.IGNORECASE), 'מקצועי'),
-    (re.compile(r'\bמטלה\b',                      re.IGNORECASE), 'משימה'),
-    (re.compile(r'\bתכתוב\s+לי\b',                re.IGNORECASE), 'סדר את המידע הבא'),
-    (re.compile(r'\bכתוב\s+לי\b',                 re.IGNORECASE), 'ארגן עבורי'),
-    (re.compile(r'\bכתוב\b',                      re.IGNORECASE), 'עצב'),
-    (re.compile(r'\bהגשה\b',                      re.IGNORECASE), 'מסירה'),
-    (re.compile(r'\bקורס\b',                      re.IGNORECASE), 'נושא'),
-    # ── English trigger words ─────────────────────────────────────────────
-    (re.compile(r'\bessay\b',                     re.IGNORECASE), 'document'),
-    (re.compile(r'\bresearch\s+paper\b',           re.IGNORECASE), 'professional document'),
-    (re.compile(r'\bacademic\s+paper\b',           re.IGNORECASE), 'professional document'),
-    (re.compile(r'\bacademic\b',                  re.IGNORECASE), 'professional'),
-    (re.compile(r'\bassignment\b',                re.IGNORECASE), 'task'),
-    (re.compile(r'\bhomework\b',                  re.IGNORECASE), 'task'),
-    (re.compile(r'\buniversity\b',                re.IGNORECASE), 'organization'),
-    (re.compile(r'\bstudent\b',                   re.IGNORECASE), 'user'),
-    (re.compile(r'write\s+in\s+the\s+style\s+of', re.IGNORECASE), 'format using the conventions of'),
-]
-
-def _sanitize(text: str) -> str:
-    """Replace LLM-refusal trigger words with neutral synonyms."""
-    for pattern, replacement in _SANITIZE_RULES:
-        text = pattern.sub(replacement, text)
-    return text
 
 
 @export_bp.route("/generate-paper", methods=["POST"])
@@ -110,7 +76,20 @@ def generate_paper(user_id: int):
     except (TypeError, ValueError):
         page_count = 1
     page_count = max(1, min(15, page_count))
-    target_word_count = page_count * 350
+    # Per-chunk word RANGE used in the pacing instruction below (and as a fallback
+    # for target_word_count if the frontend omits targetWordCount).
+    chunk_word_min = 250
+    chunk_word_max = 300
+    # Absolute word-count target for the WHOLE document. The frontend computes this
+    # as pageCount * WORDS_PER_PAGE (single source of truth — see academic-writing/
+    # page.tsx) and sends it explicitly so both sides agree; max_chunks-derived
+    # fallback only applies if that field is missing.
+    try:
+        target_word_count = int(data.get("targetWordCount")) if data and data.get("targetWordCount") else 0
+    except (TypeError, ValueError):
+        target_word_count = 0
+    if target_word_count <= 0:
+        target_word_count = max_chunks * (chunk_word_min + chunk_word_max) // 2
 
     col       = get_user_collection(user_id)
     doc_count = col.count()
@@ -228,15 +207,19 @@ def generate_paper(user_id: int):
         "that is a catastrophic, unacceptable failure. "
         "The topic in the user request is a focusing lens — it never overrides the subject "
         "matter of the source documents.\n\n"
-        f"CRITICAL LENGTH ENFORCEMENT: The user requested a document length of "
-        f"{page_count} pages, which equals approximately {target_word_count} words in total.\n"
-        f"You MUST write extensively to reach this exact length.\n"
-        f"DO NOT summarize. DO NOT be concise.\n"
-        f"To reach this word count naturally without repeating yourself, you must:\n"
-        f"1. Provide deep theoretical background and context.\n"
-        f"2. Elaborate significantly on mathematical formulas, derivations, or complex concepts.\n"
-        f"3. Provide detailed, multi-step real-world examples or case studies.\n"
-        f"4. Expand on the broader applications and implications of the topics discussed."
+        f"DOCUMENT LENGTH MODEL: The user requested a document length of {page_count} "
+        f"page(s), which equals approximately {target_word_count} words in TOTAL across "
+        f"the ENTIRE document. This total is NOT produced by a single response — it is "
+        f"built up incrementally, roughly {chunk_word_min}-{chunk_word_max} words per "
+        f"response (see the CRITICAL PACING INSTRUCTION below), across as many chunk "
+        f"responses as it takes to reach the total. "
+        f"DO NOT attempt to reach {target_word_count} words in THIS response — write a "
+        f"deep, focused section at the per-chunk length below and let the document "
+        f"build up across multiple chunks. "
+        f"Each individual chunk should be tightly focused on ONE specific point: a "
+        f"single argument, a single author's position, or a single concrete example — "
+        f"not a broad survey. Depth comes from accumulating many focused chunks, not "
+        f"from writing a long chunk."
         + (
             f"\n\n=== CHUNK ROUTING: PART {current_chunk_index + 1} OF {max_chunks} ===\n"
             + (
@@ -334,6 +317,60 @@ def generate_paper(user_id: int):
             )
             if safe_student_name else ""
         )
+        + (
+            # ── ACADEMIC RIGOR / ANTI-TEMPLATING ENGINE — applies to EVERY chunk ──
+            "\n\nCRITICAL ACADEMIC STYLE GUIDE:\n"
+            "1. NO FORMULAIC WRITING: You are strictly forbidden from using repetitive "
+            "sentence structures. Do not open consecutive paragraphs with the same "
+            "recurring template phrase or sentence pattern (e.g., always starting with "
+            "the same subject-first formula). Vary your syntax, sentence openings, and "
+            "rhythm throughout the document.\n"
+            "2. DEEP SOURCE INTEGRATION: You must actively cite, synthesize, and "
+            "critically analyze the specific researchers, authors, and case studies that "
+            "appear in the 'Source Data/Context' below. Do not just name-drop them once "
+            "in the introduction — wherever a named scholar, author, or case appears in "
+            "the source text, dedicate at least 3-4 sentences to critically analyzing "
+            "their specific argument and methodology, comparing their viewpoint to "
+            "another source where relevant, rather than merely mentioning them in "
+            "passing.\n"
+            "3. CRITICAL ANALYSIS: Do not just list descriptive facts one after another. "
+            "Write analytically — compare and contrast different approaches, sources, or "
+            "viewpoints from the texts, weigh their strengths and weaknesses, and connect "
+            "ideas using academic transition words seamlessly."
+            + (
+                "\n4. FORWARD-FLOWING PARAGRAPH ENDINGS: End every body paragraph with a "
+                "forward-looking transition sentence that explicitly connects the current "
+                "argument to the next concept you are about to develop — never wrap up, "
+                "finalize, or summarize the paragraph's point; keep the reader moving "
+                "toward what comes next.\n"
+                "5. PARAGRAPH OPENINGS — LEAD WITH SUBSTANCE: Open each body paragraph by "
+                "directly introducing a specific researcher's name, case study, or legal "
+                "ruling drawn from the source material — never with a generic framing "
+                "statement."
+                if not is_final_section else ""
+            )
+        )
+        + (
+            # ── PER-CHUNK PACING INSTRUCTION — applies to EVERY chunk ──
+            # Body chunks keep developing new material at length; the conclusion
+            # (and ONLY the conclusion) is reserved for the final chunk.
+            f"\n\nCRITICAL PACING INSTRUCTION: This is the FINAL chunk of this "
+            f"document. Write a deep, comprehensive conclusion of approximately "
+            f"{chunk_word_min}-{chunk_word_max} words: use '## סיכום', summarize and "
+            f"synthesize all key arguments developed across the document, and "
+            f"formally close the paper. Maintain the same high academic standard as "
+            f"the rest of the document — do not pad with repetition, but do not cut "
+            f"the conclusion artificially short either."
+            if is_final_section else
+            f"\n\nCRITICAL PACING INSTRUCTION: Your task is to help build a long, "
+            f"comprehensive academic paper. Write a deep, highly detailed section of "
+            f"approximately {chunk_word_min}-{chunk_word_max} words. Dive deeply into "
+            f"the source material. Expand on theories, quote examples from the text, "
+            f"and maintain a high academic standard. DO NOT summarize or conclude. "
+            f"Keep the narrative flowing — the overall ~{target_word_count}-word "
+            f"target for this {page_count}-page document is reached across multiple "
+            f"chunks like this one."
+        )
     )
     style_guidelines = safe_instructions if safe_instructions else "Standard professional formal tone"
     course_line = f"Course/Subject context: {safe_course}\n" if safe_course else ""
@@ -409,7 +446,9 @@ def generate_paper(user_id: int):
                     {"role": "user",   "content": user_message},
                 ],
                 temperature=0.4,
-                max_tokens=min(int(target_word_count * 1.8) + 1000, 8000),
+                # Generous ceiling so a ~250-300-word chunk (plus, on the final
+                # chunk, '## סיכום'/'## מקורות' headings) is never cut off mid-sentence.
+                max_tokens=800,
                 stream=True,
             )
 
@@ -542,6 +581,43 @@ def generate_quiz(user_id: int):
 
     print(f"[Quiz] u{user_id}: generated {len(valid)} questions from {len(chunks)} chunks")
     return jsonify({"questions": valid, "sources": sources}), 200
+
+
+@export_bp.route("/api/generate-slides", methods=["POST"])
+@limiter.limit("5 per minute")
+@token_required
+def generate_slides(user_id: int):
+    """Generate a 10-slide McKinsey/BCG-style deck outline (JSON) from the user's documents."""
+    data        = request.get_json(silent=True) or {}
+    topic       = strip_html((data.get("topic") or "").strip())
+    course_name = strip_html((data.get("courseName") or "").strip())
+    raw_file_ids = data.get("fileIds")
+    req_file_ids: list[str] = [str(f) for f in raw_file_ids if f] if isinstance(raw_file_ids, list) else []
+
+    if not topic:
+        return jsonify({"error": "topic is required"}), 400
+
+    col       = get_user_collection(user_id)
+    doc_count = col.count()
+    if doc_count == 0:
+        return jsonify({"error": "no documents in the knowledge base — upload a file first"}), 400
+
+    search_query = f"{topic} מושגים מרכזיים נתונים מספרים ומסקנות key concepts data statistics findings conclusions"
+    chunks, metadatas = hybrid_search(
+        user_id, search_query, min(16, doc_count), file_ids=req_file_ids or None
+    )
+    if not chunks:
+        return jsonify({"error": "no relevant content found for this topic"}), 400
+
+    context = "\n\n".join(f"[Part {i + 1}]\n{chunk}" for i, chunk in enumerate(chunks))
+    sources = sorted({m.get("source", "Unknown") for m in metadatas})
+
+    valid, error = generate_slide_deck(client, topic, context, course_name)
+    if error:
+        return jsonify({"error": error}), 500
+
+    print(f"[Slides] u{user_id}: generated {len(valid)} slides from {len(chunks)} chunks")
+    return jsonify({"slides": valid, "sources": sources}), 200
 
 
 @export_bp.route("/api/mastery/generate-quiz", methods=["POST"])

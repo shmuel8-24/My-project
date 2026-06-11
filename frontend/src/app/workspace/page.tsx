@@ -260,6 +260,9 @@ const translations = {
     noDocsYet:      'עדיין אין מסמכים',
     noDocsHint:     'עבור לכרטיסיית "העלאה" כדי להוסיף קבצים',
     deleteDocLabel: 'מחק מסמך',
+    deleteDocTitle: 'מחיקת מסמך',
+    deleteDocBody:  (name: string) => `האם למחוק את "${name}"? הפעולה אינה הפיכה והמסמך יוסר מכל השיחות.`,
+    deleting:       'מוחק...',
   },
   en: {
     subtitle: 'Your Academic Sidekick',
@@ -384,6 +387,9 @@ const translations = {
     noDocsYet:      'No documents yet',
     noDocsHint:     'Go to the "Upload" tab to add files',
     deleteDocLabel: 'Delete document',
+    deleteDocTitle: 'Delete document',
+    deleteDocBody:  (name: string) => `Delete "${name}"? This can't be undone and removes it from all chats.`,
+    deleting:       'Deleting…',
   },
 };
 
@@ -1006,17 +1012,21 @@ function UploadedDocsList({
   docs,
   onDelete,
   t,
+  lang,
 }: {
   docs: DocumentInfo[];
   onDelete: (fileId: string) => Promise<void>;
   t: T;
+  lang: 'he' | 'en';
 }) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [docToDelete, setDocToDelete] = useState<DocumentInfo | null>(null);
 
   const handleDelete = async (fileId: string) => {
     setDeletingId(fileId);
     await onDelete(fileId);
     setDeletingId(null);
+    setDocToDelete(null);
   };
 
   const getFileIcon = (name: string) => {
@@ -1068,7 +1078,7 @@ function UploadedDocsList({
                   <p className="text-xs text-[#7a9268]">{t.chunksLabel(doc.chunks)}</p>
                 </div>
                 <button
-                  onClick={() => handleDelete(doc.file_id)}
+                  onClick={() => setDocToDelete(doc)}
                   disabled={deletingId === doc.file_id}
                   aria-label={t.deleteDocLabel}
                   className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-red-100/60 transition-colors shrink-0 disabled:opacity-40">
@@ -1083,6 +1093,65 @@ function UploadedDocsList({
           </div>
         )}
       </div>
+
+      {docToDelete && (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center p-4 animate-slide-up-fade"
+          style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(8px)' }}
+          onClick={e => { if (e.target === e.currentTarget && deletingId === null) setDocToDelete(null); }}
+        >
+          <div
+            dir={lang === 'he' ? 'rtl' : 'ltr'}
+            className="w-full max-w-sm rounded-3xl overflow-hidden"
+            style={{
+              background: 'rgba(255,255,255,0.98)',
+              backdropFilter: 'blur(20px)',
+              border: '1px solid rgba(220,38,38,0.18)',
+              boxShadow: '0 20px 60px rgba(30,10,10,0.22), 0 4px 16px rgba(220,38,38,0.08)',
+            }}
+          >
+            <div
+              className="flex items-center gap-3 px-5 py-4"
+              style={{ background: 'rgba(220,38,38,0.04)', borderBottom: '1px solid rgba(220,38,38,0.12)' }}
+            >
+              <div
+                className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0"
+                style={{ background: 'rgba(220,38,38,0.10)', border: '1px solid rgba(220,38,38,0.2)' }}
+              >
+                <IconX className="w-5 h-5 text-[#dc2626]" />
+              </div>
+              <h2 className="text-base font-bold text-[#1a2e14]">{t.deleteDocTitle}</h2>
+            </div>
+
+            <div className="px-5 py-5">
+              <p className="text-sm text-[#4a5e3a] leading-relaxed">
+                {t.deleteDocBody(docToDelete.name)}
+              </p>
+            </div>
+
+            <div className="flex gap-2 px-4 pb-4">
+              <button
+                onClick={() => setDocToDelete(null)}
+                disabled={deletingId !== null}
+                className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold border transition-all disabled:opacity-50"
+                style={{ color: '#7a9268', borderColor: 'rgba(157,192,139,0.45)', background: 'transparent' }}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(81,123,62,0.06)'; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
+              >
+                {t.cancel}
+              </button>
+              <button
+                onClick={() => handleDelete(docToDelete.file_id)}
+                disabled={deletingId !== null}
+                className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 text-white disabled:opacity-70"
+                style={{ background: '#dc2626', boxShadow: '0 4px 14px rgba(220,38,38,0.30)' }}
+              >
+                {deletingId !== null ? t.deleting : t.deleteDocLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2226,6 +2295,7 @@ function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDel
               {t.navHome}
             </button>
             <button
+              onClick={onClose}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-bold"
               style={{ backgroundColor: '#D1E6D9', color: '#183025' }}
             >
@@ -2984,7 +3054,7 @@ function Home() {
               <PdfUploader key={pdfKey} onUpload={handleUpload} onRemove={handleRemove} t={t} />
             )}
             {leftPanelTab === 'docs' && (
-              <UploadedDocsList docs={docList} onDelete={handleDeleteDoc} t={t} />
+              <UploadedDocsList docs={docList} onDelete={handleDeleteDoc} t={t} lang={lang} />
             )}
           </div>
           <div className="flex-1 flex flex-col gap-3 min-h-0" style={{ position: 'relative', zIndex: 1 }}>

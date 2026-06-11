@@ -1225,47 +1225,6 @@ export default function HomePage() {
             </svg>
             {t.footerContact}
           </a>
-          {/* ── TEMPORARY: admin verification trigger ── */}
-          <button
-            onClick={async () => {
-              const token = localStorage.getItem('levy_ai_token');
-              if (!token) {
-                alert('No token found in localStorage.\nPlease log in first, then click this button.');
-                return;
-              }
-              try {
-                console.log('[VerifySystem] Calling /api/refresh-token…');
-                const res = await fetch('http://127.0.0.1:5003/api/refresh-token', {
-                  headers: { Authorization: `Bearer ${token}` },
-                });
-                const data = await res.json();
-                console.log('[VerifySystem] Server response:', data);
-                if (!res.ok) {
-                  alert(`Server error ${res.status}:\n${JSON.stringify(data, null, 2)}`);
-                  return;
-                }
-                if (data.is_admin && data.token) {
-                  localStorage.setItem('levy_ai_token', data.token);
-                  document.cookie = 'levy_ai_session=1; path=/; SameSite=Lax; max-age=86400';
-                  alert(`Admin Verified! ✓\n\nRole: ${data.role}\nis_admin: ${data.is_admin}\n\nToken refreshed. Navigate to /admin.`);
-                } else {
-                  alert(`Token refreshed but you are NOT admin.\n\nRole: ${data.role}\nis_admin: ${data.is_admin}\n\nCheck the backend — your DB role may still be "user".`);
-                }
-              } catch (err) {
-                const msg = err instanceof Error ? err.message : String(err);
-                console.error('[VerifySystem] Error:', err);
-                alert(`Network Error: ${msg}\n\nCheck:\n• Is the Flask backend running on port 5003?\n• Run: source .venv/bin/activate && python app.py`);
-              }
-            }}
-            style={{
-              fontSize: '0.65rem', color: 'rgba(180,170,150,0.5)',
-              background: 'none', border: 'none', cursor: 'pointer',
-              padding: '2px 4px', letterSpacing: '0.05em',
-            }}
-          >
-            Verify System
-          </button>
-          {/* ── END TEMPORARY ── */}
         </div>
       </footer>
 

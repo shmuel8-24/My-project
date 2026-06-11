@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth, AUTH_KEYS } from '../providers/auth';
+import { UpgradeModal } from '../workspace/UpgradeModal';
 
 const API = 'http://127.0.0.1:5003';
 
@@ -88,6 +89,9 @@ const i18n = {
     docDate:              'תאריך העלאה',
     docSize:              'גודל',
     deleteDoc:            'מחק',
+    deleteDocTitle:       'מחיקת מסמך',
+    deleteDocBody:        (name: string) => `האם למחוק את "${name}"? הפעולה אינה הפיכה והמסמך יוסר מכל השיחות.`,
+    deleting:             'מוחק...',
     noDocuments:          'לא הועלו מסמכים עדיין.',
     docDeleteErr:         'שגיאה במחיקת המסמך.',
     loadDocsErr:          'שגיאה בטעינת המסמכים.',
@@ -144,6 +148,9 @@ const i18n = {
     docDate:              'Upload Date',
     docSize:              'Size',
     deleteDoc:            'Delete',
+    deleteDocTitle:       'Delete document',
+    deleteDocBody:        (name: string) => `Delete "${name}"? This can't be undone and removes it from all chats.`,
+    deleting:             'Deleting…',
     noDocuments:          'No documents uploaded yet.',
     docDeleteErr:         'Error deleting document.',
     loadDocsErr:          'Error loading documents.',
@@ -311,6 +318,8 @@ export function ProfilePageInner() {
   const dir = he ? 'rtl' : 'ltr';
   const t   = i18n[lang];
 
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+
   const [activeTab, setActiveTab] = useState<'profile' | 'documents'>(() => {
     if (searchParams.get('tab') === 'documents') return 'documents';
     if (pathname === '/workspace/documents') return 'documents';
@@ -369,6 +378,7 @@ export function ProfilePageInner() {
   const [loadingDocs,   setLoadingDocs]   = useState(false);
   const [docsLoaded,    setDocsLoaded]    = useState(false);
   const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
+  const [docToDelete,   setDocToDelete]   = useState<ProfileDoc | null>(null);
   const [docErr,        setDocErr]        = useState('');
 
   // ── Language sync ──────────────────────────────────────────────────────────
@@ -532,7 +542,7 @@ export function ProfilePageInner() {
       setDocuments(prev => prev.filter(d => d.file_id !== fileId));
       setDocumentCount(prev => Math.max(0, prev - 1));
     } catch { setDocErr(i18n.he.docDeleteErr); }
-    finally { setDeletingDocId(null); }
+    finally { setDeletingDocId(null); setDocToDelete(null); }
   };
 
   // ── Derived display values ─────────────────────────────────────────────────
@@ -1040,6 +1050,7 @@ export function ProfilePageInner() {
 
                     {planType === 'basic' && (
                       <button
+                        onClick={() => setShowUpgradeModal(true)}
                         className="w-full py-2.5 rounded-xl text-white text-sm font-bold transition-all active:scale-[0.99]"
                         style={{ background: 'linear-gradient(135deg,#517B3E 0%,#2A3B22 100%)' }}
                       >
@@ -1125,7 +1136,7 @@ export function ProfilePageInner() {
                         </span>
                         {/* Delete */}
                         <button
-                          onClick={() => handleDeleteDoc(doc.file_id)}
+                          onClick={() => setDocToDelete(doc)}
                           disabled={!!deletingDocId}
                           title={t.deleteDoc}
                           className="w-8 h-8 rounded-lg flex items-center justify-center transition-all shrink-0"
@@ -1159,6 +1170,74 @@ export function ProfilePageInner() {
           </>)}
         </div>
       </div>
+
+      {/* Delete-document confirmation */}
+      {docToDelete && (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center p-4 animate-slide-up-fade"
+          style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(8px)' }}
+          onClick={e => { if (e.target === e.currentTarget && !deletingDocId) setDocToDelete(null); }}
+        >
+          <div
+            dir={dir}
+            className="w-full max-w-sm rounded-3xl overflow-hidden"
+            style={{
+              background: 'rgba(255,255,255,0.98)',
+              backdropFilter: 'blur(20px)',
+              border: '1px solid rgba(220,38,38,0.18)',
+              boxShadow: '0 20px 60px rgba(30,10,10,0.22), 0 4px 16px rgba(220,38,38,0.08)',
+            }}
+          >
+            <div
+              className="flex items-center gap-3 px-5 py-4"
+              style={{ background: 'rgba(220,38,38,0.04)', borderBottom: '1px solid rgba(220,38,38,0.12)' }}
+            >
+              <div
+                className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0"
+                style={{ background: 'rgba(220,38,38,0.10)', border: '1px solid rgba(220,38,38,0.2)' }}
+              >
+                <svg className="w-5 h-5 text-[#dc2626]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round"
+                    d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                </svg>
+              </div>
+              <h2 className="text-base font-bold text-[#1a2e14]">{t.deleteDocTitle}</h2>
+            </div>
+
+            <div className="px-5 py-5">
+              <p className="text-sm text-[#4a5e3a] leading-relaxed">
+                {t.deleteDocBody(docToDelete.filename)}
+              </p>
+            </div>
+
+            <div className="flex gap-2 px-4 pb-4">
+              <button
+                onClick={() => setDocToDelete(null)}
+                disabled={!!deletingDocId}
+                className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold border transition-all disabled:opacity-50"
+                style={{ color: '#7a9268', borderColor: 'rgba(157,192,139,0.45)', background: 'transparent' }}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(81,123,62,0.06)'; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
+              >
+                {t.cancel}
+              </button>
+              <button
+                onClick={() => handleDeleteDoc(docToDelete.file_id)}
+                disabled={!!deletingDocId}
+                className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 text-white disabled:opacity-70"
+                style={{ background: '#dc2626', boxShadow: '0 4px 14px rgba(220,38,38,0.30)' }}
+              >
+                {deletingDocId ? t.deleting : t.deleteDoc}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Upgrade-to-Pro modal */}
+      {showUpgradeModal && (
+        <UpgradeModal lang={lang} onClose={() => setShowUpgradeModal(false)} />
+      )}
     </div>
   );
 }

@@ -256,11 +256,7 @@ function LogoMark() {
 export default function OnboardingPage() {
   const router = useRouter();
 
-  // Step state — gender screen is bypassed; 'profile' is the entry point
-  const [step, setStep] = useState<'gender' | 'profile'>('profile');
-
   // Field values
-  const [gender,         setGender]         = useState('');
   const [country,        setCountry]        = useState('');
   const [institution,    setInstitution]    = useState('');
   const [degreeType,     setDegreeType]     = useState('regular');
@@ -388,7 +384,6 @@ export default function OnboardingPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          gender,
           country,
           institution,
           degree_type:     degreeType,
@@ -401,7 +396,6 @@ export default function OnboardingPage() {
         setError((d as { error?: string }).error ?? 'שגיאה בשמירת הנתונים');
         return;
       }
-      localStorage.setItem('levy_ai_gender',           gender);
       localStorage.setItem('levy_ai_country',          country);
       localStorage.setItem('levy_ai_institution',      institution);
       localStorage.setItem('levy_ai_degree_type',      degreeType);
@@ -431,180 +425,6 @@ export default function OnboardingPage() {
         <div className="absolute" style={{ bottom: '0%', right: '5%', width: '30%', height: '40%', background: 'radial-gradient(ellipse at 60% 70%, #1e2a45 0%, #263354 60%, transparent 85%)', borderRadius: '70% 30% 30% 70% / 30% 70% 30% 70%', opacity: 0.8 }} />
       </div>
 
-      {/* ── Gender Step — floats directly on the matcha-green page background, no glass card ── */}
-      {step === 'gender' && (
-        <div className="relative z-10 w-full animate-slide-up-fade" style={{ maxWidth: 480 }}>
-          {/* Logo */}
-          <div className="flex justify-center mb-8">
-            <LogoMark />
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0 8px' }}>
-            {/* Welcome heading — dark text readable on the warm beige/green background */}
-            <h1 style={{ fontSize: '1.625rem', fontWeight: 800, color: '#1e2a45', textAlign: 'center', marginBottom: 6, fontFamily: 'Georgia, serif' }}>
-              ברוך הבא ל-U-Note!
-            </h1>
-            <p style={{ fontSize: '0.875rem', color: '#5a6a5a', textAlign: 'center', marginBottom: 36, lineHeight: 1.6 }}>
-              ספר לנו קצת על עצמך כדי שנוכל להתאים את החוויה
-            </p>
-
-            {/* Section label */}
-            <p style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#374151', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 28 }}>
-              בחר מגדר
-            </p>
-
-            {/* Male + Female avatar circles — floating directly on background, zero card behind them */}
-            <div style={{ display: 'flex', justifyContent: 'center', gap: 52, marginBottom: 32 }}>
-              {([
-                { value: 'זכר',  img: '/assets/avatars/IMG_1.PNG', desc: 'גבר'  },
-                { value: 'נקבה', img: '/assets/avatars/IMG_2.PNG', desc: 'אישה' },
-              ] as { value: string; img: string; desc: string }[]).map(opt => {
-                const sel = gender === opt.value;
-                return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => setGender(opt.value)}
-                    className="group flex flex-col items-center bg-transparent border-none outline-none cursor-pointer appearance-none p-0 m-0"
-                    style={{ gap: 16 }}
-                  >
-                    {/* rounded-full + overflow-hidden = primary circular clip.
-                        img is scaled to 150% (228 px) so the PNG's solid-white
-                        border (outside the colored circle) lies outside the 76 px
-                        clip radius. clip-path adds a second cut on the raw pixels. */}
-                    <div
-                      className="relative rounded-full overflow-hidden transition-all duration-300 group-hover:scale-105 group-active:scale-95"
-                      style={{
-                        width: 152,
-                        height: 152,
-                        flexShrink: 0,
-                        backgroundColor: 'transparent',
-                        border: 'none',
-                        outline: 'none',
-                        boxShadow: sel
-                          ? '0 0 0 2px #e8e4d9, 0 0 0 6px #517B3E, 0 8px 24px rgba(81,123,62,0.25)'
-                          : 'none',
-                      }}
-                    >
-                      <img
-                        src={opt.img}
-                        alt={opt.value}
-                        style={{
-                          width: '150%',
-                          height: '150%',
-                          objectFit: 'cover',
-                          display: 'block',
-                          marginLeft: '-25%',
-                          marginTop: '-25%',
-                          clipPath: 'circle(50% at 50% 50%)',
-                        }}
-                      />
-                    </div>
-
-                    {/* Name label */}
-                    <p style={{
-                      fontSize: '1.0625rem',
-                      fontWeight: 700,
-                      color: sel ? '#517B3E' : '#1e2a45',
-                      margin: 0,
-                      transition: 'color 0.2s',
-                    }}>
-                      {opt.value}
-                    </p>
-
-                    {/* Radio dot + description — only border/colour change on select */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: -8 }}>
-                      <span style={{
-                        width: 17,
-                        height: 17,
-                        borderRadius: '50%',
-                        border: sel ? '5px solid #517B3E' : '2px solid rgba(100,120,100,0.4)',
-                        background: 'rgba(255,255,255,0.85)',
-                        flexShrink: 0,
-                        transition: 'border 0.2s',
-                        display: 'inline-block',
-                      }} />
-                      <span style={{ fontSize: '0.8125rem', color: sel ? '#517B3E' : '#8a9a8a', fontWeight: 500 }}>
-                        {opt.desc}
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* "אחר" pill — subtle, no card */}
-            <button
-              type="button"
-              onClick={() => setGender('אחר')}
-              style={{
-                padding: '8px 32px',
-                borderRadius: 24,
-                border: gender === 'אחר' ? '1.5px solid #517B3E' : '1.5px solid rgba(90,106,90,0.35)',
-                background: gender === 'אחר' ? 'rgba(81,123,62,0.10)' : 'transparent',
-                color: gender === 'אחר' ? '#517B3E' : '#7a8a7a',
-                fontSize: '0.875rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                transition: 'all 0.18s',
-                marginBottom: 44,
-              }}
-            >
-              אחר
-            </button>
-
-            {/* חזור / המשך buttons */}
-            <div style={{ display: 'flex', gap: 12, width: '100%' }}>
-              <button
-                type="button"
-                onClick={() => router.push('/')}
-                style={{
-                  flex: 1,
-                  padding: '13px 0',
-                  borderRadius: 12,
-                  border: '1.5px solid rgba(90,106,90,0.4)',
-                  background: 'rgba(255,255,255,0.45)',
-                  backdropFilter: 'blur(8px)',
-                  color: '#374151',
-                  fontSize: '0.9375rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  transition: 'all 0.15s',
-                }}
-              >
-                חזור
-              </button>
-              <button
-                type="button"
-                onClick={() => setStep('profile')}
-                style={{
-                  flex: 2,
-                  padding: '13px 0',
-                  borderRadius: 12,
-                  border: 'none',
-                  background: '#517B3E',
-                  color: 'white',
-                  fontSize: '0.9375rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  boxShadow: '0 4px 18px rgba(81,123,62,0.42)',
-                  transition: 'background 0.15s, box-shadow 0.15s',
-                }}
-              >
-                המשך
-              </button>
-            </div>
-          </div>
-
-          {/* Footer note */}
-          <p className="text-center mt-6 text-xs" style={{ color: 'rgba(30,42,69,0.45)' }}>
-            ניתן לעדכן פרטים אלה בכל עת דרך הגדרות הפרופיל
-          </p>
-        </div>
-      )}
-
-      {/* ── Profile Step — inside the glass card ── */}
-      {step === 'profile' && (
       <div className="relative z-10 w-full animate-slide-up-fade" style={{ maxWidth: 480 }}>
         {/* Logo */}
         <div className="flex justify-center mb-6">
@@ -942,11 +762,10 @@ export default function OnboardingPage() {
         </div> {/* glass card */}
 
         {/* Footer note */}
-        <p className="text-center mt-5 text-xs" style={{ color: 'rgba(255,255,255,0.55)' }}>
+        <p className="text-center mt-5 text-xs" style={{ color: 'rgba(30,42,69,0.45)' }}>
           ניתן לעדכן פרטים אלה בכל עת דרך הגדרות הפרופיל
         </p>
       </div>
-      )}
 
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }

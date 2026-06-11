@@ -1370,7 +1370,8 @@ export default function ProfessorSimulatorPage() {
               )}
 
               {chatErr && (
-                <div className="flex items-center gap-2 bg-red-950/40 border border-red-500/25 text-red-400 rounded-xl px-4 py-3 text-xs">
+                <div className="flex items-center gap-2 rounded-xl px-4 py-3 text-xs"
+                  style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#dc2626' }}>
                   <span>⚠️</span>{chatErr}
                 </div>
               )}
