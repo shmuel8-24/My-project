@@ -51,34 +51,48 @@ _SLIDE_SYSTEM_PROMPT = (
 # {title, layout, content} slides for SlideViewer, not {title, content,
 # layoutType, imageQuery} slides for SlideRenderer.
 # ---------------------------------------------------------------------------
-DECK_LAYOUTS = {"title", "bullets", "metric"}
+DECK_LAYOUTS = {"title", "bullets", "metric", "split-screen"}
 
 _DECK_SYSTEM_PROMPT = (
     "You are an automated presentation-deck generation engine used inside a "
     "professional slide-authoring tool. Your sole function is to transform "
     "aggregated source material into a structured slide deck in the style of "
     "a top-tier management consulting firm (McKinsey/BCG): crisp, data-driven, "
-    "one idea per slide.\n\n"
+    "one idea per slide, with a strong narrative line from cover to close.\n\n"
     "Respond ONLY by calling the build_presentation tool with the complete deck.\n\n"
     "Required schema per slide:\n"
-    '{"title":"...","layout":"title"|"bullets"|"metric","content":[...]|"..."|123}\n\n'
+    '{"title":"...","layout":"title"|"bullets"|"metric"|"split-screen","content":[...]|"..."|123}\n\n'
     "Rules:\n"
     "1. Output exactly 10 slide objects, in presentation order.\n"
-    "2. \"layout\" must be exactly one of: \"title\", \"bullets\", \"metric\".\n"
+    "2. \"layout\" must be exactly one of: \"title\", \"bullets\", \"metric\", \"split-screen\".\n"
     "3. Slide 1 MUST use layout \"title\": \"title\" is the presentation title, "
     "\"content\" is a one-line subtitle/tagline string.\n"
     "4. The LAST slide MUST also use layout \"title\" as a closing/summary slide "
     "(\"title\" e.g. a Hebrew/English word for 'Summary' or 'Thank you', "
     "\"content\" is a one-line closing takeaway string).\n"
-    "5. Use \"metric\" for at least 1 and at most 3 slides where the source "
-    "material contains a striking number, percentage, or statistic: \"title\" is "
-    "a short label/headline, \"content\" is ONLY the metric itself "
-    "(e.g. \"85%\", \"x3\", \"2.4M\", or a bare number) — no extra words.\n"
-    "6. Use \"bullets\" for the remaining slides: \"title\" is the slide headline, "
-    "\"content\" is an array of 3-5 short bullet strings, each concise (max ~12 words).\n"
-    "7. Write all titles/content in the same language as the source text "
+    "5. ACTION TITLES: For every slide EXCEPT the first and last (\"title\") "
+    "slides, \"title\" MUST be a full-sentence action title that states the "
+    "slide's core takeaway or finding — never a static topic label. Write "
+    "'Market share grew by 15% due to aggressive regulation', not "
+    "'Market Overview'. Every body-slide title must report a conclusion drawn "
+    "from the source material, not just name a subject.\n"
+    "6. LAYOUT DIVERSITY: Across slides 2-9, use a varied mix of \"bullets\", "
+    "\"metric\", and \"split-screen\" — do not repeat the same layout more than "
+    "2-3 times in a row, and do not produce a deck that is almost entirely one "
+    "layout.\n"
+    "7. Use \"metric\" for at least 1 and at most 3 slides where the source "
+    "material contains a striking number, percentage, or statistic: \"content\" "
+    "is ONLY the metric itself (e.g. \"85%\", \"x3\", \"2.4M\", or a bare number) "
+    "— no extra words; the action-title \"title\" carries the takeaway.\n"
+    "8. Use \"bullets\" for slides presenting 3-5 distinct points: \"content\" "
+    "is an array of 3-5 short bullet strings, each concise (max ~12 words).\n"
+    "9. Use \"split-screen\" for slides that pair a short list of points with a "
+    "supporting visual: \"content\" is an array of 3-5 short bullet strings (max "
+    "~12 words each); the visual side is rendered by the slide template, not by "
+    "you.\n"
+    "10. Write all titles/content in the same language as the source text "
     "(Hebrew for Hebrew source material).\n"
-    "8. Base all factual content strictly on the provided source material — "
+    "11. Base all factual content strictly on the provided source material — "
     "do not invent statistics that aren't grounded in the text; if no real "
     "metric exists, use fewer \"metric\" slides (but at least 1)."
 )
@@ -109,14 +123,15 @@ BUILD_PRESENTATION_TOOL = {
                             "layout": {
                                 "type": "string",
                                 "enum": sorted(DECK_LAYOUTS),
-                                "description": "Slide layout: 'title' (cover/closing), 'bullets' (bullet list), or 'metric' (single big number/stat).",
+                                "description": "Slide layout: 'title' (cover/closing), 'bullets' (bullet list), 'metric' (single big number/stat), or 'split-screen' (bullet list paired with a visual placeholder).",
                             },
                             "content": {
                                 "description": (
-                                    "Slide body. For layout 'bullets': an array of "
-                                    "3-5 short bullet strings. For 'title': a "
-                                    "one-line subtitle string. For 'metric': the "
-                                    "bare metric as a string or number (e.g. \"85%\")."
+                                    "Slide body. For layout 'bullets' or "
+                                    "'split-screen': an array of 3-5 short bullet "
+                                    "strings. For 'title': a one-line subtitle "
+                                    "string. For 'metric': the bare metric as a "
+                                    "string or number (e.g. \"85%\")."
                                 ),
                                 "anyOf": [
                                     {"type": "array", "items": {"type": "string"}},
@@ -206,10 +221,11 @@ def generate_slide_deck(
 def _validate_deck_slides(slides_obj: dict) -> list[dict]:
     """Filter+normalize a raw {"slides": [...]} dict into validated deck slides.
 
-    Each returned slide is {"title": str, "layout": "title"|"bullets"|"metric",
-    "content": list[str] | str}. "content" is normalized per layout: "bullets"
-    always becomes a non-empty list[str]; "title"/"metric" always become a
-    non-empty str (joining array content with spaces if the model returned one).
+    Each returned slide is {"title": str, "layout": "title"|"bullets"|"metric"|
+    "split-screen", "content": list[str] | str}. "content" is normalized per
+    layout: "bullets"/"split-screen" always become a non-empty list[str];
+    "title"/"metric" always become a non-empty str (joining array content with
+    spaces if the model returned one).
     """
     valid: list[dict] = []
     for s in slides_obj.get("slides", []):
@@ -219,7 +235,7 @@ def _validate_deck_slides(slides_obj: dict) -> list[dict]:
         if not (isinstance(title, str) and title.strip() and layout in DECK_LAYOUTS):
             continue
 
-        if layout == "bullets":
+        if layout in ("bullets", "split-screen"):
             if isinstance(content, list):
                 bullets = [str(b).strip() for b in content if str(b).strip()]
             elif isinstance(content, str):
@@ -251,8 +267,8 @@ def generate_deck_via_agent(
     parse_document / transcribe_media / analyze_image have produced the
     aggregated `context`. Uses real OpenAI function-calling — the model's
     response is a tool_call whose arguments are the {"slides": [...]} payload,
-    with each slide shaped {"title", "layout": "title"|"bullets"|"metric",
-    "content": list[str] | str | number}.
+    with each slide shaped {"title", "layout": "title"|"bullets"|"metric"|
+    "split-screen", "content": list[str] | str | number}.
 
     Returns (slides, error_message). On success error_message is None and
     slides is a non-empty list of validated {title, layout, content} dicts.
