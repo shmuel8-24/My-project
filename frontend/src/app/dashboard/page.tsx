@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { Settings as IconSettings } from 'lucide-react';
+import { Settings as IconSettings, Home, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, LogOut } from 'lucide-react';
 import { useAuth }     from '../providers/auth';
 import { useLanguage } from '../providers/language';
 import { useCourse, COURSES, type Course } from '../providers/course';
@@ -204,27 +204,27 @@ function DashboardSidebar({ isOpen, onClose, isAdmin, lang, userFirstName, userL
               className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold"
               style={{ backgroundColor: '#D1E6D9', color: '#183025', boxShadow: '0 2px 4px rgba(28,51,41,0.06)' }}
             >
-              <span className="text-base leading-none shrink-0">🏠</span>{he ? 'בית' : 'Home'}
+              <Home className="w-4 h-4 shrink-0" />{he ? 'בית' : 'Home'}
             </button>
             <button onClick={() => { router.push('/workspace'); onClose(); }}
               className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-[#527061] transition-all duration-150 hover:bg-[#EEF5F0] hover:text-[#1C3329]">
-              <span className="text-base leading-none shrink-0">🌱</span>{he ? 'מרחב לימוד' : 'StudyLab'}
+              <BookOpen className="w-4 h-4 shrink-0" />{he ? 'מרחב לימוד' : 'StudyLab'}
             </button>
             <button onClick={() => { router.push('/academic-writing'); onClose(); }}
               className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-[#527061] transition-all duration-150 hover:bg-[#EEF5F0] hover:text-[#1C3329]">
-              <span className="text-base leading-none shrink-0">✍️</span>{he ? 'כתיבה אקדמית' : 'Academic Writing'}
+              <PenTool className="w-4 h-4 shrink-0" />{he ? 'כתיבה אקדמית' : 'Academic Writing'}
             </button>
             <button onClick={() => { router.push('/presentation-generator'); onClose(); }}
               className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-[#527061] transition-all duration-150 hover:bg-[#EEF5F0] hover:text-[#1C3329]">
-              <span className="text-base leading-none shrink-0">🎬</span>{he ? 'יצירת מצגת' : 'Create Presentation'}
+              <PresentationIcon className="w-4 h-4 shrink-0" />{he ? 'יצירת מצגת' : 'Create Presentation'}
             </button>
             <button onClick={() => { router.push('/workspace/professor-simulator'); onClose(); }}
               className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-[#527061] transition-all duration-150 hover:bg-[#EEF5F0] hover:text-[#1C3329]">
-              <span className="text-base leading-none shrink-0">🧠</span>{he ? 'הראש של המרצה' : "Professor's Brain"}
+              <Brain className="w-4 h-4 shrink-0" />{he ? 'הראש של המרצה' : "Professor's Brain"}
             </button>
             <button onClick={() => { router.push('/mastery'); onClose(); }}
               className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-[#527061] transition-all duration-150 hover:bg-[#EEF5F0] hover:text-[#1C3329]">
-              <span className="text-base leading-none shrink-0">🎯</span>{he ? 'שליטה בחומר' : 'Mastery'}
+              <Target className="w-4 h-4 shrink-0" />{he ? 'שליטה בחומר' : 'Mastery'}
             </button>
             <button onClick={() => { router.push('/settings'); onClose(); }}
               className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-[#527061] transition-all duration-150 hover:bg-[#EEF5F0] hover:text-[#1C3329]">
@@ -269,12 +269,12 @@ function DashboardSidebar({ isOpen, onClose, isAdmin, lang, userFirstName, userL
               <div className="absolute bottom-full left-0 mb-2 w-full bg-white rounded-xl shadow-xl border border-gray-100 p-2 z-50">
                 <button onClick={() => { setIsProfileMenuOpen(false); router.push('/settings'); onClose(); }}
                   className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 text-gray-700 text-sm transition-colors">
-                  <span aria-hidden="true">⚙️</span>
+                  <IconSettings className="w-4 h-4" aria-hidden="true" />
                   <span>{he ? 'הגדרות חשבון' : 'Account Settings'}</span>
                 </button>
                 <button onClick={() => { setIsProfileMenuOpen(false); onClose(); onRequestLogout(); }}
                   className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-red-50 text-red-600 text-sm transition-colors">
-                  <span aria-hidden="true">🚪</span>
+                  <LogOut className="w-4 h-4" aria-hidden="true" />
                   <span>{he ? 'התנתק' : 'Logout'}</span>
                 </button>
               </div>

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import { Settings as IconSettings, Home, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, Monitor, LogOut } from 'lucide-react';
 import { useAuth }     from '../providers/auth';
 import { useLanguage } from '../providers/language';
 import { useCourse }   from '../providers/course';
@@ -305,38 +306,38 @@ function SettingsSidebar({
 
             <button onClick={() => { router.push('/dashboard'); onClose(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
-              <span className="text-base leading-none shrink-0">🏠</span>
+              <Home className="w-4 h-4 shrink-0" />
               {he ? 'בית' : 'Home'}
             </button>
 
             <button onClick={() => { router.push('/workspace'); onClose(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
-              <span className="text-base leading-none shrink-0">🌱</span>
+              <BookOpen className="w-4 h-4 shrink-0" />
               {he ? 'מרחב לימוד' : 'StudyLab'}
             </button>
 
             <button onClick={() => { router.push('/academic-writing'); onClose(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
-              <span className="text-base leading-none shrink-0">✍️</span>
+              <PenTool className="w-4 h-4 shrink-0" />
               {he ? 'כתיבה אקדמית' : 'Academic Writing'}
             </button>
 
             <button onClick={() => { router.push('/presentation-generator'); onClose(); }}
               className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${pathname.startsWith('/presentation') ? 'border' : 'hover:bg-[#517B3E]/10 text-[#2d3b25]'}`}
               style={pathname.startsWith('/presentation') ? { backgroundColor: 'rgba(81,123,62,0.12)', borderColor: 'rgba(81,123,62,0.3)', color: '#517B3E', fontWeight: 600 } : undefined}>
-              <span className="text-base leading-none shrink-0">🎬</span>
+              <PresentationIcon className="w-4 h-4 shrink-0" />
               {he ? 'יצירת מצגת' : 'Create Presentation'}
             </button>
 
             <button onClick={() => { router.push('/workspace/professor-simulator'); onClose(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
-              <span className="text-base leading-none shrink-0">🧠</span>
+              <Brain className="w-4 h-4 shrink-0" />
               {he ? 'הראש של המרצה' : "Professor's Brain"}
             </button>
 
             <button onClick={() => { router.push('/mastery'); onClose(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
-              <span className="text-base leading-none shrink-0">🎯</span>
+              <Target className="w-4 h-4 shrink-0" />
               {he ? 'שליטה בחומר' : 'Mastery'}
             </button>
 
@@ -345,7 +346,7 @@ function SettingsSidebar({
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm border"
               style={{ backgroundColor: 'rgba(81,123,62,0.12)', borderColor: 'rgba(81,123,62,0.3)', color: '#517B3E', fontWeight: 600 }}
             >
-              <span className="text-base leading-none shrink-0">⚙️</span>
+              <IconSettings className="w-4 h-4 shrink-0" />
               {he ? 'הגדרות' : 'Settings'}
             </button>
 
@@ -369,7 +370,7 @@ function SettingsSidebar({
               <button onClick={() => { router.push('/dashboard'); onClose(); }}
                 className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${pathname === '/dashboard' ? 'border' : 'hover:bg-[#517B3E]/10 text-[#2d3b25]'}`}
                 style={pathname === '/dashboard' ? { backgroundColor: 'rgba(81,123,62,0.12)', borderColor: 'rgba(81,123,62,0.3)', color: '#517B3E', fontWeight: 600 } : undefined}>
-                <span className="text-base leading-none shrink-0">🖥️</span>
+                <Monitor className="w-4 h-4 shrink-0" />
                 Platform
               </button>
               <button onClick={() => { router.push('/admin'); onClose(); }}
@@ -402,7 +403,7 @@ function SettingsSidebar({
               <div className="absolute bottom-full left-0 mb-2 w-full bg-white rounded-xl shadow-xl border border-gray-100 p-2 z-50">
                 <button onClick={() => { setIsProfileMenuOpen(false); onClose(); onRequestLogout(); }}
                   className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-red-50 text-red-600 text-sm transition-colors">
-                  <span aria-hidden="true">🚪</span>
+                  <LogOut className="w-4 h-4" aria-hidden="true" />
                   <span>{he ? 'התנתק' : 'Logout'}</span>
                 </button>
               </div>

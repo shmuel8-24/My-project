@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import { Settings as IconSettings, Home, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, Monitor, GraduationCap, LogOut } from 'lucide-react';
 import { useLanguage } from '../providers/language';
 import { useCourse }   from '../providers/course';
 import CoursePill      from '../../components/CoursePill';
@@ -191,43 +192,43 @@ function AdminSidebar({
 
             <button onClick={() => { router.push('/dashboard'); onClose(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
-              <span className="text-base leading-none shrink-0">🏠</span>
+              <Home className="w-4 h-4 shrink-0" />
               {he ? 'בית' : 'Home'}
             </button>
 
             <button onClick={() => { router.push('/workspace'); onClose(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
-              <span className="text-base leading-none shrink-0">🌱</span>
+              <BookOpen className="w-4 h-4 shrink-0" />
               {he ? 'מרחב לימוד' : 'StudyLab'}
             </button>
 
             <button onClick={() => { router.push('/academic-writing'); onClose(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
-              <span className="text-base leading-none shrink-0">✍️</span>
+              <PenTool className="w-4 h-4 shrink-0" />
               {he ? 'כתיבה אקדמית' : 'Academic Writing'}
             </button>
 
             <button onClick={() => { router.push('/presentation-generator'); onClose(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
-              <span className="text-base leading-none shrink-0">🎬</span>
+              <PresentationIcon className="w-4 h-4 shrink-0" />
               {he ? 'יצירת מצגת' : 'Create Presentation'}
             </button>
 
             <button onClick={() => { router.push('/workspace/professor-simulator'); onClose(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
-              <span className="text-base leading-none shrink-0">🧠</span>
+              <Brain className="w-4 h-4 shrink-0" />
               {he ? 'הראש של המרצה' : "Professor's Brain"}
             </button>
 
             <button onClick={() => { router.push('/mastery'); onClose(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
-              <span className="text-base leading-none shrink-0">🎯</span>
+              <Target className="w-4 h-4 shrink-0" />
               {he ? 'שליטה בחומר' : 'Mastery'}
             </button>
 
             <button onClick={() => { router.push('/settings'); onClose(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
-              <span className="text-base leading-none shrink-0">⚙️</span>
+              <IconSettings className="w-4 h-4 shrink-0" />
               {he ? 'הגדרות' : 'Settings'}
             </button>
 
@@ -250,7 +251,7 @@ function AdminSidebar({
 
             <button onClick={() => { router.push('/dashboard'); onClose(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors hover:bg-[#517B3E]/10 text-[#2d3b25]">
-              <span className="text-base leading-none shrink-0">🖥️</span>
+              <Monitor className="w-4 h-4 shrink-0" />
               Platform
             </button>
 
@@ -270,7 +271,7 @@ function AdminSidebar({
 
             <button disabled
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[#7a9268] text-sm cursor-not-allowed opacity-50">
-              <span className="text-base leading-none shrink-0">📚</span>
+              <GraduationCap className="w-4 h-4 shrink-0" />
               Course Assignments
               <span className="ms-auto text-[10px] bg-[#517B3E]/15 text-[#517B3E] px-1.5 py-0.5 rounded-full font-medium">Soon</span>
             </button>
@@ -297,12 +298,12 @@ function AdminSidebar({
               <div className="absolute bottom-full left-0 mb-2 w-full bg-white rounded-xl shadow-xl border border-gray-100 p-2 z-50">
                 <button onClick={() => { setIsProfileMenuOpen(false); router.push('/settings'); onClose(); }}
                   className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 text-gray-700 text-sm transition-colors">
-                  <span aria-hidden="true">⚙️</span>
+                  <IconSettings className="w-4 h-4" aria-hidden="true" />
                   <span>{he ? 'הגדרות חשבון' : 'Account Settings'}</span>
                 </button>
                 <button onClick={() => { setIsProfileMenuOpen(false); onClose(); onRequestLogout(); }}
                   className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-red-50 text-red-600 text-sm transition-colors">
-                  <span aria-hidden="true">🚪</span>
+                  <LogOut className="w-4 h-4" aria-hidden="true" />
                   <span>{he ? 'התנתק' : 'Logout'}</span>
                 </button>
               </div>

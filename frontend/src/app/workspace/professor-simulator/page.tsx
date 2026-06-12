@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { Settings as IconSettings, CheckCircle2, X as IconX } from 'lucide-react';
+import { Settings as IconSettings, CheckCircle2, X as IconX, Home, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, Monitor, LogOut, GraduationCap } from 'lucide-react';
 import { useAuth }     from '../../providers/auth';
 import { useLanguage } from '../../providers/language';
 import { useCourse }   from '../../providers/course';
@@ -278,26 +278,26 @@ function ProfSimSidebar({ isOpen, onClose, isAdmin, lang, userFirstName, userLas
 
             <button onClick={() => { router.push('/dashboard'); onClose(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
-              <span className="text-base leading-none shrink-0">🏠</span>
+              <Home className="w-4 h-4 shrink-0" />
               {lang === 'he' ? 'בית' : 'Home'}
             </button>
 
             <button onClick={() => { router.push('/workspace'); onClose(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
-              <span className="text-base leading-none shrink-0">🌱</span>
+              <BookOpen className="w-4 h-4 shrink-0" />
               {he ? 'מרחב לימוד' : 'StudyLab'}
             </button>
 
             <button onClick={() => { router.push('/academic-writing'); onClose(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
-              <span className="text-base leading-none shrink-0">✍️</span>
+              <PenTool className="w-4 h-4 shrink-0" />
               {he ? 'כתיבה אקדמית' : 'Academic Writing'}
             </button>
 
             <button onClick={() => { router.push('/presentation-generator'); onClose(); }}
               className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${pathname.startsWith('/presentation') ? 'border' : 'hover:bg-[#517B3E]/10 text-[#2d3b25]'}`}
               style={pathname.startsWith('/presentation') ? { backgroundColor: 'rgba(81,123,62,0.12)', borderColor: 'rgba(81,123,62,0.3)', color: '#517B3E', fontWeight: 600 } : undefined}>
-              <span className="text-base leading-none shrink-0">🎬</span>
+              <PresentationIcon className="w-4 h-4 shrink-0" />
               {he ? 'יצירת מצגת' : 'Create Presentation'}
             </button>
 
@@ -322,12 +322,12 @@ function ProfSimSidebar({ isOpen, onClose, isAdmin, lang, userFirstName, userLas
               {/* Brain icon — pulsing ring glow while AI is processing */}
               <span
                 className={[
-                  'text-base leading-none shrink-0 rounded-full transition-all duration-300',
+                  'flex items-center justify-center shrink-0 rounded-full transition-all duration-300',
                   isProcessing ? 'animate-brain-ring' : '',
                 ].join(' ')}
                 style={isProcessing ? { backgroundColor: 'rgba(81,123,62,0.12)' } : undefined}
               >
-                🧠
+                <Brain className="w-4 h-4" />
               </span>
               {lang === 'he' ? 'הראש של המרצה' : "Professor's Brain"}
 
@@ -347,7 +347,7 @@ function ProfSimSidebar({ isOpen, onClose, isAdmin, lang, userFirstName, userLas
 
             <button onClick={() => { router.push('/mastery'); onClose(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
-              <span className="text-base leading-none shrink-0">🎯</span>
+              <Target className="w-4 h-4 shrink-0" />
               {lang === 'he' ? 'שליטה בחומר' : 'Mastery'}
             </button>
 
@@ -385,7 +385,7 @@ function ProfSimSidebar({ isOpen, onClose, isAdmin, lang, userFirstName, userLas
                   ? { backgroundColor: 'rgba(81,123,62,0.12)', borderColor: 'rgba(81,123,62,0.3)', color: '#517B3E', fontWeight: 600 }
                   : undefined}
               >
-                <span className="text-base leading-none shrink-0">🖥️</span>
+                <Monitor className="w-4 h-4 shrink-0" />
                 Platform
               </button>
 
@@ -426,12 +426,12 @@ function ProfSimSidebar({ isOpen, onClose, isAdmin, lang, userFirstName, userLas
               <div className="absolute bottom-full left-0 mb-2 w-full bg-white rounded-xl shadow-xl border border-gray-100 p-2 z-50">
                 <button onClick={() => { setIsProfileMenuOpen(false); router.push('/settings'); onClose(); }}
                   className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 text-gray-700 text-sm transition-colors">
-                  <span aria-hidden="true">⚙️</span>
+                  <IconSettings className="w-4 h-4" aria-hidden="true" />
                   <span>{he ? 'הגדרות חשבון' : 'Account Settings'}</span>
                 </button>
                 <button onClick={() => { setIsProfileMenuOpen(false); onClose(); onRequestLogout(); }}
                   className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-red-50 text-red-600 text-sm transition-colors">
-                  <span aria-hidden="true">🚪</span>
+                  <LogOut className="w-4 h-4" aria-hidden="true" />
                   <span>{he ? 'התנתק' : 'Logout'}</span>
                 </button>
               </div>
@@ -1274,9 +1274,9 @@ export default function ProfessorSimulatorPage() {
               className="flex items-center gap-3 px-5 py-3.5 shrink-0"
               style={{ borderBottom: '1px solid rgba(157,192,139,0.28)' }}
             >
-              <span className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 text-base"
+              <span className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 text-white"
                 style={{ background: 'linear-gradient(135deg,#9DC08B,#517B3E)' }}>
-                🎓
+                <GraduationCap className="w-5 h-5" />
               </span>
               <div>
                 <p className="font-semibold text-[#2A3B22] text-sm">
@@ -1294,10 +1294,10 @@ export default function ProfessorSimulatorPage() {
               {messages.length === 0 && !sending && (
                 <div className="flex flex-col items-center justify-center h-full gap-5 py-10 text-center">
                   <div
-                    className="w-20 h-20 rounded-3xl flex items-center justify-center text-4xl"
+                    className="w-20 h-20 rounded-3xl flex items-center justify-center"
                     style={{ background: 'rgba(81,123,62,0.08)', border: '1px solid rgba(81,123,62,0.15)' }}
                   >
-                    🧠
+                    <Brain className="w-9 h-9" style={{ color: '#517B3E' }} />
                   </div>
                   <div>
                     <p className="font-semibold text-[#2A3B22] text-base">מוכן לסימולציה</p>

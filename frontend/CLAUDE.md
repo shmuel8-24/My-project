@@ -52,6 +52,47 @@ i18n convention — the landing page's copy volume (long blog excerpts, multi-pa
 made an inline approach unwieldy. Don't propagate this dictionary pattern to other pages; it exists
 because of this one page's unusual amount of static prose.
 
+## Auth-related routes not in the root monorepo tree
+
+These pages exist under `src/app/` but aren't listed in the root CLAUDE.md's monorepo layout:
+
+- `login/page.tsx` and `register/page.tsx` — both are 10-line client components that just call
+  `router.replace('/?login=true')` / `router.replace('/?register=true')`. The real login/register
+  UI is the auth modal on the landing page (`page.tsx`); these routes exist only so links to
+  `/login` or `/register` redirect there correctly.
+- `reset-password/page.tsx` (225 lines) — standalone page (not a modal) for the
+  `POST /api/reset-password` flow; reads `?token=` from the URL (sent via the password-reset
+  email — see `services/email.py`).
+- `onboarding/page.tsx` (775 lines) — post-registration form (country/institution/degree/majors
+  with autocomplete dropdowns), guarded by `if (!getToken()) router.replace('/?login=true')`,
+  submits via `POST /api/user/onboarding`, then `router.push('/workspace')`.
+
+## Sidebar/header icon convention — `lucide-react`, never emoji
+
+All "full-nav sidebar" copies (the 9 pages listed in the root CLAUDE.md plus `admin/AdminShell.tsx`)
+use `lucide-react` icons for nav items and profile-menu entries — emoji were fully removed from
+sidebar nav, admin sections, profile menus, and matching page-header "identity" icons. Fixed
+mapping — keep any new full-nav page consistent with this:
+
+| Nav item | Icon | Import alias |
+|---|---|---|
+| Home | `Home` | `HomeIcon` in `workspace/page.tsx` only (collides with its own `function Home()` default export) |
+| StudyLab | `BookOpen` | — |
+| Academic Writing | `PenTool` | — |
+| Create Presentation | `Presentation` | `PresentationIcon` (kept consistently in every "presentation"-named file) |
+| Professor's Brain | `Brain` | — |
+| Mastery | `Target` | — |
+| Settings | `Settings` | `IconSettings` |
+| Admin → Platform | `Monitor` | — |
+| Admin → Course Assignments | `GraduationCap` | — |
+| Profile menu → Logout | `LogOut` | — |
+
+Page-header "identity" icons mirror the nav icon for that page (e.g. Mastery's hero icon and
+Presentation Generator's empty-state icon both use `Target`/`Presentation` respectively, matching
+their own nav entry). All other emoji — quiz feedback (🌟🎉💪✓✗), `WRITING_TYPES`/preference-toggle
+icons, course color icons, file-type icons in `presentation-generator`, and `⚠️` error spans — are
+intentionally untouched: they're content/feature icons, not navigation/header chrome.
+
 ## `AcademicRichEditor.tsx` — Markdown rich-text editor (academic-writing only)
 
 `src/components/AcademicRichEditor.tsx` wraps `@uiw/react-md-editor` with three custom toolbar

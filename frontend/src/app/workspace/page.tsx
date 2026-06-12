@@ -12,7 +12,7 @@ import { useHaptics }                from '../../hooks/useHaptics';
 import { playPop, getSoundEnabled, toggleSound } from '../../utils/audio';
 import type { KeyboardEvent, ChangeEvent } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { Settings as IconSettings } from 'lucide-react';
+import { Settings as IconSettings, Home as HomeIcon, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, Monitor } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import type { FileRejection } from 'react-dropzone';
 import UserProfileModal from './UserProfileModal';
@@ -2268,7 +2268,7 @@ function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDel
               className={['w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all', pathname === '/dashboard' ? 'font-bold' : 'hover:bg-white/5'].join(' ')}
               style={pathname === '/dashboard' ? { backgroundColor: '#D1E6D9', color: '#183025', fontWeight: 700 } : { color: '#1C3329' }}
             >
-              <span className="text-base leading-none shrink-0">🏠</span>
+              <HomeIcon className="w-4 h-4 shrink-0" />
               {t.navHome}
             </button>
             <button
@@ -2276,7 +2276,7 @@ function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDel
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-bold"
               style={{ backgroundColor: '#D1E6D9', color: '#183025' }}
             >
-              <span className="text-base leading-none shrink-0">🌱</span>
+              <BookOpen className="w-4 h-4 shrink-0" />
               {t.navStudyLab}
             </button>
             <button
@@ -2284,7 +2284,7 @@ function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDel
               className={['w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all', pathname === '/academic-writing' ? 'font-bold' : 'hover:bg-white/5'].join(' ')}
               style={pathname === '/academic-writing' ? { backgroundColor: '#D1E6D9', color: '#183025', fontWeight: 700 } : { color: '#1C3329' }}
             >
-              <span className="text-base leading-none shrink-0">✍️</span>
+              <PenTool className="w-4 h-4 shrink-0" />
               {t.tabPaper}
             </button>
             <button
@@ -2292,7 +2292,7 @@ function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDel
               className={['w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all', pathname.startsWith('/presentation') ? 'font-bold' : 'hover:bg-white/5'].join(' ')}
               style={pathname.startsWith('/presentation') ? { backgroundColor: '#D1E6D9', color: '#183025', fontWeight: 700 } : { color: '#1C3329' }}
             >
-              <span className="text-base leading-none shrink-0">🎬</span>
+              <PresentationIcon className="w-4 h-4 shrink-0" />
               {t.navPresentation}
             </button>
             <button
@@ -2300,14 +2300,14 @@ function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDel
               className={['w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all', pathname === '/workspace/professor-simulator' ? 'font-bold' : 'hover:bg-white/5'].join(' ')}
               style={pathname === '/workspace/professor-simulator' ? { backgroundColor: '#D1E6D9', color: '#183025', fontWeight: 700 } : { color: '#1C3329' }}
             >
-              <span className="text-base leading-none shrink-0">🧠</span>
+              <Brain className="w-4 h-4 shrink-0" />
               {t.navProfSim}
             </button>
             <button
               onClick={() => { router.push('/mastery'); onClose(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-[#1C3329]/70 transition-all hover:bg-[#EEF5F0] hover:text-[#1C3329]"
             >
-              <span className="text-base leading-none shrink-0">🎯</span>
+              <Target className="w-4 h-4 shrink-0" />
               {t.navGapFill}
             </button>
             <SidebarDocumentsLink lang={lang} onNavigate={onClose} />
@@ -2376,7 +2376,7 @@ function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDel
                   ? { backgroundColor: 'rgba(81,123,62,0.12)', borderColor: 'rgba(81,123,62,0.3)', color: '#517B3E', fontWeight: 600 }
                   : undefined}
               >
-                <span className="text-base leading-none shrink-0">🖥️</span>
+                <Monitor className="w-4 h-4 shrink-0" />
                 {t.navDashboard}
               </button>
 

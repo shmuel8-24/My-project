@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { Settings as IconSettings, Minus, Plus } from 'lucide-react';
+import { Settings as IconSettings, Minus, Plus, Home, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, LogOut } from 'lucide-react';
 import { useAuth }     from '../providers/auth';
 import { useLanguage } from '../providers/language';
 import { useCourse }   from '../providers/course';
@@ -413,13 +413,13 @@ function Sidebar({ isOpen, onClose, isAdmin, t, lang, userFirstName, userLastNam
           <div className="px-3 py-3 space-y-1 shrink-0" style={{ borderBottom: '1px solid #E8F0EB' }}>
             <p className="text-[10px] font-semibold text-[#527061] uppercase tracking-widest px-2 mb-2">Navigation</p>
             {[
-              { path: '/dashboard',                     emoji: '🏠',  label: t.navHome },
-              { path: '/workspace',                     emoji: '🌱',  label: t.navStudyLab },
-              { path: '/academic-writing',              emoji: '✍️',  label: t.navAcademic },
-              { path: '/presentation-generator',        emoji: '🎬',  label: t.navPresentation },
-              { path: '/workspace/professor-simulator', emoji: '🧠',  label: t.navProfSim },
-              { path: '/mastery',                       emoji: '🎯',  label: t.navGapFill },
-            ].map(({ path, emoji, label }) => (
+              { path: '/dashboard',                     icon: Home,            label: t.navHome },
+              { path: '/workspace',                     icon: BookOpen,        label: t.navStudyLab },
+              { path: '/academic-writing',              icon: PenTool,         label: t.navAcademic },
+              { path: '/presentation-generator',        icon: PresentationIcon, label: t.navPresentation },
+              { path: '/workspace/professor-simulator', icon: Brain,           label: t.navProfSim },
+              { path: '/mastery',                       icon: Target,          label: t.navGapFill },
+            ].map(({ path, icon: Icon, label }) => (
               <button key={path} onClick={() => { router.push(path); onClose(); }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all"
                 style={isActive(path)
@@ -427,7 +427,7 @@ function Sidebar({ isOpen, onClose, isAdmin, t, lang, userFirstName, userLastNam
                   : { color: '#1C3329' }}
                 onMouseEnter={e => { if (!isActive(path)) (e.currentTarget as HTMLButtonElement).style.backgroundColor = '#EEF5F0'; }}
                 onMouseLeave={e => { if (!isActive(path)) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}>
-                <span className="text-base leading-none shrink-0">{emoji}</span>{label}
+                <Icon className="w-4 h-4 shrink-0" />{label}
               </button>
             ))}
             <button onClick={() => { router.push('/settings'); onClose(); }}
@@ -463,12 +463,12 @@ function Sidebar({ isOpen, onClose, isAdmin, t, lang, userFirstName, userLastNam
               <div className="absolute bottom-full left-0 mb-2 w-full bg-white rounded-xl shadow-xl border border-gray-100 p-2 z-50">
                 <button onClick={() => { setIsProfileMenuOpen(false); router.push('/settings'); onClose(); }}
                   className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 text-gray-700 text-sm transition-colors">
-                  <span aria-hidden="true">⚙️</span>
+                  <IconSettings className="w-4 h-4" aria-hidden="true" />
                   <span>{he ? 'הגדרות חשבון' : 'Account Settings'}</span>
                 </button>
                 <button onClick={() => { setIsProfileMenuOpen(false); onClose(); onRequestLogout(); }}
                   className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-red-50 text-red-600 text-sm transition-colors">
-                  <span aria-hidden="true">🚪</span>
+                  <LogOut className="w-4 h-4" aria-hidden="true" />
                   <span>{he ? 'התנתק' : 'Logout'}</span>
                 </button>
               </div>
