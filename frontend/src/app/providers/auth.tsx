@@ -19,7 +19,7 @@
  *   • Token refresh (admin page does that; it calls `updateToken` afterward)
  */
 
-import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 
 /* ── Shared constants ─────────────────────────────────────────────────────── */
 

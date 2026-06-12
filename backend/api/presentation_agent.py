@@ -6,8 +6,9 @@ from flask import Blueprint, jsonify, request
 from werkzeug.utils import secure_filename
 
 from api.middleware import token_required
-from extensions import client, limiter
+from extensions import TOP_K, client, limiter
 from services.pdf import extract_pptx_text
+from services.rag import hybrid_search
 from services.security import strip_html
 from services.slides import BUILD_PRESENTATION_TOOL, generate_deck_via_agent
 
@@ -245,10 +246,21 @@ def generate_presentation(user_id: int):
         "Presentation",
     )
 
-    # Note: files are processed in-memory only and not persisted to the user's
-    # FAISS knowledge base — this is a one-shot deck generation, distinct from
-    # the RAG-based /api/generate-slides flow.
-    valid, error = generate_deck_via_agent(client, deck_topic, context)
+    # Multi-document RAG synthesis: in addition to the freshly-uploaded files
+    # above (in-memory only, never persisted to FAISS), pull the top relevant
+    # chunks from the user's existing FAISS knowledge base — covering ALL of
+    # their previously-indexed course materials — and pass them along as
+    # supplementary context so the deck isn't limited to a single document.
+    rag_chunks, rag_metas = hybrid_search(user_id, deck_topic, TOP_K)
+    rag_context = "\n\n".join(
+        f"[{meta.get('source', '?')}]\n{chunk}"
+        for chunk, meta in zip(rag_chunks, rag_metas)
+    )
+    if rag_context:
+        print(f"[PresentationAgent] u{user_id}: added {len(rag_chunks)} RAG chunk(s) "
+              f"from knowledge base as supplementary context")
+
+    valid, error = generate_deck_via_agent(client, deck_topic, context, rag_context)
     if error:
         print(f"[PresentationAgent] u{user_id}: slide generation error: {error}")
         return jsonify({"error": error}), 500

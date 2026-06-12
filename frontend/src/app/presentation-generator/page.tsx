@@ -574,13 +574,6 @@ export default function PresentationGeneratorPage() {
             <LogoMark size={32} />
           </div>
 
-          <div className="flex-1 flex items-center justify-center gap-2 min-w-0">
-            <span className="text-lg leading-none">🎬</span>
-            <h1 className="text-[#1C3329] font-bold text-base tracking-wide truncate">
-              {he ? 'יצירת מצגת מקבצים' : 'Presentation Generator'}
-            </h1>
-          </div>
-
           <div className="flex items-center gap-2 shrink-0">
             <CoursePill />
             <button

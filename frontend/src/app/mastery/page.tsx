@@ -638,6 +638,13 @@ function MasterySidebar({
               {he ? 'כתיבה אקדמית' : 'Academic Writing'}
             </button>
 
+            <button onClick={() => { router.push('/presentation-generator'); onClose(); }}
+              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${pathname.startsWith('/presentation') ? 'border' : 'hover:bg-[#517B3E]/10 text-[#2d3b25]'}`}
+              style={pathname.startsWith('/presentation') ? { backgroundColor: 'rgba(81,123,62,0.12)', borderColor: 'rgba(81,123,62,0.3)', color: '#517B3E', fontWeight: 600 } : undefined}>
+              <span className="text-base leading-none shrink-0">🎬</span>
+              {he ? 'יצירת מצגת' : 'Create Presentation'}
+            </button>
+
             <button onClick={() => { router.push('/workspace/professor-simulator'); onClose(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
               <span className="text-base leading-none shrink-0">🧠</span>
@@ -1125,13 +1132,6 @@ export default function MasteryPage() {
               </svg>
             </button>
             <LogoMark size={40} />
-          </div>
-
-          <div className="flex-1 flex items-center justify-center gap-2">
-            <span className="text-lg leading-none">🎯</span>
-            <h1 className="text-[#1C3329] font-bold text-base tracking-wide">
-              {he ? 'שליטה בחומר' : 'Mastery'}
-            </h1>
           </div>
 
           <div className="flex items-center gap-2">

@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import AiAccountantChat, { type AiAccountantStats } from './AiAccountantChat';
+import AdminShell from './AdminShell';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../providers/auth';
 
@@ -36,17 +37,6 @@ function authFetch(url: string, init: RequestInit = {}) {
         : {}),
     },
   });
-}
-
-/* ── Logo ────────────────────────────────────────────────────────────────────── */
-function LogoMark({ size = 30 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 40 40" fill="none" aria-hidden="true">
-      <rect width="40" height="40" rx="9" fill="#FDFCF8" />
-      <rect width="40" height="40" rx="9" stroke="rgba(107,144,74,0.35)" strokeWidth="1.5" fill="none" />
-      <path d="M9 7 L9 26 C9 35 31 35 31 26 L31 7 L25 7 L25 26 C25 30 15 30 15 26 L15 7 Z" fill="#6B904A" />
-    </svg>
-  );
 }
 
 /* ── Types ───────────────────────────────────────────────────────────────────── */
@@ -752,10 +742,10 @@ export default function AdminPage() {
 
   if (isAdmin === null) {
     return (
-      <div className="min-h-screen bg-[#F5F3ED] flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center" style={{ background: '#97AB92' }}>
         <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 rounded-full border-2 border-[#6B904A] border-t-transparent animate-spin" />
-          <p className="text-sm text-slate-500">Verifying access…</p>
+          <div className="w-8 h-8 rounded-full border-2 border-white border-t-transparent animate-spin" />
+          <p className="text-sm text-white/80 font-medium">Verifying access…</p>
         </div>
       </div>
     );
@@ -765,58 +755,22 @@ export default function AdminPage() {
 
   /* ── Main render ────────────────────────────────────────────────────────── */
   return (
-    <div dir="ltr" className="min-h-screen bg-[#F5F3ED] relative overflow-hidden">
-
-      {/* Ambient blobs */}
-      <div className="fixed inset-0 pointer-events-none" aria-hidden="true">
-        <div style={{
-          position: 'absolute', top: '-10%', right: '-8%', width: 520, height: 520,
-          borderRadius: '50%', background: 'rgba(107,144,74,0.055)', filter: 'blur(130px)',
-        }} />
-        <div style={{
-          position: 'absolute', bottom: '-8%', left: '-4%', width: 400, height: 400,
-          borderRadius: '50%', background: 'rgba(180,160,120,0.045)', filter: 'blur(110px)',
-        }} />
-      </div>
-
-      {/* ── Header ──────────────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-30 flex items-center justify-between px-8 py-4"
-        style={{
-          background: 'rgba(245,243,237,0.92)', backdropFilter: 'blur(18px)',
-          borderBottom: '1px solid #E2DAC8', boxShadow: '0 1px 10px rgba(0,0,0,0.05)',
-        }}>
-        <div className="flex items-center gap-3">
-          <LogoMark size={30} />
-          <div>
-            <span className="text-slate-900 font-bold text-sm tracking-tight">U-Note</span>
-            <span className="text-slate-400 text-xs ms-2">· Admin</span>
-          </div>
-        </div>
-        <div className="flex items-center gap-5">
-          {isAdmin && <CfoNotificationBell onOpenChat={handleOpenChatFromAlert} />}
-          <button onClick={handleRefreshToken}
-            className="text-xs font-semibold text-[#6B904A] hover:text-[#4a7a36] transition-colors">
-            Sync Admin Token
-          </button>
-          <button
-            type="button"
-            onClick={e => { e.preventDefault(); router.push('/workspace'); }}
-            className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 transition-colors">
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
-            </svg>
-            Back to app
-          </button>
-        </div>
-      </header>
-
-      {/* ── Main content ────────────────────────────────────────────────────── */}
-      <main className="relative z-10 max-w-7xl mx-auto px-8 py-10">
+    <AdminShell>
+      <div dir="ltr" className="max-w-7xl mx-auto">
 
         {/* Page heading */}
-        <div className="mb-8">
-          <h1 className="text-2xl font-black text-slate-900 tracking-tight">User Management</h1>
-          <p className="text-slate-500 text-sm mt-1">All registered users · plan types · usage limits</p>
+        <div className="mb-8 flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <h1 className="text-2xl font-black text-slate-900 tracking-tight">Admin Overview</h1>
+            <p className="text-slate-500 text-sm mt-1">Platform health · usage KPIs · AI accountant</p>
+          </div>
+          <div className="flex items-center gap-5">
+            {isAdmin && <CfoNotificationBell onOpenChat={handleOpenChatFromAlert} />}
+            <button onClick={handleRefreshToken}
+              className="text-xs font-semibold text-[#6B904A] hover:text-[#4a7a36] transition-colors">
+              Sync Admin Token
+            </button>
+          </div>
         </div>
 
         {/* ── Connection Status (always visible — shows live Flask health) ─── */}
@@ -1112,9 +1066,9 @@ export default function AdminPage() {
             </div>
           </div>
         )}
-      </main>
+      </div>
 
       {toast && <Toast msg={toast.msg} ok={toast.ok} />}
-    </div>
+    </AdminShell>
   );
 }

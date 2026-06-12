@@ -269,6 +269,7 @@ const TR = {
     navProfSim:      'הראש של המרצה',
     navGapFill:      'שליטה בחומר',
     navAcademic:     'כתיבה אקדמית',
+    navPresentation: 'יצירת מצגת',
     navAdmin:        'Admin',
     logout:          'יציאה',
     logoutTitle:     'יציאה מהמערכת',
@@ -325,6 +326,7 @@ const TR = {
     navProfSim:      "Professor's Brain",
     navGapFill:      'Mastery',
     navAcademic:     'Academic Writing',
+    navPresentation: 'Create Presentation',
     navAdmin:        'Admin',
     logout:          'Logout',
     logoutTitle:     'Log Out',
@@ -414,6 +416,7 @@ function Sidebar({ isOpen, onClose, isAdmin, t, lang, userFirstName, userLastNam
               { path: '/dashboard',                     emoji: '🏠',  label: t.navHome },
               { path: '/workspace',                     emoji: '🌱',  label: t.navStudyLab },
               { path: '/academic-writing',              emoji: '✍️',  label: t.navAcademic },
+              { path: '/presentation-generator',        emoji: '🎬',  label: t.navPresentation },
               { path: '/workspace/professor-simulator', emoji: '🧠',  label: t.navProfSim },
               { path: '/mastery',                       emoji: '🎯',  label: t.navGapFill },
             ].map(({ path, emoji, label }) => (
@@ -2062,10 +2065,6 @@ export default function AcademicWritingPage() {
               <IconMenu className="w-5 h-5" />
             </button>
             <LogoMark size={38} />
-          </div>
-          <div className="flex items-center gap-2 text-[#1C3329]">
-            <span className="text-lg leading-none">✍️</span>
-            <h1 className="font-bold text-base tracking-wide">{t.pageTitle}</h1>
           </div>
           <div className="flex items-center gap-2">
             <CoursePill />

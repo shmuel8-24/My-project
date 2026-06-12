@@ -142,13 +142,27 @@ _DECK_SYSTEM_PROMPT = (
     "\"connections\" (an array of {\"from\": node id, \"to\": node id} edges "
     "showing data/control flow between nodes — may be empty). Do not include "
     "\"content\" for this layout.\n"
-    "15. Write all titles/content/text in the same language as the source "
-    "text (Hebrew for Hebrew source material) — \"iconName\" values, and "
-    "\"id\" values in \"architecture\" nodes/connections, always stay in "
-    "English exactly as specified.\n"
+    "15. LANGUAGE: You MUST generate all slide content — titles, subtitles, "
+    "bullet points, metric labels and values, tile titles/text, timeline "
+    "dates/events, chart labels, and architecture layer/node labels — "
+    "entirely in Hebrew, regardless of the source material's language. If "
+    "the source document is in English or any other language, translate the "
+    "key points into professional, natural Hebrew with correct terminology "
+    "— do not leave any slide text in English. \"iconName\" values and "
+    "\"id\" values in \"architecture\" nodes/connections are identifiers, "
+    "not display text, and must always stay in English exactly as "
+    "specified.\n"
     "16. Base all factual content strictly on the provided source material — "
     "do not invent statistics that aren't grounded in the text; if no real "
-    "metric exists, use fewer \"metric\"/\"barChart\" slides."
+    "metric exists, use fewer \"metric\"/\"barChart\" slides.\n"
+    "17. The user message may include an additional section of context "
+    "retrieved from the user's existing course document knowledge base "
+    "(a vector database covering multiple course materials, separate from "
+    "the freshly uploaded files). When present, synthesize a comprehensive "
+    "presentation from BOTH sources together: treat the uploaded files as "
+    "the primary subject of the deck and use the vector-database context to "
+    "add depth, corroborating detail, or related examples — do not ignore "
+    "either source."
 )
 
 BUILD_PRESENTATION_TOOL = {
@@ -486,7 +500,7 @@ def _validate_deck_slides(slides_obj: dict) -> list[dict]:
 
 
 def generate_deck_via_agent(
-    client, topic: str, context: str,
+    client, topic: str, context: str, rag_context: str = "",
 ) -> tuple[list[dict], str | None]:
     """Agent step: force the LLM to call build_presentation with the final deck.
 
@@ -499,6 +513,11 @@ def generate_deck_via_agent(
     list[str] | str | number, "timelineData"/"chartData"/"tiles": list[dict]}
     (the last three keys are layout-specific — see _validate_deck_slides).
 
+    `rag_context` is optional aggregated text retrieved via hybrid_search from
+    the user's existing FAISS knowledge base (across all of their course
+    materials, not just the freshly uploaded files) — see rule 17 of
+    _DECK_SYSTEM_PROMPT. Pass "" when no such context is available.
+
     Returns (slides, error_message). On success error_message is None and
     slides is a non-empty list of validated slide dicts (see
     _validate_deck_slides for the per-layout shape). On failure slides is []
@@ -507,11 +526,18 @@ def generate_deck_via_agent(
     safe_topic   = _sanitize(topic)
     safe_context = _sanitize(context)
 
-    user_message = (
-        f"Presentation topic: {safe_topic}\n\n"
-        f"Aggregated source material (gathered from uploaded files):\n---\n{safe_context}\n---\n\n"
-        "Call build_presentation now with the complete 10-slide deck."
-    )
+    user_message_parts = [
+        f"Presentation topic: {safe_topic}",
+        f"Aggregated source material (gathered from uploaded files):\n---\n{safe_context}\n---",
+    ]
+    if rag_context.strip():
+        safe_rag_context = _sanitize(rag_context)
+        user_message_parts.append(
+            "Additional context retrieved from the user's existing course "
+            f"document knowledge base (vector database):\n---\n{safe_rag_context}\n---"
+        )
+    user_message_parts.append("Call build_presentation now with the complete 10-slide deck.")
+    user_message = "\n\n".join(user_message_parts)
 
     try:
         response = client.chat.completions.create(

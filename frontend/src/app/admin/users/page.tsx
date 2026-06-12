@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../../providers/auth';
+import AdminShell from '../AdminShell';
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://127.0.0.1:5003';
 
@@ -275,10 +276,10 @@ export default function AdminUsersPage() {
 
   if (isAdmin === null) {
     return (
-      <div className="flex-1 flex items-center justify-center" style={{ background:'#F6F9F7' }}>
+      <div className="min-h-screen flex items-center justify-center" style={{ background:'#97AB92' }}>
         <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 rounded-full border-2 border-[#517B3E] border-t-transparent animate-spin" />
-          <p className="text-sm text-slate-500 font-medium">Verifying admin access…</p>
+          <div className="w-8 h-8 rounded-full border-2 border-white border-t-transparent animate-spin" />
+          <p className="text-sm text-white/80 font-medium">Verifying admin access…</p>
         </div>
       </div>
     );
@@ -286,50 +287,47 @@ export default function AdminUsersPage() {
 
   /* ── Full render ── */
   return (
-    <div className="flex flex-col min-h-screen" style={{ background:'#F6F9F7' }}>
-
-      {/* ─── Page header ─── */}
-      <div className="px-8 pt-8 pb-6 flex items-start justify-between gap-4"
-        style={{ borderBottom:'1px solid #E8F0EB', background:'rgba(255,255,255,0.72)', backdropFilter:'blur(12px)' }}>
-        <div>
-          <h1 style={{ fontSize:'1.375rem', fontWeight:800, color:'#1C3329', letterSpacing:'-0.02em', lineHeight:1.2 }}>
-            User Management
-          </h1>
-          <p style={{ fontSize:'0.8125rem', color:'#527061', marginTop:4 }}>
-            {loading ? 'Loading users…' : `${filtered.length} of ${users.length} users`}
-          </p>
-        </div>
-
-        {/* Search */}
-        <div style={{ position:'relative', width:280 }}>
-          <svg style={{ position:'absolute', insetInlineStart:12, top:'50%', transform:'translateY(-50%)', pointerEvents:'none' }}
-            width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#8FB3A0" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-          </svg>
-          <input
-            type="text"
-            placeholder="Search by name or email…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            style={{
-              width:'100%', paddingBlock:8, paddingInlineStart:36, paddingInlineEnd:12,
-              borderRadius:10, border:'1px solid #E8F0EB', background:'#fff',
-              fontSize:'0.8125rem', color:'#1C3329', outline:'none',
-              boxShadow:'0 1px 4px rgba(28,51,41,0.04)',
-              transition:'border-color 0.15s, box-shadow 0.15s',
-            }}
-            onFocus={e => { e.target.style.borderColor='#517B3E'; e.target.style.boxShadow='0 0 0 3px rgba(81,123,62,0.12)'; }}
-            onBlur={e  => { e.target.style.borderColor='#E8F0EB'; e.target.style.boxShadow='0 1px 4px rgba(28,51,41,0.04)'; }}
-          />
-        </div>
-      </div>
-
-      {/* ─── Table wrapper ─── */}
-      <div className="flex-1 px-8 py-6">
+    <AdminShell>
+      <div className="max-w-6xl mx-auto w-full">
         <div style={{
-          background:'#fff', borderRadius:16, border:'1px solid #E8F0EB',
-          boxShadow:'0 2px 16px rgba(28,51,41,0.05)', overflow:'hidden',
+          background:'rgba(255,255,255,0.90)', backdropFilter:'blur(20px)',
+          borderRadius:24, border:'1px solid #E8F0EB',
+          boxShadow:'0 4px 24px rgba(28,51,41,0.06)', overflow:'hidden',
         }}>
+
+          {/* ─── Panel header ─── */}
+          <div className="px-6 py-5 flex items-center justify-between gap-4 flex-wrap"
+            style={{ borderBottom:'1px solid #EEF5F0' }}>
+            <div>
+              <h1 className="text-2xl font-bold text-[#1A2E26] mb-1">User Management</h1>
+              <p className="text-xs text-[#7B9E8F]">
+                {loading ? 'Loading users…' : `${filtered.length} of ${users.length} users`}
+              </p>
+            </div>
+
+            {/* Search */}
+            <div style={{ position:'relative', width:280 }}>
+              <svg style={{ position:'absolute', insetInlineStart:12, top:'50%', transform:'translateY(-50%)', pointerEvents:'none' }}
+                width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#8FB3A0" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+              </svg>
+              <input
+                type="text"
+                placeholder="Search by name or email…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                style={{
+                  width:'100%', paddingBlock:8, paddingInlineStart:36, paddingInlineEnd:12,
+                  borderRadius:10, border:'1px solid #E8F0EB', background:'#fff',
+                  fontSize:'0.8125rem', color:'#1C3329', outline:'none',
+                  boxShadow:'0 1px 4px rgba(28,51,41,0.04)',
+                  transition:'border-color 0.15s, box-shadow 0.15s',
+                }}
+                onFocus={e => { e.target.style.borderColor='#517B3E'; e.target.style.boxShadow='0 0 0 3px rgba(81,123,62,0.12)'; }}
+                onBlur={e  => { e.target.style.borderColor='#E8F0EB'; e.target.style.boxShadow='0 1px 4px rgba(28,51,41,0.04)'; }}
+              />
+            </div>
+          </div>
 
           {loading ? (
             <div className="flex items-center justify-center py-20">
@@ -496,7 +494,6 @@ export default function AdminUsersPage() {
           {toast.msg}
         </div>
       )}
-
-    </div>
+    </AdminShell>
   );
 }

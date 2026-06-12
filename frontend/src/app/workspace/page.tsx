@@ -252,6 +252,7 @@ const translations = {
     quizClose:      'סגור',
     quizErr:        'שגיאה ביצירת החידון. נסה שוב.',
     rateLimitMsg:   'יותר מדי בקשות — אנא המתן רגע.',
+    navPresentation: 'יצירת מצגת',
     navProfSim:     'הראש של המרצה',
     navGapFill:     'שליטה בחומר',
     tabUpload:      'העלאה',
@@ -379,6 +380,7 @@ const translations = {
     quizClose:      'Close',
     quizErr:        'Quiz generation failed. Please try again.',
     rateLimitMsg:   'Too many requests. Please wait a moment.',
+    navPresentation: 'Create Presentation',
     navProfSim:     "Professor's Brain",
     navGapFill:     'Mastery',
     tabUpload:      'Upload',
@@ -441,22 +443,6 @@ function IconSend({ className }: { className?: string }) {
     </svg>
   );
 }
-function IconPen({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round"
-        d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
-    </svg>
-  );
-}
-function IconDownload({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round"
-        d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
-    </svg>
-  );
-}
 function IconSparkles({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -515,14 +501,6 @@ function IconPhoto({ className }: { className?: string }) {
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
       <path strokeLinecap="round" strokeLinejoin="round"
         d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
-    </svg>
-  );
-}
-function IconWord({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round"
-        d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
     </svg>
   );
 }
@@ -1375,7 +1353,6 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
                   : 'webm';
         fd.append('audio', blob, `recording.${ext}`);
 
-        console.log('🎤 Sending audio to: http://127.0.0.1:5003/api/transcribe');
         const res = await authFetch('http://127.0.0.1:5003/api/transcribe', { method: 'POST', body: fd, mode: 'cors' });
 
         // Guard against non-JSON bodies (e.g. 502 proxy error)
@@ -1401,7 +1378,7 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
     mediaRecorderRef.current = recorder;
     setIsRecording(true);
     recorder.start();
-  }, [isRecording, isTranscribing, send, t]);
+  }, [isRecording, isTranscribing, t]);
 
   const fetchQuiz = useCallback(async () => {
     if (quizLoading) return;
@@ -2309,6 +2286,14 @@ function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDel
             >
               <span className="text-base leading-none shrink-0">✍️</span>
               {t.tabPaper}
+            </button>
+            <button
+              onClick={() => { router.push('/presentation-generator'); onClose(); }}
+              className={['w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all', pathname.startsWith('/presentation') ? 'font-bold' : 'hover:bg-white/5'].join(' ')}
+              style={pathname.startsWith('/presentation') ? { backgroundColor: '#D1E6D9', color: '#183025', fontWeight: 700 } : { color: '#1C3329' }}
+            >
+              <span className="text-base leading-none shrink-0">🎬</span>
+              {t.navPresentation}
             </button>
             <button
               onClick={() => { router.push('/workspace/professor-simulator'); onClose(); }}

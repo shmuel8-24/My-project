@@ -22,6 +22,8 @@ import {
   Clock, CheckCircle, Star, BookOpen, Briefcase, Cpu,
   Database, Layers, Zap, BarChart3, Image as ImageIcon,
 } from 'lucide-react';
+import ChartSlide from './ChartSlide';
+import { exportToPPTX } from './pptxExport';
 
 const urbanist = Urbanist({ subsets: ['latin'], weight: ['700', '800', '900'], variable: '--font-urbanist' });
 const assistant = Assistant({ subsets: ['hebrew', 'latin'], weight: ['400', '500', '600', '700'], variable: '--font-assistant' });
@@ -210,27 +212,6 @@ function TimelineLayout({ slide }: { slide: DeckSlide }) {
   );
 }
 
-function BarChartLayout({ slide }: { slide: DeckSlide }) {
-  const items = slide.chartData ?? [];
-  const max = Math.max(...items.map(i => i.percentage), 1);
-  return (
-    <div className="w-full h-full flex flex-col px-16 py-14 gap-8">
-      <h2 className="text-2xl md:text-3xl font-extrabold leading-snug shrink-0" style={{ color: EXEC.text, fontFamily: HEADING_FONT }}>{slide.title}</h2>
-      <div className="flex-1 flex flex-col justify-center gap-5 min-h-0">
-        {items.map((item, i) => (
-          <div key={i} className="flex items-center gap-4">
-            <p className="w-32 shrink-0 text-sm font-semibold truncate" style={{ color: EXEC.text, fontFamily: BODY_FONT }}>{item.label}</p>
-            <div className="flex-1 h-6 rounded-full overflow-hidden" style={{ background: 'rgba(139,175,132,0.12)' }}>
-              <div className="h-full rounded-full" style={{ width: `${(item.percentage / max) * 100}%`, background: EXEC.accent }} />
-            </div>
-            <p className="w-14 shrink-0 text-end text-sm font-bold" style={{ color: EXEC.accent, fontFamily: HEADING_FONT }}>{item.percentage}%</p>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function TileGridLayout({ slide }: { slide: DeckSlide }) {
   const tiles = slide.tiles ?? [];
   return (
@@ -305,8 +286,8 @@ function ArchitectureLayout({ slide }: { slide: DeckSlide }) {
           ))}
         </div>
 
-        {/* diagram area */}
-        <div className="relative flex-1">
+        {/* diagram area kept LTR — connector-line math assumes left-to-right x positions */}
+        <div className="relative flex-1" dir="ltr">
           <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
             {connections.map((c, i) => {
               const from = positions.get(c.from);
@@ -359,7 +340,7 @@ function SlideContent({ slide }: { slide: DeckSlide }) {
     case 'metric':       return <MetricLayout slide={slide} />;
     case 'split-screen': return <SplitScreenLayout slide={slide} />;
     case 'timeline':     return <TimelineLayout slide={slide} />;
-    case 'barChart':     return <BarChartLayout slide={slide} />;
+    case 'barChart':     return <ChartSlide title={slide.title} data={slide.chartData ?? []} />;
     case 'tileGrid':     return <TileGridLayout slide={slide} />;
     case 'bleedImage':   return <BleedImageLayout slide={slide} />;
     case 'architecture': return <ArchitectureLayout slide={slide} />;
@@ -375,6 +356,7 @@ interface SlideViewerProps {
 
 export default function SlideViewer({ slides, lang }: SlideViewerProps) {
   const [current, setCurrent] = useState(0);
+  const [exportingPptx, setExportingPptx] = useState(false);
   const he = lang === 'he';
   const slide = slides[current];
   if (!slide) return null;
@@ -382,6 +364,17 @@ export default function SlideViewer({ slides, lang }: SlideViewerProps) {
   const goPrev = () => setCurrent(c => Math.max(0, c - 1));
   const goNext = () => setCurrent(c => Math.min(slides.length - 1, c + 1));
   const downloadPdf = () => window.print();
+  const downloadPptx = async () => {
+    if (exportingPptx) return;
+    setExportingPptx(true);
+    try {
+      await exportToPPTX(slides, lang);
+    } catch (err) {
+      console.error('[SlideViewer] PPTX export failed:', err);
+    } finally {
+      setExportingPptx(false);
+    }
+  };
 
   return (
     <div className={`flex flex-col gap-4 ${urbanist.variable} ${assistant.variable}`}>
@@ -389,6 +382,8 @@ export default function SlideViewer({ slides, lang }: SlideViewerProps) {
       <div className="print:hidden flex flex-col gap-4">
         <div className="w-full mx-auto" style={{ maxWidth: 1280 }}>
           <div
+            dir="rtl"
+            lang="he"
             className="relative w-full rounded-2xl overflow-hidden"
             style={{ aspectRatio: '1280 / 720', background: EXEC.bg, border: '1px solid rgba(139,175,132,0.25)', boxShadow: '0 12px 40px rgba(0,0,0,0.35)' }}
           >
@@ -449,22 +444,38 @@ export default function SlideViewer({ slides, lang }: SlideViewerProps) {
         </p>
 
         {/* Export */}
-        <button
-          onClick={downloadPdf}
-          className="self-center flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-bold text-white transition-all hover:opacity-90 active:scale-[0.98]"
-          style={{ background: '#517B3E' }}
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
-          </svg>
-          {he ? 'הורד כ-PDF' : 'Download as PDF'}
-        </button>
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <button
+            onClick={downloadPdf}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-bold text-white transition-all hover:opacity-90 active:scale-[0.98]"
+            style={{ background: '#517B3E' }}
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+            </svg>
+            {he ? 'הורד כ-PDF' : 'Download as PDF'}
+          </button>
+
+          <button
+            onClick={downloadPptx}
+            disabled={exportingPptx}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-bold transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ background: 'rgba(255,255,255,0.6)', border: '1px solid rgba(157,192,139,0.4)', color: '#1C3329' }}
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+            </svg>
+            {exportingPptx
+              ? (he ? 'מייצא...' : 'Exporting...')
+              : (he ? 'הורד כ-PPTX' : 'Download as PPTX')}
+          </button>
+        </div>
       </div>
 
       {/* Print-only full deck — one slide per fixed 16:9 page (see globals.css @media print) */}
       <div className="hidden print:block print-slide-deck">
         {slides.map((s, i) => (
-          <div key={i} className="print-slide-page" style={{ background: EXEC.bg }}>
+          <div key={i} dir="rtl" lang="he" className="print-slide-page" style={{ background: EXEC.bg }}>
             <SlideContent slide={s} />
           </div>
         ))}
