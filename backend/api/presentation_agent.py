@@ -201,6 +201,7 @@ def analyze_image(filename: str, file_bytes: bytes) -> str:
 @token_required
 def generate_presentation(user_id: int):
     topic = strip_html((request.form.get("topic") or "").strip())
+    course_name = strip_html((request.form.get("course_name") or "").strip()) or None
     uploaded_files = request.files.getlist("files")
 
     if not uploaded_files:
@@ -248,17 +249,21 @@ def generate_presentation(user_id: int):
 
     # Multi-document RAG synthesis: in addition to the freshly-uploaded files
     # above (in-memory only, never persisted to FAISS), pull the top relevant
-    # chunks from the user's existing FAISS knowledge base — covering ALL of
-    # their previously-indexed course materials — and pass them along as
-    # supplementary context so the deck isn't limited to a single document.
-    rag_chunks, rag_metas = hybrid_search(user_id, deck_topic, TOP_K)
+    # chunks from the user's existing FAISS knowledge base and pass them along
+    # as supplementary context so the deck isn't limited to a single document.
+    # When the frontend sends an active course_name, retrieval is STRICTLY
+    # scoped to documents tagged with that course — chunks from other courses
+    # are never returned, even on a perfect semantic match. With no active
+    # course, retrieval spans the user's entire knowledge base as before.
+    rag_chunks, rag_metas = hybrid_search(user_id, deck_topic, TOP_K, course_name=course_name)
     rag_context = "\n\n".join(
         f"[{meta.get('source', '?')}]\n{chunk}"
         for chunk, meta in zip(rag_chunks, rag_metas)
     )
     if rag_context:
         print(f"[PresentationAgent] u{user_id}: added {len(rag_chunks)} RAG chunk(s) "
-              f"from knowledge base as supplementary context")
+              f"from knowledge base as supplementary context"
+              + (f" (course={course_name!r})" if course_name else ""))
 
     valid, error = generate_deck_via_agent(client, deck_topic, context, rag_context)
     if error:

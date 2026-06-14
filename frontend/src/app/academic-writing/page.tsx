@@ -1986,6 +1986,7 @@ export default function AcademicWritingPage() {
       // Send all files in one multipart request — backend expects field name "files" (plural)
       const fd = new FormData();
       for (const file of files) fd.append('files', file);
+      if (selectedCourse) fd.append('course_name', selectedCourse.name);
       const res  = await authFetch(`${API}/upload-pdf`, { method: 'POST', body: fd });
       const data = await res.json();
       if (!res.ok) {
@@ -2016,7 +2017,7 @@ export default function AcademicWritingPage() {
     } finally {
       setUploading(false);
     }
-  }, [uploading, he]);
+  }, [uploading, he, selectedCourse]);
 
   const handleRemoveFile = useCallback((fileToRemove: UploadedFile) => {
     const remaining = uploadedFiles.filter(f => f.fileId !== fileToRemove.fileId);

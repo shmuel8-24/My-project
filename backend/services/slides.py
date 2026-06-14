@@ -1,5 +1,6 @@
 import json
 
+from services.images import get_image_provider
 from services.security import _sanitize
 
 VALID_SLIDE_LAYOUTS = {"Title_Slide", "Image_Right", "Big_Metric"}
@@ -81,48 +82,69 @@ _DECK_SYSTEM_PROMPT = (
     "for every other layout, and omit \"content\" for \"timeline\", "
     "\"barChart\", \"tileGrid\", and \"architecture\".)\n\n"
     "Rules:\n"
-    "1. Output exactly 10 slide objects, in presentation order.\n"
+    "1. Output EXACTLY 20 slide objects, in presentation order. This is a "
+    "comprehensive deep-dive deck, not a short summary — never stop early and "
+    "never output fewer than 20 slides. Slide 1, slide 2, and slide 20 have "
+    "fixed roles — see rule 4.\n"
     "2. \"layout\" must be exactly one of: \"title\", \"bullets\", \"metric\", "
     "\"split-screen\", \"timeline\", \"barChart\", \"tileGrid\", \"bleedImage\", "
     "\"architecture\".\n"
     "3. Slide 1 MUST use layout \"title\": \"title\" is the presentation title, "
     "\"content\" is a one-line subtitle/tagline string.\n"
-    "4. The LAST slide MUST also use layout \"title\" as a closing/summary slide "
-    "(\"title\" e.g. a Hebrew/English word for 'Summary' or 'Thank you', "
-    "\"content\" is a one-line closing takeaway string).\n"
-    "5. ACTION TITLES: For every slide EXCEPT the first and last (\"title\") "
-    "slides, \"title\" MUST be a full-sentence action title that states the "
-    "slide's core takeaway or finding — never a static topic label. Write "
+    "4. STRUCTURAL MANDATE for slides 2 and 20 — both use layout \"bullets\" "
+    "(never \"title\"):\n"
+    "   - Slide 2 is the Executive Summary: \"title\" is a full-sentence "
+    "action title naming the single most important overall conclusion of the "
+    "whole deck, and \"content\" is an array of 5-7 full-sentence bullets, "
+    "each previewing one major finding that a later body slide will expand "
+    "on — write this as a synthesis of the entire deck, not a generic "
+    "introduction.\n"
+    "   - Slide 20 (the LAST slide) is the Strategic Summary & Conclusion: "
+    "\"title\" is a full-sentence action title stating the overall strategic "
+    "implication, and \"content\" is an array of 5-7 full-sentence bullets "
+    "covering the deck's key strategic takeaways and recommended next steps. "
+    "Slide 20 must be as content-rich as any body slide — NEVER a sparse "
+    "closing such as 'תודה' / 'Thank you' / 'שאלות?' / 'Questions?'.\n"
+    "5. ACTION TITLES: For every slide EXCEPT slide 1 (the \"title\" cover), "
+    "\"title\" MUST be a full-sentence action title that states the slide's "
+    "core takeaway or finding — never a static topic label. Write "
     "'Market share grew by 15% due to aggressive regulation', not "
-    "'Market Overview'. Every body-slide title must report a conclusion drawn "
-    "from the source material, not just name a subject.\n"
-    "6. LAYOUT DIVERSITY: Across slides 2-9, use a varied mix of the body "
-    "layouts (\"bullets\", \"metric\", \"split-screen\", \"timeline\", "
-    "\"barChart\", \"tileGrid\", \"bleedImage\", \"architecture\") — do not "
-    "repeat the same layout more than 2-3 times in a row, and do not produce a "
-    "deck that is almost entirely one layout. Use \"timeline\", \"barChart\", "
-    "\"tileGrid\", and \"architecture\" only when the source material genuinely "
-    "supports them (a chronology, multiple comparable percentages, 3-6 "
-    "parallel items/categories, or a system/process/data architecture, "
-    "respectively) — otherwise prefer \"bullets\" or \"split-screen\".\n"
+    "'Market Overview'. Every such title (including slides 2 and 20) must "
+    "report a conclusion drawn from the source material, not just name a "
+    "subject.\n"
+    "6. LAYOUT DIVERSITY: Across slides 3-19 (the body slides between the "
+    "Executive Summary and the Strategic Summary & Conclusion), use a varied "
+    "mix of the body layouts (\"bullets\", \"metric\", \"split-screen\", "
+    "\"timeline\", \"barChart\", \"tileGrid\", \"bleedImage\", \"architecture\") "
+    "— do not repeat the same layout more than 2-3 times in a row, and do not "
+    "produce a deck that is almost entirely one layout. Use \"timeline\", "
+    "\"barChart\", \"tileGrid\", and \"architecture\" only when the source "
+    "material genuinely supports them (a chronology, multiple comparable "
+    "percentages, 3-6 parallel items/categories, or a system/process/data "
+    "architecture, respectively) — otherwise prefer \"bullets\" or "
+    "\"split-screen\".\n"
     "7. Use \"metric\" for at least 1 and at most 3 slides where the source "
     "material contains a striking number, percentage, or statistic: \"content\" "
     "is ONLY the metric itself (e.g. \"85%\", \"x3\", \"2.4M\", or a bare number) "
     "— no extra words; the action-title \"title\" carries the takeaway.\n"
-    "8. Use \"bullets\" for slides presenting 3-5 distinct points: \"content\" "
-    "is an array of 3-5 short bullet strings, each concise (max ~12 words).\n"
-    "9. Use \"split-screen\" for slides that pair a short list of points with a "
-    "supporting visual: \"content\" is an array of 3-5 short bullet strings (max "
-    "~12 words each); the visual side is rendered by the slide template, not by "
-    "you.\n"
+    "8. Use \"bullets\" for slides presenting 4-6 distinct points: \"content\" "
+    "is an array of 4-6 full-sentence bullet strings — each a complete, "
+    "substantive sentence (roughly 15-30 words) that explains or analyzes the "
+    "point in depth, not a short label or fragment.\n"
+    "9. Use \"split-screen\" for slides that pair a list of points with a "
+    "supporting visual: \"content\" is an array of 4-6 full-sentence bullet "
+    "strings (roughly 12-25 words each); the visual side shows a photo (see "
+    "rule 19) or, if none is available, a placeholder rendered by the slide "
+    "template.\n"
     "10. Use \"bleedImage\" for slides that should foreground a single visual: "
-    "\"content\" is an array of 1-3 short bullet strings (max ~12 words each) "
-    "for the text side; an edge-to-edge visual placeholder fills the other half "
-    "of the slide.\n"
+    "\"content\" is an array of 2-3 full-sentence bullet strings (roughly "
+    "12-20 words each) for the text side; the other half shows an edge-to-edge "
+    "photo (see rule 19) or, if none is available, a placeholder.\n"
     "11. Use \"timeline\" for slides describing a chronology or sequence of "
     "milestones: include \"timelineData\", an ordered array of 3-6 "
-    "{\"date\": short period label, \"event\": brief description (max ~10 "
-    "words)} objects. Do not include \"content\" for this layout.\n"
+    "{\"date\": short period label, \"event\": detailed description (roughly "
+    "12-20 words — a full clause explaining what happened and why it "
+    "matters)} objects. Do not include \"content\" for this layout.\n"
     "12. Use \"barChart\" for slides comparing multiple percentages or "
     "proportional values: include \"chartData\", an array of 2-6 "
     "{\"label\": short name, \"percentage\": number 0-100} objects. Do not "
@@ -130,8 +152,9 @@ _DECK_SYSTEM_PROMPT = (
     "13. Use \"tileGrid\" for slides presenting 3-6 parallel items, "
     "categories, or pillars: include \"tiles\", an array of 3-6 "
     "{\"iconName\": one of " + json.dumps(TILE_ICON_NAMES) + ", \"title\": "
-    "short headline (max ~6 words), \"text\": brief description (max ~15 "
-    "words)} objects. Do not include \"content\" for this layout.\n"
+    "short headline (max ~6 words), \"text\": detailed description (roughly "
+    "20-30 words — a full sentence of explanation)} objects. Do not include "
+    "\"content\" for this layout.\n"
     "14. Use \"architecture\" for slides describing a system, pipeline, "
     "process flow, or data architecture: include \"layers\" (an ordered array "
     "of 2-5 short layer/stage names, top to bottom, e.g. [\"Presentation "
@@ -162,7 +185,36 @@ _DECK_SYSTEM_PROMPT = (
     "presentation from BOTH sources together: treat the uploaded files as "
     "the primary subject of the deck and use the vector-database context to "
     "add depth, corroborating detail, or related examples — do not ignore "
-    "either source."
+    "either source.\n"
+    "18. DESIGN SYSTEM: Every slide is rendered with a light, high-contrast "
+    "'Matcha Executive Light' theme — pale off-white backgrounds, "
+    "near-black text, and Matcha Green (#8BAF84) used only for accents, "
+    "borders, and icons. Never write slide text that describes or assumes "
+    "a dark/black background (e.g. avoid phrases like 'on a dark "
+    "background' or 'against a black backdrop').\n"
+    "19. STOCK PHOTO QUERY: For \"split-screen\" and \"bleedImage\" slides "
+    "ONLY, also include \"imageQuery\": a short ENGLISH stock-photo search "
+    "phrase (2-4 words) that visually represents the slide's subject — "
+    "translate the concept into English even though the rest of the slide is "
+    "in Hebrew (e.g. for a slide about \"מגמות בשוק העבודה\" use \"job market "
+    "trends\"; for \"שיתופי פעולה עסקיים\" use \"business partnership "
+    "handshake\"). Omit \"imageQuery\" entirely for every other layout.\n"
+    "20. DEPTH OF ANALYSIS: This deck is a comprehensive deep dive, not a "
+    "high-level overview. For every slide, extract and surface concrete "
+    "technical details, definitions, named concepts, figures, and "
+    "explanations drawn directly from the source material — explain the "
+    "mechanism or reasoning behind each point (the 'how' and 'why'), not just "
+    "the 'what'. Prefer specific, source-grounded detail over generic "
+    "filler statements.\n"
+    "21. STRUCTURE: Organize the body slides into a clear narrative arc that "
+    "covers, wherever the source material supports it, phases such as: "
+    "theoretical background / key definitions, context or methodology, "
+    "detailed findings or case studies, deeper analysis of mechanisms or "
+    "trade-offs, and implications or future directions. Distribute slides "
+    "roughly evenly across these phases — do not front-load all the depth "
+    "into the first few slides and pad the rest with filler. Each slide's "
+    "action title (rule 5) must still report that slide's specific finding "
+    "within its phase."
 )
 
 BUILD_PRESENTATION_TOOL = {
@@ -173,14 +225,16 @@ BUILD_PRESENTATION_TOOL = {
             "Construct the final presentation deck from the aggregated source "
             "material gathered by parse_document / transcribe_media / "
             "analyze_image. Call this once, with the complete ordered list of "
-            "10 slides."
+            "15-20 slides."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "slides": {
                     "type": "array",
-                    "description": "Ordered list of exactly 10 slide objects.",
+                    "description": "Ordered list of 15-20 slide objects (comprehensive deep-dive deck).",
+                    "minItems": 15,
+                    "maxItems": 20,
                     "items": {
                         "type": "object",
                         "properties": {
@@ -277,6 +331,10 @@ BUILD_PRESENTATION_TOOL = {
                                     },
                                     "required": ["from", "to"],
                                 },
+                            },
+                            "imageQuery": {
+                                "type": "string",
+                                "description": "Only for 'split-screen' and 'bleedImage' layouts: a short ENGLISH stock-photo search phrase (2-4 words) translated from the slide's (Hebrew) subject. Omit for all other layouts.",
                             },
                         },
                         "required": ["title", "layout"],
@@ -396,6 +454,12 @@ def _validate_deck_slides(slides_obj: dict) -> list[dict]:
                 continue
             slide_out["content"] = bullets
 
+            if layout in ("split-screen", "bleedImage"):
+                # Internal-only field, resolved (and removed) by _attach_images.
+                image_query = str(s.get("imageQuery", "")).strip()
+                if image_query:
+                    slide_out["imageQuery"] = image_query
+
         elif layout == "timeline":
             items = []
             if isinstance(s.get("timelineData"), list):
@@ -499,6 +563,37 @@ def _validate_deck_slides(slides_obj: dict) -> list[dict]:
     return valid
 
 
+def _attach_images(slides: list[dict]) -> list[dict]:
+    """Resolve each slide's internal "imageQuery" into an optional "image" field.
+
+    "imageQuery" is set by _validate_deck_slides for "split-screen"/"bleedImage"
+    slides only. For each such slide, looks up a photo via the configured
+    provider (services/images.py::get_image_provider — Unsplash today, swappable
+    via IMAGE_PROVIDER) and, on success, sets
+    slide["image"] = {"url": ..., "alt": ..., "credit": {"name": ..., "link": ...}}.
+
+    "imageQuery" is always popped before returning, regardless of outcome — it's
+    an internal lookup key, never part of the public slide contract. If the
+    provider is unconfigured (NullProvider — e.g. no UNSPLASH_ACCESS_KEY) or a
+    lookup errors/returns nothing, the slide is simply left without "image": the
+    frontend (SlideViewer.tsx) renders its existing placeholder visual in that
+    case, so a deck is never blocked or broken by image lookups.
+    """
+    provider = get_image_provider()
+    for slide in slides:
+        query = slide.pop("imageQuery", None)
+        if not query:
+            continue
+        try:
+            image = provider.get_image(query)
+        except Exception as exc:
+            print(f"[Slides] image lookup failed for query={query!r}: {exc}")
+            image = None
+        if image:
+            slide["image"] = image
+    return slides
+
+
 def generate_deck_via_agent(
     client, topic: str, context: str, rag_context: str = "",
 ) -> tuple[list[dict], str | None]:
@@ -512,6 +607,9 @@ def generate_deck_via_agent(
     "split-screen"|"timeline"|"barChart"|"tileGrid"|"bleedImage", "content":
     list[str] | str | number, "timelineData"/"chartData"/"tiles": list[dict]}
     (the last three keys are layout-specific — see _validate_deck_slides).
+    "split-screen"/"bleedImage" slides may additionally carry an optional
+    "image": {"url", "alt", "credit": {"name", "link"}} (see _attach_images) —
+    absent when no image provider is configured or no photo was found.
 
     `rag_context` is optional aggregated text retrieved via hybrid_search from
     the user's existing FAISS knowledge base (across all of their course
@@ -536,7 +634,7 @@ def generate_deck_via_agent(
             "Additional context retrieved from the user's existing course "
             f"document knowledge base (vector database):\n---\n{safe_rag_context}\n---"
         )
-    user_message_parts.append("Call build_presentation now with the complete 10-slide deck.")
+    user_message_parts.append("Call build_presentation now with the complete deck (15-20 slides).")
     user_message = "\n\n".join(user_message_parts)
 
     try:
@@ -549,7 +647,7 @@ def generate_deck_via_agent(
             tools=[BUILD_PRESENTATION_TOOL],
             tool_choice={"type": "function", "function": {"name": "build_presentation"}},
             temperature=0.7,
-            max_tokens=3000,
+            max_tokens=10000,
         )
         tool_calls = response.choices[0].message.tool_calls
         if not tool_calls:
@@ -566,4 +664,5 @@ def generate_deck_via_agent(
     if not valid:
         return [], "AI did not produce a valid slide deck — please try again."
 
+    valid = _attach_images(valid)
     return valid, None

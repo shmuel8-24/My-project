@@ -95,6 +95,7 @@ class UserDocument(_Base):
     filename        = Column(String(255), nullable=False)
     uploaded_at     = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     file_size_bytes = Column(Integer, nullable=True)
+    course_name     = Column(String(255), nullable=True, index=True)
     __table_args__ = (UniqueConstraint("user_id", "file_id", name="uq_user_document"),)
 
 
@@ -207,6 +208,7 @@ with _db_engine.connect() as _conn:
         ("ALTER TABLE users ADD COLUMN prof_sims_this_month INTEGER NOT NULL DEFAULT 0", "added prof_sims_this_month to users"),
         ("ALTER TABLE users ADD COLUMN prof_sim_month_key VARCHAR(7) NOT NULL DEFAULT ''", "added prof_sim_month_key to users"),
         ("ALTER TABLE user_documents ADD COLUMN file_size_bytes INTEGER", "added file_size_bytes to user_documents"),
+        ("ALTER TABLE user_documents ADD COLUMN course_name VARCHAR(255)", "added course_name to user_documents"),
     ]:
         try:
             _conn.execute(sql_text(_stmt))

@@ -1,21 +1,24 @@
 /* ── PPTX export for the AI Presentation Agent (/presentation-generator) ──
    Maps DeckSlide JSON (see SlideViewer.tsx) onto native PowerPoint shapes/
-   text/charts via pptxgenjs, mirroring the on-screen "Matcha Executive" deck
-   theme: deep dark background, white/cream text, matcha-green accents, with
-   RTL alignment for Hebrew decks. pptxgenjs is imported dynamically so it
-   never loads during SSR — only when the user clicks "Download as PPTX". */
+   text/charts via pptxgenjs, mirroring the on-screen "Matcha Executive Light"
+   deck theme: pale off-white background, near-black text, matcha-green
+   accents, with RTL alignment for Hebrew decks. pptxgenjs is imported
+   dynamically so it never loads during SSR — only when the user clicks
+   "Download as PPTX". */
 
 import type PptxGenJS from 'pptxgenjs';
 import type { DeckSlide } from './SlideViewer';
 
-/* "Matcha Executive" palette — pptxgenjs hex colors have no leading '#' */
-const EXEC_BG     = '0c120e';
-const EXEC_ACCENT = '8BAF84';
-const EXEC_TEXT   = 'f5f5f5';
-const EXEC_CREAM  = 'daffde';
+/* "Matcha Executive Light" palette — pptxgenjs hex colors have no leading '#' */
+const EXEC_BG        = 'F8FAF5';
+const EXEC_ACCENT    = '8BAF84';
+const EXEC_ACCENT_DK = '517B3E';
+const EXEC_TEXT      = '1C3329';
+const EXEC_CREAM     = '527061';
 
-/* "architecture" per-layer accent colors, mirrors LAYER_COLORS in SlideViewer.tsx */
-const LAYER_COLORS = ['c68a64', '5b7b8e', '8a8f98', '5e9c72'];
+/* "architecture" per-layer accent colors, mirrors LAYER_COLORS in SlideViewer.tsx
+   — darkened for contrast against the light slide background */
+const LAYER_COLORS = ['A8623E', '3D5A6C', '5C6470', '3F7A56'];
 
 const FONT = 'Arial';
 
@@ -89,7 +92,7 @@ function buildSlideContent(pptx: PptxGenJS, pptxSlide: PptxGenJS.Slide, slide: D
     case 'metric': {
       pptxSlide.addText(toText(slide.content), {
         x: 1, y: 2.1, w: SLIDE_W - 2, h: 2,
-        fontFace: FONT, fontSize: 72, bold: true, color: EXEC_ACCENT,
+        fontFace: FONT, fontSize: 72, bold: true, color: EXEC_ACCENT_DK,
         align: 'center', valign: 'middle',
       });
       pptxSlide.addText(slide.title, {
@@ -107,7 +110,7 @@ function buildSlideContent(pptx: PptxGenJS, pptxSlide: PptxGenJS.Slide, slide: D
       pptxSlide.addShape(pptx.ShapeType.roundRect, {
         x: SLIDE_W / 2 + 0.2, y: 1.0, w: SLIDE_W / 2 - 0.8, h: SLIDE_H - 1.6,
         rectRadius: 0.06,
-        fill: { color: EXEC_ACCENT, transparency: 94 },
+        fill: { color: EXEC_ACCENT, transparency: 88 },
         line: { color: EXEC_ACCENT, width: 1, transparency: 65 },
       });
       break;
@@ -133,7 +136,7 @@ function buildSlideContent(pptx: PptxGenJS, pptxSlide: PptxGenJS.Slide, slide: D
         });
         pptxSlide.addText(item.date, {
           x: colX + 0.05, y: lineY + 0.25, w: colW - 0.1, h: 0.4,
-          fontFace: FONT, fontSize: 12, bold: true, color: EXEC_ACCENT,
+          fontFace: FONT, fontSize: 12, bold: true, color: EXEC_ACCENT_DK,
           align: 'center',
         });
         pptxSlide.addText(item.event, {
@@ -187,8 +190,8 @@ function buildSlideContent(pptx: PptxGenJS, pptxSlide: PptxGenJS.Slide, slide: D
         const y = areaY + row * (tileH + gap);
         pptxSlide.addShape(pptx.ShapeType.roundRect, {
           x, y, w: tileW, h: tileH, rectRadius: 0.06,
-          fill: { color: EXEC_ACCENT, transparency: 95 },
-          line: { color: EXEC_ACCENT, width: 1, transparency: 75 },
+          fill: { color: EXEC_ACCENT, transparency: 90 },
+          line: { color: EXEC_ACCENT, width: 1, transparency: 65 },
         });
         pptxSlide.addText([
           { text: tile.title, options: { bold: true, breakLine: true, fontSize: 13, color: EXEC_TEXT } },

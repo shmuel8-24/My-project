@@ -634,6 +634,7 @@ export default function ProfessorSimulatorPage() {
     try {
       const form = new FormData();
       toUpload.forEach(f => form.append('files', f));
+      if (selectedCourse) form.append('course_name', selectedCourse.name);
       const res  = await authFetch(`${API}/upload-pdf`, { method: 'POST', body: form });
       const data = await safeJson(res);
       if (!res.ok) { setUploadErr((data.error as string) ?? 'שגיאה בהעלאת הקבצים'); return; }
@@ -646,7 +647,7 @@ export default function ProfessorSimulatorPage() {
       setUploadErr('לא ניתן להתחבר לשרת');
     }
     finally { setUploading(false); }
-  }, [canUploadMore, fileLimit, files.length]);
+  }, [canUploadMore, fileLimit, files.length, selectedCourse]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -670,6 +671,7 @@ export default function ProfessorSimulatorPage() {
     try {
       const form = new FormData();
       form.append('files', file);
+      if (selectedCourse) form.append('course_name', selectedCourse.name);
       const res  = await authFetch(`${API}/upload-pdf`, { method: 'POST', body: form });
       const data = await safeJson(res);
       if (!res.ok) { setSampleExamErr((data.error as string) ?? 'שגיאה בהעלאת הקובץ'); return; }
@@ -680,7 +682,7 @@ export default function ProfessorSimulatorPage() {
       setSampleExamErr('לא ניתן להתחבר לשרת');
     }
     finally { setSampleExamUploading(false); }
-  }, []);
+  }, [selectedCourse]);
 
   const {
     getRootProps:  getSampleExamRootProps,

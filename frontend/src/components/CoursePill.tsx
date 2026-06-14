@@ -11,7 +11,10 @@
  *  • Course selected     → shows icon + name, plus a chevron that opens a
  *    dropdown listing every course (built-in + custom). Picking one switches
  *    the active course instantly via CourseContext — no navigation needed.
- *  • × button            → clears the selected course (user stays on current page)
+ *  • × button            → clears the selected course and routes to /course-picker
+ *    (most pages assume an active course, so clearing it leaves the user on
+ *    /course-picker to choose a new one — same destination as the pill itself
+ *    when no course is selected)
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -93,9 +96,12 @@ export default function CoursePill() {
           </svg>
         </button>
 
-        {/* Clear button — stays on current page */}
+        {/* Clear button — clears the course and returns to the course picker */}
         <button
-          onClick={() => setSelectedCourse(null)}
+          onClick={() => {
+            setSelectedCourse(null);
+            router.push('/course-picker');
+          }}
           aria-label={he ? 'נקה בחירת קורס' : 'Clear course selection'}
           className="w-[26px] h-[26px] flex items-center justify-center bg-[#EEF5F0] border border-[#D3E0D8] rounded-full text-[11px] font-bold hover:bg-red-50 hover:text-red-500 transition-all duration-150 cursor-pointer shrink-0"
           style={{ color: '#527061' }}

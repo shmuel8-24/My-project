@@ -780,6 +780,7 @@ function QuizModal({ questions, loading, error, lang, t, onClose, onRetry }: {
 function PdfUploader({ onUpload, onRemove, t }: {
   onUpload: () => void; onRemove: () => void; t: T;
 }) {
+  const { selectedCourse } = useCourse();
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [uploading, setUploading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
@@ -798,6 +799,7 @@ function PdfUploader({ onUpload, onRemove, t }: {
       try {
         const fd = new FormData();
         for (const file of accepted) fd.append('files', file);
+        if (selectedCourse) fd.append('course_name', selectedCourse.name);
         const res  = await authFetch(`${API}/upload-pdf`, { method: 'POST', body: fd });
         const data = await res.json();
         if (!res.ok) {
@@ -817,7 +819,7 @@ function PdfUploader({ onUpload, onRemove, t }: {
         setErrors([...rejectionErrors, t.serverErr]);
       } finally { setUploading(false); }
     },
-    [onUpload, t],
+    [onUpload, t, selectedCourse],
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({

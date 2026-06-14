@@ -386,6 +386,7 @@ function Sidebar({
 export default function PresentationGeneratorPage() {
   const { user: authUser, isLoading: authLoading } = useAuth();
   const { lang, toggleLanguage } = useLanguage();
+  const { selectedCourse } = useCourse();
   const he = lang === 'he';
 
   // ── Shell state ────────────────────────────────────────────────────────────
@@ -457,6 +458,7 @@ export default function PresentationGeneratorPage() {
     try {
       const form = new FormData();
       if (topic.trim()) form.append('topic', topic.trim());
+      if (selectedCourse) form.append('course_name', selectedCourse.name);
       pending.forEach(p => form.append('files', p.file));
 
       const res = await authFetch(`${API}/api/generate-presentation`, {
@@ -476,7 +478,7 @@ export default function PresentationGeneratorPage() {
     } finally {
       setLoading(false);
     }
-  }, [pending, topic, loading, he]);
+  }, [pending, topic, loading, he, selectedCourse]);
 
   const reset = useCallback(() => {
     setSlides(null);
@@ -485,6 +487,18 @@ export default function PresentationGeneratorPage() {
     setTopic('');
     setError(null);
   }, []);
+
+  // ── Reset on active-course change ─────────────────────────────────────────
+  // When the user switches courses (or clears the active course via CoursePill's
+  // "✕"), any generated deck / pending files belong to the previous course's
+  // context and must not linger on screen. Adjusting state during render (rather
+  // than in an effect) per https://react.dev/learn/you-might-not-need-an-effect.
+  const activeCourseKey = selectedCourse?.id ?? null;
+  const [lastCourseKey, setLastCourseKey] = useState<string | null>(activeCourseKey);
+  if (activeCourseKey !== lastCourseKey) {
+    setLastCourseKey(activeCourseKey);
+    reset();
+  }
 
   // ── Click-outside profile popover ─────────────────────────────────────────
   useEffect(() => {
@@ -759,7 +773,7 @@ export default function PresentationGeneratorPage() {
                 >
                   {loading ? <Spinner /> : null}
                   {loading
-                    ? (he ? 'הסוכן מעבד את החומרים...' : 'The agent is processing your materials...')
+                    ? (he ? 'מעבד את החומרים...' : 'The agent is processing your materials...')
                     : (he ? 'צור מצגת' : 'Create Presentation')}
                 </button>
 

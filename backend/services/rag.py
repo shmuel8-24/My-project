@@ -70,6 +70,7 @@ def hybrid_search(
     *,
     file_id: str | None = None,        # backward-compat single-file filter
     file_ids: list[str] | None = None, # multi-file filter (preferred)
+    course_name: str | None = None,    # restrict to chunks tagged with this course
 ) -> tuple[list[str], list[dict]]:
     col       = get_user_collection(user_id)
     bm25_st   = get_user_bm25(user_id)
@@ -88,12 +89,14 @@ def hybrid_search(
 
     _uid_filter = {"user_id": {"$eq": user_id}}
     try:
+        _filters: list[dict] = [_uid_filter]
         if len(_file_ids) == 1:
-            where_filter: dict = {"$and": [_uid_filter, {"file_id": {"$eq": _file_ids[0]}}]}
+            _filters.append({"file_id": {"$eq": _file_ids[0]}})
         elif len(_file_ids) > 1:
-            where_filter = {"$and": [_uid_filter, {"file_id": {"$in": _file_ids}}]}
-        else:
-            where_filter = _uid_filter
+            _filters.append({"file_id": {"$in": _file_ids}})
+        if course_name:
+            _filters.append({"course_name": {"$eq": course_name}})
+        where_filter: dict = _filters[0] if len(_filters) == 1 else {"$and": _filters}
         sem_result = col.query(
             query_embeddings=[query_vector],
             n_results=n_fetch,
@@ -102,10 +105,14 @@ def hybrid_search(
         )
     except Exception:
         try:
+            _fallback_filter = (
+                {"$and": [_uid_filter, {"course_name": {"$eq": course_name}}]}
+                if course_name else _uid_filter
+            )
             sem_result = col.query(
                 query_embeddings=[query_vector],
                 n_results=n_fetch,
-                where=_uid_filter,
+                where=_fallback_filter,
                 include=["documents", "metadatas", "distances"],
             )
         except Exception:
@@ -129,11 +136,15 @@ def hybrid_search(
                 if scores[i] > 0.0 and (
                     not _file_ids
                     or bm25_st["metadatas"][i].get("file_id") in _file_ids
+                ) and (
+                    not course_name
+                    or bm25_st["metadatas"][i].get("course_name") == course_name
                 )
             ]
 
     print(f"▶ HYBRID u{user_id}: {len(sem_ids)} semantic | {len(bm25_ids)} bm25"
-          + (f" | file_ids={_file_ids}" if _file_ids else ""))
+          + (f" | file_ids={_file_ids}" if _file_ids else "")
+          + (f" | course_name={course_name!r}" if course_name else ""))
 
     if not bm25_ids:
         chunks, metas = sem_chunks[:n_results], sem_metas[:n_results]
@@ -150,10 +161,14 @@ def hybrid_search(
     safe_chunks, safe_metas = [], []
     for chunk, meta in zip(chunks, metas):
         meta_uid = meta.get("user_id")
-        if meta_uid == user_id or meta_uid is None:
-            safe_chunks.append(chunk)
-            safe_metas.append(meta)
-        else:
+        if meta_uid != user_id and meta_uid is not None:
             print(f"[Security] DROPPED chunk with user_id={meta_uid} "
                   f"(expected {user_id}) — possible isolation violation")
+            continue
+        if course_name and meta.get("course_name") != course_name:
+            print(f"[Security] DROPPED chunk with course_name={meta.get('course_name')!r} "
+                  f"(expected {course_name!r}) — course isolation enforced")
+            continue
+        safe_chunks.append(chunk)
+        safe_metas.append(meta)
     return safe_chunks, safe_metas

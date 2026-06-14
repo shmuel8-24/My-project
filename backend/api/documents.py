@@ -70,6 +70,11 @@ def upload_pdf(user_id: int):
     if not valid_files:
         return jsonify({"error": "no files provided"}), 400
 
+    # Optional active-course tag (sent by the frontend when a course is selected via
+    # CourseContext). Stamped onto chunk metadata + UserDocument so course-scoped
+    # RAG retrieval (e.g. /api/generate-presentation) can filter to this course only.
+    course_name = strip_html((request.form.get("course_name") or "").strip()) or None
+
     new_text_count = sum(
         1 for f in valid_files
         if os.path.splitext(secure_filename(f.filename).lower())[1] not in _IMG_MIME
@@ -159,6 +164,7 @@ def upload_pdf(user_id: int):
                                 "chunk_index": i,
                                 "user_id":     user_id,
                                 "file_type":   "image_ocr",
+                                "course_name": course_name,
                             }
                             for i in range(len(ocr_chunks))
                         ]
@@ -178,7 +184,7 @@ def upload_pdf(user_id: int):
                                 if not _ocr_exists:
                                     _ocr_db.add(UserDocument(
                                         user_id=user_id, file_id=ocr_file_id, filename=filename,
-                                        file_size_bytes=len(img_bytes)))
+                                        file_size_bytes=len(img_bytes), course_name=course_name))
                                     _ocr_db.commit()
                             except Exception as reg_exc:
                                 print(f"[OCR] WARNING: ownership registration failed: {reg_exc}")
@@ -267,6 +273,7 @@ def upload_pdf(user_id: int):
                     "upload_date": upload_date,
                     "chunk_index": idx,
                     "user_id":     user_id,
+                    "course_name": course_name,
                 })
                 chunk_ids.append(f"{filename}_chunk_{idx}")
 
@@ -296,7 +303,7 @@ def upload_pdf(user_id: int):
             ).first()
             if not _exists:
                 _reg_db.add(UserDocument(user_id=user_id, file_id=file_id, filename=filename,
-                                         file_size_bytes=len(raw_bytes)))
+                                         file_size_bytes=len(raw_bytes), course_name=course_name))
                 _reg_db.commit()
         except Exception as reg_exc:
             print(f"[upload] WARNING: could not register document ownership: {reg_exc}")
