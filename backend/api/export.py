@@ -7,7 +7,8 @@ from flask import Blueprint, Response, jsonify, request, send_file, stream_with_
 
 from api.middleware import token_required
 from extensions import client, limiter
-from models import SessionLocal, TopicMastery, User, UserDocument
+from models import CustomCourse, SessionLocal, SyllabusTopicMastery, TopicMastery, User, UserDocument
+from services.mastery import UNLOCK_THRESHOLD, extract_syllabus_topics
 from services.md_renderer import render_markdown_html
 from services.rag import get_user_collection, hybrid_search
 from services.slides import generate_slide_deck
@@ -631,9 +632,10 @@ def mastery_generate_quiz(user_id: int):
     to produce 3 challenging Hebrew multiple-choice questions grounded in that
     material. Falls back to sound academic knowledge when no documents are loaded.
     """
-    req_data = request.get_json(silent=True) or {}
-    topic    = strip_html((req_data.get("topic") or "").strip())
-    file_id  = req_data.get("file_id") or None
+    req_data    = request.get_json(silent=True) or {}
+    topic       = strip_html((req_data.get("topic") or "").strip())
+    file_id     = req_data.get("file_id") or None
+    course_name = strip_html((req_data.get("course_name") or "").strip()) or None
     if not topic:
         return jsonify({"error": "topic is required"}), 400
 
@@ -648,6 +650,17 @@ def mastery_generate_quiz(user_id: int):
                 return jsonify({"error": "Forbidden — document not found or not yours."}), 403
         finally:
             _gate.close()
+    elif course_name:
+        _gate = SessionLocal()
+        try:
+            _owns_course = _gate.query(CustomCourse).filter(
+                CustomCourse.user_id == user_id,
+                CustomCourse.course_name == course_name,
+            ).first()
+            if not _owns_course:
+                return jsonify({"error": "Forbidden — course not found or not yours."}), 403
+        finally:
+            _gate.close()
 
     # ── Retrieve relevant context from the user's vector store ──────────────
     col       = get_user_collection(user_id)
@@ -655,7 +668,9 @@ def mastery_generate_quiz(user_id: int):
     sources: list[str] = []
 
     if doc_count > 0:
-        chunks, metadatas = hybrid_search(user_id, topic, min(8, doc_count), file_id=file_id)
+        chunks, metadatas = hybrid_search(
+            user_id, topic, min(8, doc_count), file_id=file_id, course_name=course_name,
+        )
         context_section = (
             "חומר לימוד רלוונטי מהמאגר:\n---\n"
             + "\n\n".join(chunks)
@@ -739,31 +754,58 @@ def mastery_generate_quiz(user_id: int):
 @limiter.limit("20 per minute")
 @token_required
 def mastery_submit_results(user_id: int):
-    req_data = request.get_json(silent=True) or {}
-    topic    = strip_html((req_data.get("topic") or "").strip())
-    file_id  = req_data.get("file_id")
-    score    = req_data.get("score")
-    total    = req_data.get("total")
+    req_data    = request.get_json(silent=True) or {}
+    topic       = strip_html((req_data.get("topic") or "").strip())
+    file_id     = req_data.get("file_id")
+    course_name = strip_html((req_data.get("course_name") or "").strip()) or None
+    score       = req_data.get("score")
+    total       = req_data.get("total")
 
     if not topic:
         return jsonify({"error": "topic is required"}), 400
-    if not isinstance(file_id, str) or len(file_id) != 32:
-        return jsonify({"error": "file_id must be a 32-char MD5 hex string"}), 400
     if not isinstance(score, int) or not isinstance(total, int) or total <= 0:
         return jsonify({"error": "score and total must be integers with total > 0"}), 400
     if score < 0 or score > total:
         return jsonify({"error": "score must be between 0 and total"}), 400
+    if not course_name and (not isinstance(file_id, str) or len(file_id) != 32):
+        return jsonify({"error": "file_id must be a 32-char MD5 hex string, or course_name must be provided"}), 400
+
+    quiz_performance_pct = (score / total) * 100
 
     db = SessionLocal()
     try:
+        if course_name:
+            _owns_course = db.query(CustomCourse).filter(
+                CustomCourse.user_id == user_id,
+                CustomCourse.course_name == course_name,
+            ).first()
+            if not _owns_course:
+                return jsonify({"error": "Forbidden — course not found or not yours."}), 403
+
+            record = db.query(SyllabusTopicMastery).filter(
+                SyllabusTopicMastery.user_id == user_id,
+                SyllabusTopicMastery.course_name == course_name,
+                SyllabusTopicMastery.topic == topic,
+            ).first()
+            if not record:
+                return jsonify({"error": "Topic not found for this course."}), 404
+
+            new_mastery = round(record.mastery_pct * 0.4 + quiz_performance_pct * 0.6, 1)
+            new_mastery = min(100.0, max(0.0, new_mastery))
+            record.mastery_pct  = new_mastery
+            record.quiz_count  += 1
+            record.last_updated = datetime.now(timezone.utc)
+
+            db.commit()
+            print(f"[Mastery] u{user_id}: course={course_name!r} topic={topic!r} quiz={score}/{total} → {new_mastery:.1f}%")
+            return jsonify({"mastery_pct": new_mastery, "course_name": course_name, "topic": topic}), 200
+
         _owns = db.query(UserDocument).filter(
             UserDocument.user_id == user_id,
             UserDocument.file_id == file_id,
         ).first()
         if not _owns:
             return jsonify({"error": "Forbidden — document not found or not yours."}), 403
-
-        quiz_performance_pct = (score / total) * 100
 
         record = db.query(TopicMastery).filter(
             TopicMastery.user_id == user_id,
@@ -852,6 +894,77 @@ def mastery_topics(user_id: int):
                 "quiz_count": rec.quiz_count   if rec else 0,
             })
         return jsonify(result), 200
+    finally:
+        db.close()
+
+
+@export_bp.route("/api/mastery/skill-tree", methods=["GET"])
+@limiter.limit("30 per minute")
+@token_required
+def mastery_skill_tree(user_id: int):
+    """Syllabus-derived Skill Tree for a course — ordered topics with per-user mastery + unlock state.
+
+    Topics are extracted (once, lazily) from CustomCourse.full_syllabus_text via
+    extract_syllabus_topics() and persisted as SyllabusTopicMastery rows in syllabus
+    order. Topic N is unlocked once topic N-1's mastery_pct reaches UNLOCK_THRESHOLD;
+    topic 0 is always unlocked.
+    """
+    course_name = (request.args.get("course_name") or "").strip()
+    if not course_name:
+        return jsonify({"error": "course_name is required"}), 400
+
+    db = SessionLocal()
+    try:
+        course = db.query(CustomCourse).filter(
+            CustomCourse.user_id == user_id,
+            CustomCourse.course_name == course_name,
+        ).first()
+        if not course:
+            return jsonify({"error": "Course not found"}), 404
+
+        rows = (
+            db.query(SyllabusTopicMastery)
+              .filter(SyllabusTopicMastery.user_id == user_id, SyllabusTopicMastery.course_name == course_name)
+              .order_by(SyllabusTopicMastery.topic_order)
+              .all()
+        )
+
+        if not rows:
+            if not (course.full_syllabus_text or "").strip():
+                return jsonify({"has_syllabus": False, "topics": []}), 200
+
+            topic_names = extract_syllabus_topics(course.full_syllabus_text)
+            if not topic_names:
+                return jsonify({"has_syllabus": False, "topics": []}), 200
+
+            for i, name in enumerate(topic_names):
+                db.add(SyllabusTopicMastery(
+                    user_id=user_id, course_name=course_name, topic=name, topic_order=i,
+                ))
+            db.commit()
+
+            rows = (
+                db.query(SyllabusTopicMastery)
+                  .filter(SyllabusTopicMastery.user_id == user_id, SyllabusTopicMastery.course_name == course_name)
+                  .order_by(SyllabusTopicMastery.topic_order)
+                  .all()
+            )
+
+        result = []
+        prev_mastery: float | None = None
+        for i, row in enumerate(rows):
+            is_unlocked = i == 0 or (prev_mastery is not None and prev_mastery >= UNLOCK_THRESHOLD)
+            result.append({
+                "topic_id":    row.id,
+                "topic":       row.topic,
+                "topic_order": row.topic_order,
+                "mastery_pct": row.mastery_pct,
+                "quiz_count":  row.quiz_count,
+                "is_unlocked": is_unlocked,
+            })
+            prev_mastery = row.mastery_pct
+
+        return jsonify({"has_syllabus": True, "course_name": course_name, "topics": result}), 200
     finally:
         db.close()
 

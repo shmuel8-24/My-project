@@ -9,31 +9,42 @@ _SLIDE_SYSTEM_PROMPT = (
     "professional slide-authoring tool. Your sole function is to transform "
     "source material into a structured slide outline in the style of a "
     "top-tier management consulting firm (McKinsey/BCG): crisp, data-driven, "
-    "one idea per slide. "
+    "one idea per slide, with a strong narrative line from cover to close. "
+    "This is a comprehensive deep-dive deck, not a short summary. "
     "Output ONLY a valid JSON object — no markdown fences, no extra keys.\n\n"
     "Required schema:\n"
     '{"slides":[{"title":"...","content":"...","layoutType":"...","imageQuery":"..."}]}\n\n'
     "Rules:\n"
-    "1. Output exactly 10 slide objects, in presentation order.\n"
+    "1. Output EXACTLY 20 slide objects, in presentation order — this is a "
+    "deep-dive deck, never stop early and never output fewer than 20 slides.\n"
     "2. \"layoutType\" must be exactly one of: \"Title_Slide\", \"Image_Right\", \"Big_Metric\".\n"
     "3. Slide 1 MUST use \"Title_Slide\": \"title\" is the presentation title, "
     "\"content\" is a one-line subtitle/tagline.\n"
-    "4. The LAST slide MUST also use \"Title_Slide\" as a closing/summary slide "
-    "(\"title\" e.g. a Hebrew/English word for 'Summary' or 'Thank you', "
-    "\"content\" is a one-line closing takeaway).\n"
-    "5. Use \"Big_Metric\" for at least 1 and at most 3 slides where the source "
+    "4. Slide 20 (the LAST slide) MUST use \"Image_Right\" as a Strategic "
+    "Summary & Conclusion: \"title\" is a full-sentence action title stating "
+    "the overall strategic implication of the deck, and \"content\" is 3-5 "
+    "full-sentence bullet points (separated by \"\\n\") covering the deck's "
+    "key takeaways and recommended next steps. Slide 20 must be as "
+    "content-rich as any body slide — NEVER a sparse closing such as "
+    "'תודה' / 'Thank you' / 'שאלות?' / 'Questions?'.\n"
+    "5. ACTION TITLES: For every slide EXCEPT slide 1 (the \"title\" cover), "
+    "\"title\" should be a full-sentence action title that states the slide's "
+    "core finding or takeaway — never a static topic label. Write "
+    "'Market share grew by 15% due to aggressive regulation', not "
+    "'Market Overview'.\n"
+    "6. Use \"Big_Metric\" for at least 1 and at most 3 slides where the source "
     "material contains a striking number, percentage, or statistic: \"title\" is "
     "a short label/headline, \"content\" is ONLY the metric itself "
     "(e.g. \"85%\", \"x3\", \"2.4M\") — no extra words.\n"
-    "6. Use \"Image_Right\" for the remaining slides: \"title\" is the slide headline, "
+    "7. Use \"Image_Right\" for the remaining slides: \"title\" is the slide headline, "
     "\"content\" is 3-5 short bullet points separated by \"\\n\", each bullet "
     "concise (max ~12 words).\n"
-    "7. \"imageQuery\" is a short English phrase (2-5 words) describing an image "
+    "8. \"imageQuery\" is a short English phrase (2-5 words) describing an image "
     "that would visually support the slide — required for every slide, even "
     "Title_Slide and Big_Metric (provide a thematically relevant query).\n"
-    "8. Write all titles/content in the same language as the source text "
+    "9. Write all titles/content in the same language as the source text "
     "(Hebrew for Hebrew source material).\n"
-    "9. Base all factual content strictly on the provided source material — "
+    "10. Base all factual content strictly on the provided source material — "
     "do not invent statistics that aren't grounded in the text; if no real "
     "metric exists, use fewer Big_Metric slides (but at least 1)."
 )
@@ -293,15 +304,15 @@ BUILD_PRESENTATION_TOOL = {
             "Construct the final presentation deck from the aggregated source "
             "material gathered by parse_document / transcribe_media / "
             "analyze_image. Call this once, with the complete ordered list of "
-            "15-20 slides."
+            "exactly 20 slides."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "slides": {
                     "type": "array",
-                    "description": "Ordered list of 15-20 slide objects (comprehensive deep-dive deck).",
-                    "minItems": 15,
+                    "description": "Ordered list of exactly 20 slide objects (comprehensive deep-dive deck).",
+                    "minItems": 20,
                     "maxItems": 20,
                     "items": {
                         "type": "object",
@@ -472,7 +483,7 @@ def _validate_slides(slides_obj: dict) -> list[dict]:
 def generate_slide_deck(
     client, topic: str, context: str, course_name: str = "",
 ) -> tuple[list[dict], str | None]:
-    """Tool: construct a 10-slide McKinsey/BCG-style deck (JSON) from source text.
+    """Tool: construct a 20-slide McKinsey/BCG-style deck (JSON) from source text.
 
     Returns (slides, error_message). On success error_message is None and
     slides is a non-empty list of validated {title, content, layoutType,
@@ -487,7 +498,7 @@ def generate_slide_deck(
     if safe_course:
         user_message_parts.append(f"Course / subject context: {safe_course}")
     user_message_parts.append(f"Source material:\n---\n{safe_context}\n---")
-    user_message_parts.append("Generate the 10-slide JSON deck now.")
+    user_message_parts.append("Generate the 20-slide JSON deck now.")
     user_message = "\n\n".join(user_message_parts)
 
     try:
@@ -499,7 +510,7 @@ def generate_slide_deck(
             ],
             response_format={"type": "json_object"},
             temperature=0.7,
-            max_tokens=3000,
+            max_tokens=8000,
         )
         raw        = response.choices[0].message.content or ""
         slides_obj = json.loads(raw)
@@ -770,7 +781,7 @@ def generate_deck_via_agent(
             "Additional context retrieved from the user's existing course "
             f"document knowledge base (vector database):\n---\n{safe_rag_context}\n---"
         )
-    user_message_parts.append("Call build_presentation now with the complete deck (15-20 slides).")
+    user_message_parts.append("Call build_presentation now with the complete deck (exactly 20 slides).")
     user_message = "\n\n".join(user_message_parts)
 
     try:

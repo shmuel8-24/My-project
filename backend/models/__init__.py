@@ -157,6 +157,26 @@ class CustomCourse(_Base):
     created_at         = Column(DateTime,    default=lambda: datetime.now(timezone.utc))
 
 
+class SyllabusTopicMastery(_Base):
+    """Per-user, per-course syllabus-topic mastery — powers the Mastery page's Skill Tree.
+
+    Rows are lazily created (one per extracted syllabus topic, in teaching order) the
+    first time GET /api/mastery/skill-tree is called for a given course. Distinct from
+    TopicMastery (which tracks per-document mastery, not per-syllabus-topic).
+    """
+    __tablename__ = "syllabus_topic_mastery"
+    id           = Column(Integer, primary_key=True, index=True)
+    user_id      = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"),
+                          nullable=False, index=True)
+    course_name  = Column(String(200), nullable=False, index=True)
+    topic        = Column(String(200), nullable=False)
+    topic_order  = Column(Integer, nullable=False, server_default="0")
+    mastery_pct  = Column(Float,   nullable=False, server_default="0.0")
+    quiz_count   = Column(Integer, nullable=False, server_default="0")
+    last_updated = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    __table_args__ = (UniqueConstraint("user_id", "course_name", "topic", name="uq_user_course_topic"),)
+
+
 # ── DB engine ─────────────────────────────────────────────────────────────────
 os.makedirs("./data", exist_ok=True)  # ensure data/ exists before SQLite opens it
 _db_engine  = create_engine("sqlite:///./data/chat.db", connect_args={"check_same_thread": False})

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { Settings as IconSettings, Home, BookOpen, PenTool, Presentation, Brain, Target, Monitor, LogOut } from 'lucide-react';
+import { Settings as IconSettings, Home, BookOpen, PenTool, Presentation, Brain, Target, Monitor, LogOut, Lock } from 'lucide-react';
 import { useAuth }       from '../providers/auth';
 import { useLanguage }   from '../providers/language';
 import { useCourse }     from '../providers/course';
@@ -527,6 +527,101 @@ function GapCardUI({ card, he, onTest }: {
   );
 }
 
+/* ── Skill Tree (syllabus-derived progress path) ─────────────────────────────── */
+const UNLOCK_THRESHOLD = 50;
+
+interface SkillTreeTopic {
+  topic_id: number;
+  topic: string;
+  topic_order: number;
+  mastery_pct: number;
+  quiz_count: number;
+  is_unlocked: boolean;
+}
+
+function SkillTreeCard({ node, index, he, courseName, onTest }: {
+  node: SkillTreeTopic;
+  index: number;
+  he: boolean;
+  courseName: string;
+  onTest: (topic: string, fileId: string, courseName: string) => void;
+}) {
+  const pct    = Math.round(node.mastery_pct);
+  const color  = node.is_unlocked ? gapColor(pct) : '#B8C7B0';
+  const radius = 24;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference * (1 - pct / 100);
+
+  return (
+    <div className="relative flex items-start gap-4">
+      {/* Connector to previous node */}
+      {index > 0 && (
+        <div
+          className="absolute w-0.5 h-5"
+          style={{ top: '-20px', insetInlineStart: '27px', background: node.is_unlocked ? '#8BAF84' : '#D3E0D8' }}
+        />
+      )}
+
+      {/* Circular progress */}
+      <div className="relative shrink-0 w-14 h-14">
+        <svg viewBox="0 0 56 56" className="w-14 h-14 -rotate-90" aria-hidden="true">
+          <circle cx="28" cy="28" r={radius} fill="none" stroke="#E2EBE5" strokeWidth="5" />
+          {node.is_unlocked && (
+            <circle
+              cx="28" cy="28" r={radius} fill="none" stroke={color} strokeWidth="5"
+              strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round"
+              style={{ transition: 'stroke-dashoffset 0.85s cubic-bezier(0.4,0,0.2,1)' }}
+            />
+          )}
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center">
+          {node.is_unlocked
+            ? <span className="text-xs font-bold tabular-nums" style={{ color }}>{pct}%</span>
+            : <Lock className="w-4 h-4" style={{ color: '#9DBAA4' }} />}
+        </div>
+      </div>
+
+      {/* Topic card */}
+      <div
+        className="flex-1 flex items-center justify-between gap-3 p-4 rounded-2xl mb-1"
+        style={{
+          background: node.is_unlocked ? '#DCE8D6' : '#EAF0E6',
+          border: `1px solid ${node.is_unlocked ? '#BCCAB5' : '#D9E3D6'}`,
+          opacity: node.is_unlocked ? 1 : 0.7,
+        }}
+      >
+        <div className="min-w-0">
+          <h4 className="text-sm font-bold leading-snug" style={{ color: node.is_unlocked ? '#1a2e14' : '#8a9c80' }}>
+            {node.topic}
+          </h4>
+          {node.quiz_count > 0 ? (
+            <p className="text-[11px] mt-0.5" style={{ color: '#9aaf8a' }}>
+              {he
+                ? `✓ ${node.quiz_count} חידון${node.quiz_count !== 1 ? 'ים' : ''} הושלמ${node.quiz_count !== 1 ? 'ו' : ''}`
+                : `✓ ${node.quiz_count} quiz${node.quiz_count !== 1 ? 'zes' : ''} completed`}
+            </p>
+          ) : (
+            <p className="text-[11px] mt-0.5" style={{ color: node.is_unlocked ? '#b0c4a5' : '#a9bda1' }}>
+              {node.is_unlocked
+                ? (he ? '◦ עדיין לא נבדק — לחץ להתחלה' : '◦ Never tested — press to begin')
+                : (he ? `🔒 נעול — דרוש ${UNLOCK_THRESHOLD}%+ בנושא הקודם` : `🔒 Locked — reach ${UNLOCK_THRESHOLD}%+ on the previous topic`)}
+            </p>
+          )}
+        </div>
+        {node.is_unlocked && (
+          <button
+            onClick={() => onTest(node.topic, '', courseName)}
+            className="shrink-0 px-4 py-2.5 rounded-xl text-xs font-bold text-white active:scale-95 transition-transform duration-150"
+            style={{ background: 'linear-gradient(135deg, #517B3E 0%, #2A3B22 100%)', boxShadow: '0 4px 16px rgba(81,123,62,0.32)' }}
+          >
+            {he ? 'בדוק אותי' : 'Quiz me'}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ── Sidebar ─────────────────────────────────────────────────────────────────── */
 interface SidebarProps {
   isOpen: boolean;
@@ -777,11 +872,17 @@ export default function MasteryPage() {
   const [topics,        setTopics]        = useState<GapCard[]>([]);
   const [topicsLoading, setTopicsLoading] = useState(true);
 
+  // ── Skill Tree state (syllabus-derived, from backend) ──────────────────────
+  const [skillTree,        setSkillTree]        = useState<SkillTreeTopic[]>([]);
+  const [skillTreeLoading, setSkillTreeLoading] = useState(true);
+  const [hasSyllabus,      setHasSyllabus]      = useState(false);
+
   // ── Quiz state ─────────────────────────────────────────────────────────────
-  const [quizState,     setQuizState]     = useState<QuizState>('closed');
-  const [quizTopic,     setQuizTopic]     = useState('');
-  const [quizFileId,    setQuizFileId]    = useState('');
-  const [quizQuestions, setQuizQuestions] = useState<QuizQuestion[]>([]);
+  const [quizState,      setQuizState]      = useState<QuizState>('closed');
+  const [quizTopic,      setQuizTopic]      = useState('');
+  const [quizFileId,     setQuizFileId]     = useState('');
+  const [quizCourseName, setQuizCourseName] = useState<string | null>(null);
+  const [quizQuestions,  setQuizQuestions]  = useState<QuizQuestion[]>([]);
   const [quizCurrent,   setQuizCurrent]   = useState(0);
   const [quizScore,     setQuizScore]     = useState(0);
   const [quizSelected,  setQuizSelected]  = useState<number | null>(null);
@@ -872,6 +973,25 @@ export default function MasteryPage() {
       .catch(() => { setTopicsLoading(false); });
   }, [authUser, selectedCourse]);
 
+  // ── Load Skill Tree (syllabus-derived topics + mastery) from backend ──────
+  useEffect(() => {
+    if (!authUser || !selectedCourse) return;
+    const token = getToken();
+    const request = token
+      ? fetch(`${API}/api/mastery/skill-tree?course_name=${encodeURIComponent(selectedCourse.name)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+      : Promise.resolve(null);
+    request
+      .then(r => (r && r.ok) ? r.json() : { has_syllabus: false, topics: [] })
+      .then((data: { has_syllabus: boolean; topics: SkillTreeTopic[] }) => {
+        setHasSyllabus(!!data.has_syllabus);
+        setSkillTree(data.topics ?? []);
+        setSkillTreeLoading(false);
+      })
+      .catch(() => { setHasSyllabus(false); setSkillTree([]); setSkillTreeLoading(false); });
+  }, [authUser, selectedCourse]);
+
   // ── Logout ─────────────────────────────────────────────────────────────────
   const handleLogout = useCallback(() => {
     ['levy_ai_token','levy_ai_email','levy_ai_first_name','levy_ai_last_name',
@@ -883,8 +1003,8 @@ export default function MasteryPage() {
   }, []);
 
   // ── Submit quiz results & update mastery in DB ────────────────────────────
-  const submitResults = useCallback(async (topic: string, fileId: string, score: number, total: number) => {
-    if (!fileId || total === 0) return;
+  const submitResults = useCallback(async (topic: string, fileId: string, score: number, total: number, courseName?: string | null) => {
+    if (total === 0 || (!fileId && !courseName)) return;
     setSubmitState('loading');
     setNewMasteryPct(null);
     try {
@@ -895,10 +1015,12 @@ export default function MasteryPage() {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ topic, file_id: fileId, score, total }),
+        body: JSON.stringify(
+          courseName ? { topic, course_name: courseName, score, total } : { topic, file_id: fileId, score, total }
+        ),
       });
       if (!res.ok) throw new Error('submit failed');
-      const data = await res.json() as { mastery_pct: number; file_id: string };
+      const data = await res.json() as { mastery_pct: number; file_id?: string };
       setNewMasteryPct(data.mastery_pct);
       setSubmitState('success');
       if (score / total >= 0.9) {
@@ -927,20 +1049,37 @@ export default function MasteryPage() {
           }), 500);
         });
       }
-      setTopics(prev => prev.map(t =>
-        t.id === data.file_id
-          ? { ...t, mastery: Math.round(data.mastery_pct), quiz_count: t.quiz_count + 1 }
-          : t
-      ));
+      if (courseName) {
+        setSkillTree(prev => {
+          const updated = prev.map(t =>
+            t.topic === topic
+              ? { ...t, mastery_pct: data.mastery_pct, quiz_count: t.quiz_count + 1 }
+              : t
+          );
+          let prevMastery: number | null = null;
+          return updated.map((t, i) => {
+            const unlocked = i === 0 || (prevMastery !== null && prevMastery >= UNLOCK_THRESHOLD);
+            prevMastery = t.mastery_pct;
+            return { ...t, is_unlocked: unlocked };
+          });
+        });
+      } else {
+        setTopics(prev => prev.map(t =>
+          t.id === data.file_id
+            ? { ...t, mastery: Math.round(data.mastery_pct), quiz_count: t.quiz_count + 1 }
+            : t
+        ));
+      }
     } catch {
       setSubmitState('error');
     }
   }, []);
 
   // ── Start quiz: fetch from RAG backend ────────────────────────────────────
-  const startQuiz = useCallback(async (topic: string, fileId: string) => {
+  const startQuiz = useCallback(async (topic: string, fileId: string, courseName?: string) => {
     setQuizTopic(topic);
     setQuizFileId(fileId);
+    setQuizCourseName(courseName ?? null);
     setQuizQuestions([]);
     setQuizCurrent(0);
     setQuizScore(0);
@@ -958,7 +1097,7 @@ export default function MasteryPage() {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ topic, file_id: fileId }),
+        body: JSON.stringify(courseName ? { topic, course_name: courseName } : { topic, file_id: fileId }),
       });
 
       const data = await res.json() as { questions?: QuizQuestion[]; error?: string };
@@ -999,9 +1138,9 @@ export default function MasteryPage() {
       setQuizScore(newScore);
       setQuizState('done');
       setQuizSelected(null);
-      submitResults(quizTopic, quizFileId, newScore, quizQuestions.length);
+      submitResults(quizTopic, quizFileId, newScore, quizQuestions.length, quizCourseName);
     }
-  }, [quizSelected, quizQuestions, quizCurrent, quizScore, quizTopic, quizFileId, submitResults]);
+  }, [quizSelected, quizQuestions, quizCurrent, quizScore, quizTopic, quizFileId, quizCourseName, submitResults]);
 
   // ── Quiz: close ────────────────────────────────────────────────────────────
   const handleQuizClose = useCallback(() => {
@@ -1010,10 +1149,10 @@ export default function MasteryPage() {
     setNewMasteryPct(null);
   }, []);
 
-  // ── Quiz: retry (same document, new questions) ────────────────────────────
+  // ── Quiz: retry (same document/topic, new questions) ──────────────────────
   const handleQuizRetry = useCallback((topic: string) => {
-    startQuiz(topic, quizFileId);
-  }, [quizFileId, startQuiz]);
+    startQuiz(topic, quizFileId, quizCourseName ?? undefined);
+  }, [quizFileId, quizCourseName, startQuiz]);
 
   if (authLoading || !authUser || !courseHydrated || !selectedCourse) {
     return (
@@ -1234,6 +1373,47 @@ export default function MasteryPage() {
               </p>
             </div>
           </div>
+
+          {/* Skill Tree — syllabus-derived progress path (shown when the active course has a syllabus) */}
+          {skillTreeLoading ? (
+            <div className="flex flex-col gap-5">
+              {[0, 1, 2].map(i => (
+                <div key={i} className="flex items-center gap-4">
+                  <Skeleton className="w-14 h-14 rounded-full shrink-0" />
+                  <Skeleton className="flex-1 h-16 rounded-2xl" />
+                </div>
+              ))}
+            </div>
+          ) : hasSyllabus && skillTree.length > 0 && (
+            <>
+              {/* Section header */}
+              <div className="flex items-center justify-between px-1">
+                <div className="flex items-center gap-2">
+                  <div className="w-1 h-4 rounded-full" style={{ background: 'linear-gradient(180deg, #517B3E, #2A3B22)' }} />
+                  <h3 className="text-xs font-bold text-[#2A3B22] uppercase tracking-wider">
+                    {he ? `מסלול התקדמות · ${skillTree.length}` : `Skill Tree · ${skillTree.length}`}
+                  </h3>
+                </div>
+                <span className="text-[11px] font-medium text-[#7a9268]">
+                  {he ? `${selectedCourse.icon} ${selectedCourse.name}` : `${selectedCourse.icon} ${selectedCourse.name}`}
+                </span>
+              </div>
+
+              {/* Vertical progress path */}
+              <div className="flex flex-col gap-1 px-1">
+                {skillTree.map((node, i) => (
+                  <SkillTreeCard
+                    key={node.topic_id}
+                    node={node}
+                    index={i}
+                    he={he}
+                    courseName={selectedCourse.name}
+                    onTest={startQuiz}
+                  />
+                ))}
+              </div>
+            </>
+          )}
 
           {/* Topics section — loading / empty / populated */}
           {topicsLoading ? (
