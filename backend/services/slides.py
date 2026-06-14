@@ -1,6 +1,5 @@
 import json
 
-from services.images import get_image_provider
 from services.security import _sanitize
 
 VALID_SLIDE_LAYOUTS = {"Title_Slide", "Image_Right", "Big_Metric"}
@@ -55,7 +54,13 @@ _SLIDE_SYSTEM_PROMPT = (
 DECK_LAYOUTS = {
     "title", "bullets", "metric", "split-screen",
     "timeline", "barChart", "tileGrid", "bleedImage", "architecture",
+    "quote_focus", "formula_heavy", "two_column",
 }
+
+# Layouts that may carry an optional "highlightBox" callout (see rule 24 and
+# _validate_deck_slides) — frontend support is limited to these in SlideViewer.tsx.
+HIGHLIGHT_BOX_LAYOUTS = {"bullets", "split-screen", "bleedImage", "quote_focus", "formula_heavy"}
+HIGHLIGHT_BOX_TYPES = {"tip", "warning", "definition"}
 
 # Allowed iconName values for "tileGrid" slides — must match the keys of
 # TILE_ICONS in frontend/src/components/SlideViewer.tsx.
@@ -74,13 +79,20 @@ _DECK_SYSTEM_PROMPT = (
     "Respond ONLY by calling the build_presentation tool with the complete deck.\n\n"
     "Required schema per slide:\n"
     '{"title":"...","layout":"title"|"bullets"|"metric"|"split-screen"|'
-    '"timeline"|"barChart"|"tileGrid"|"bleedImage"|"architecture",'
+    '"timeline"|"barChart"|"tileGrid"|"bleedImage"|"architecture"|'
+    '"quote_focus"|"formula_heavy"|"two_column",'
     '"content":[...]|"..."|123,"timelineData":[...],"chartData":[...],'
-    '"tiles":[...],"layers":[...],"nodes":[...],"connections":[...]}\n'
+    '"tiles":[...],"layers":[...],"nodes":[...],"connections":[...],'
+    '"latexFormula":"...","attribution":"...","highlightBox":{...},'
+    '"keyTakeaway":{...}}\n'
     "(\"timelineData\" / \"chartData\" / \"tiles\" / \"layers\"+\"nodes\"+"
     "\"connections\" are ONLY present for their matching layout — omit them "
     "for every other layout, and omit \"content\" for \"timeline\", "
-    "\"barChart\", \"tileGrid\", and \"architecture\".)\n\n"
+    "\"barChart\", \"tileGrid\", and \"architecture\". \"latexFormula\" is "
+    "ONLY for \"formula_heavy\"; \"attribution\" is ONLY for \"quote_focus\"; "
+    "\"keyTakeaway\" is REQUIRED for \"two_column\" and omitted for every "
+    "other layout; \"highlightBox\" is an OPTIONAL extra on top of "
+    + json.dumps(sorted(HIGHLIGHT_BOX_LAYOUTS)) + " — see rule 24.)\n\n"
     "Rules:\n"
     "1. Output EXACTLY 20 slide objects, in presentation order. This is a "
     "comprehensive deep-dive deck, not a short summary — never stop early and "
@@ -88,7 +100,7 @@ _DECK_SYSTEM_PROMPT = (
     "fixed roles — see rule 4.\n"
     "2. \"layout\" must be exactly one of: \"title\", \"bullets\", \"metric\", "
     "\"split-screen\", \"timeline\", \"barChart\", \"tileGrid\", \"bleedImage\", "
-    "\"architecture\".\n"
+    "\"architecture\", \"quote_focus\", \"formula_heavy\", \"two_column\".\n"
     "3. Slide 1 MUST use layout \"title\": \"title\" is the presentation title, "
     "\"content\" is a one-line subtitle/tagline string.\n"
     "4. STRUCTURAL MANDATE for slides 2 and 20 — both use layout \"bullets\" "
@@ -115,14 +127,20 @@ _DECK_SYSTEM_PROMPT = (
     "6. LAYOUT DIVERSITY: Across slides 3-19 (the body slides between the "
     "Executive Summary and the Strategic Summary & Conclusion), use a varied "
     "mix of the body layouts (\"bullets\", \"metric\", \"split-screen\", "
-    "\"timeline\", \"barChart\", \"tileGrid\", \"bleedImage\", \"architecture\") "
+    "\"timeline\", \"barChart\", \"tileGrid\", \"bleedImage\", \"architecture\", "
+    "\"quote_focus\", \"formula_heavy\", \"two_column\") "
     "— do not repeat the same layout more than 2-3 times in a row, and do not "
     "produce a deck that is almost entirely one layout. Use \"timeline\", "
-    "\"barChart\", \"tileGrid\", and \"architecture\" only when the source "
-    "material genuinely supports them (a chronology, multiple comparable "
-    "percentages, 3-6 parallel items/categories, or a system/process/data "
-    "architecture, respectively) — otherwise prefer \"bullets\" or "
-    "\"split-screen\".\n"
+    "\"barChart\", \"tileGrid\", \"architecture\", \"quote_focus\", "
+    "\"formula_heavy\", and \"two_column\" only when the source material "
+    "genuinely supports them (a chronology, multiple comparable percentages, "
+    "3-6 parallel items/categories, a system/process/data architecture, a key "
+    "principle or notable quote worth foregrounding, a mathematical/technical "
+    "formula, or a single key term/concept worth its own definition panel, "
+    "respectively) — otherwise prefer \"bullets\" or \"split-screen\". For "
+    "technical subjects (physics, mathematics, computer science, engineering, "
+    "statistics) where the source material contains formulas or equations, "
+    "use \"formula_heavy\" for at least 1 slide.\n"
     "7. Use \"metric\" for at least 1 and at most 3 slides where the source "
     "material contains a striking number, percentage, or statistic: \"content\" "
     "is ONLY the metric itself (e.g. \"85%\", \"x3\", \"2.4M\", or a bare number) "
@@ -167,14 +185,18 @@ _DECK_SYSTEM_PROMPT = (
     "\"content\" for this layout.\n"
     "15. LANGUAGE: You MUST generate all slide content — titles, subtitles, "
     "bullet points, metric labels and values, tile titles/text, timeline "
-    "dates/events, chart labels, and architecture layer/node labels — "
+    "dates/events, chart labels, architecture layer/node labels, quote "
+    "content/attribution, and highlightBox title/text — "
     "entirely in Hebrew, regardless of the source material's language. If "
     "the source document is in English or any other language, translate the "
     "key points into professional, natural Hebrew with correct terminology "
     "— do not leave any slide text in English. \"iconName\" values and "
     "\"id\" values in \"architecture\" nodes/connections are identifiers, "
     "not display text, and must always stay in English exactly as "
-    "specified.\n"
+    "specified. \"latexFormula\" is the one exception: it must remain "
+    "standard LaTeX math notation (variable names, Greek letters, operators "
+    "— e.g. \"E = mc^2\") and must NOT be translated or transliterated into "
+    "Hebrew.\n"
     "16. Base all factual content strictly on the provided source material — "
     "do not invent statistics that aren't grounded in the text; if no real "
     "metric exists, use fewer \"metric\"/\"barChart\" slides.\n"
@@ -192,13 +214,18 @@ _DECK_SYSTEM_PROMPT = (
     "borders, and icons. Never write slide text that describes or assumes "
     "a dark/black background (e.g. avoid phrases like 'on a dark "
     "background' or 'against a black backdrop').\n"
-    "19. STOCK PHOTO QUERY: For \"split-screen\" and \"bleedImage\" slides "
-    "ONLY, also include \"imageQuery\": a short ENGLISH stock-photo search "
-    "phrase (2-4 words) that visually represents the slide's subject — "
-    "translate the concept into English even though the rest of the slide is "
-    "in Hebrew (e.g. for a slide about \"מגמות בשוק העבודה\" use \"job market "
-    "trends\"; for \"שיתופי פעולה עסקיים\" use \"business partnership "
-    "handshake\"). Omit \"imageQuery\" entirely for every other layout.\n"
+    "19. AI IMAGE PROMPT: For \"split-screen\" and \"bleedImage\" slides "
+    "ONLY, also include \"imagePrompt\": a highly descriptive, 15-20 word "
+    "image-generation prompt IN ENGLISH that visually represents the slide's "
+    "subject — translate the concept into English even though the rest of "
+    "the slide is in Hebrew. Focus on cinematic, professional, and academic "
+    "aesthetics (e.g. for a slide about \"מגמות בשוק העבודה\" write "
+    "\"a sleek modern office skyline at dusk, glowing data dashboards "
+    "reflected in glass windows, cinematic professional photography, "
+    "academic tone\"; for a slide about quantum computing write \"a "
+    "futuristic quantum computer glowing in a dark high-tech laboratory, "
+    "hyper-realistic, cinematic lighting\"). Do NOT provide URLs, only the "
+    "prompt text. Omit \"imagePrompt\" entirely for every other layout.\n"
     "20. DEPTH OF ANALYSIS: This deck is a comprehensive deep dive, not a "
     "high-level overview. For every slide, extract and surface concrete "
     "technical details, definitions, named concepts, figures, and "
@@ -214,7 +241,48 @@ _DECK_SYSTEM_PROMPT = (
     "roughly evenly across these phases — do not front-load all the depth "
     "into the first few slides and pad the rest with filler. Each slide's "
     "action title (rule 5) must still report that slide's specific finding "
-    "within its phase."
+    "within its phase.\n"
+    "22. Use \"quote_focus\" for a slide built around a single foundational "
+    "principle, law, definition, or notable claim drawn directly from the "
+    "source material: \"content\" is ONE full-sentence Hebrew string (15-30 "
+    "words) presenting that insight — not a list. Optionally include "
+    "\"attribution\": a short Hebrew label naming its source (a named "
+    "person, law, theorem, or publication, e.g. \"החוק השני של ניוטון\"). "
+    "Use this for foundational/definitional material, not for routine "
+    "findings (use \"bullets\" or \"metric\" for those).\n"
+    "23. Use \"formula_heavy\" for a slide centered on a mathematical, "
+    "physical, statistical, or algorithmic-complexity formula that is "
+    "present in or directly relevant to the source material: include "
+    "\"latexFormula\", ONE LaTeX math expression WITHOUT surrounding \"$\" "
+    "or \"$$\" delimiters (e.g. \"E = mc^2\" or \"\\\\frac{\\\\partial "
+    "\\\\psi}{\\\\partial t} = -\\\\frac{i}{\\\\hbar}\\\\hat{H}\\\\psi\"). "
+    "Optionally include \"content\" as an array of 1-3 Hebrew bullet strings "
+    "explaining the formula's terms, derivation, or application. NEVER "
+    "invent a formula that isn't grounded in or directly relevant to the "
+    "source material — if no genuine formula fits, do not use this layout.\n"
+    "24. HIGHLIGHT BOX: For slides using layout \"bullets\", \"split-screen\", "
+    "\"bleedImage\", \"quote_focus\", or \"formula_heavy\", you MAY "
+    "optionally add \"highlightBox\" — ONE supplementary callout for an "
+    "important warning, practical tip, or formal definition drawn from the "
+    "source material: {\"type\": \"tip\"|\"warning\"|\"definition\", "
+    "\"title\": short Hebrew label (max ~5 words), \"text\": one Hebrew "
+    "sentence (max ~20 words)}. Use sparingly — at most 2-4 slides across "
+    "the whole deck, only where the source material genuinely contains a "
+    "noteworthy caveat, exception, practical tip, or term worth a formal "
+    "definition. Omit \"highlightBox\" entirely otherwise.\n"
+    "25. Use \"two_column\" for a slide that explains ONE key term, concept, "
+    "or principle from the source material alongside supporting bullets: "
+    "\"content\" is an array of 3-5 full-sentence Hebrew bullet strings "
+    "(roughly 12-25 words each) giving context, examples, or implications of "
+    "that concept, and \"keyTakeaway\" (REQUIRED for this layout) is "
+    "{\"title\": a short Hebrew label naming the concept/term (max ~6 words), "
+    "\"text\": a 1-2 sentence Hebrew definition or explanation of it (max ~35 "
+    "words)}, rendered as a single prominent panel beside the bullets. Do not "
+    "also include \"highlightBox\" on a \"two_column\" slide — \"keyTakeaway\" "
+    "already provides the slide's prominent panel. Use \"two_column\" for "
+    "definitional/conceptual material, distinct from \"quote_focus\" (a single "
+    "standalone sentence with no bullets) and from routine findings (use "
+    "\"bullets\" for those)."
 )
 
 BUILD_PRESENTATION_TOOL = {
@@ -245,7 +313,7 @@ BUILD_PRESENTATION_TOOL = {
                             "layout": {
                                 "type": "string",
                                 "enum": sorted(DECK_LAYOUTS),
-                                "description": "Slide layout: 'title' (cover/closing), 'bullets' (bullet list), 'metric' (single big number/stat), 'split-screen' (bullet list paired with a visual placeholder), 'timeline' (chronological milestones), 'barChart' (comparable percentages), 'tileGrid' (3-6 parallel icon+text items), 'bleedImage' (1-3 bullets paired with an edge-to-edge visual), or 'architecture' (layered system/pipeline diagram).",
+                                "description": "Slide layout: 'title' (cover/closing), 'bullets' (bullet list), 'metric' (single big number/stat), 'split-screen' (bullet list paired with a visual placeholder), 'timeline' (chronological milestones), 'barChart' (comparable percentages), 'tileGrid' (3-6 parallel icon+text items), 'bleedImage' (1-3 bullets paired with an edge-to-edge visual), 'architecture' (layered system/pipeline diagram), 'quote_focus' (a single foundational principle/definition/quote), 'formula_heavy' (a LaTeX formula with explanatory bullets), or 'two_column' (bullets paired with a required keyTakeaway definition panel).",
                             },
                             "content": {
                                 "description": (
@@ -253,7 +321,14 @@ BUILD_PRESENTATION_TOOL = {
                                     "'split-screen', or 'bleedImage': an array of "
                                     "short bullet strings. For 'title': a one-line "
                                     "subtitle string. For 'metric': the bare metric "
-                                    "as a string or number (e.g. \"85%\"). Omit "
+                                    "as a string or number (e.g. \"85%\"). For "
+                                    "'quote_focus': a single full-sentence string "
+                                    "(the quote/insight). For 'formula_heavy': an "
+                                    "optional array of 1-3 explanatory bullet "
+                                    "strings (may be omitted). For 'two_column': "
+                                    "an array of 3-5 full-sentence bullet strings "
+                                    "for the left column (paired with the required "
+                                    "'keyTakeaway' panel on the other side). Omit "
                                     "entirely for 'timeline', 'barChart', "
                                     "'tileGrid', and 'architecture' (use "
                                     "timelineData/chartData/tiles/layers+nodes+"
@@ -332,9 +407,36 @@ BUILD_PRESENTATION_TOOL = {
                                     "required": ["from", "to"],
                                 },
                             },
-                            "imageQuery": {
+                            "imagePrompt": {
                                 "type": "string",
-                                "description": "Only for 'split-screen' and 'bleedImage' layouts: a short ENGLISH stock-photo search phrase (2-4 words) translated from the slide's (Hebrew) subject. Omit for all other layouts.",
+                                "description": "Only for 'split-screen' and 'bleedImage' layouts: a highly descriptive 15-20 word AI image-generation prompt in English (cinematic, professional, academic aesthetic) translated from the slide's (Hebrew) subject. Omit for all other layouts.",
+                            },
+                            "latexFormula": {
+                                "type": "string",
+                                "description": "Required when layout is 'formula_heavy': ONE formula in LaTeX math notation, without surrounding '$' or '$$' delimiters (e.g. 'E = mc^2'). Omit for all other layouts.",
+                            },
+                            "attribution": {
+                                "type": "string",
+                                "description": "Optional for layout 'quote_focus': short Hebrew label naming the source (a person, law, theorem, or publication) of the quote/insight. Omit for all other layouts.",
+                            },
+                            "highlightBox": {
+                                "type": "object",
+                                "description": "Optional supplementary callout for layouts 'bullets', 'split-screen', 'bleedImage', 'quote_focus', or 'formula_heavy' — an important warning, practical tip, or formal definition drawn from the source material. Use sparingly (2-4 slides per deck at most). Omit entirely when not needed.",
+                                "properties": {
+                                    "type":  {"type": "string", "enum": sorted(HIGHLIGHT_BOX_TYPES), "description": "'tip', 'warning', or 'definition'."},
+                                    "title": {"type": "string", "description": "Short Hebrew label (max ~5 words)."},
+                                    "text":  {"type": "string", "description": "One Hebrew sentence (max ~20 words)."},
+                                },
+                                "required": ["type", "title", "text"],
+                            },
+                            "keyTakeaway": {
+                                "type": "object",
+                                "description": "Required when layout is 'two_column': the prominent definition/concept panel shown beside the bullets. Omit for all other layouts.",
+                                "properties": {
+                                    "title": {"type": "string", "description": "Short Hebrew label naming the concept/term (max ~6 words)."},
+                                    "text":  {"type": "string", "description": "1-2 sentence Hebrew definition or explanation (max ~35 words)."},
+                                },
+                                "required": ["title", "text"],
                             },
                         },
                         "required": ["title", "layout"],
@@ -415,13 +517,28 @@ def generate_slide_deck(
     return valid, None
 
 
+def _extract_bullets(content) -> list[str]:
+    """Normalize a slide's "content" field into a list of non-empty bullet strings.
+
+    Accepts either a list (each item stringified+stripped) or a newline-delimited
+    string; anything else yields an empty list.
+    """
+    if isinstance(content, list):
+        return [str(b).strip() for b in content if str(b).strip()]
+    if isinstance(content, str):
+        return [b.strip() for b in content.split("\n") if b.strip()]
+    return []
+
+
 def _validate_deck_slides(slides_obj: dict) -> list[dict]:
     """Filter+normalize a raw {"slides": [...]} dict into validated deck slides.
 
     Each returned slide is {"title": str, "layout": ..., ...}. The shape of the
     remaining keys depends on "layout":
     - "bullets" / "split-screen" / "bleedImage": "content" is a non-empty
-      list[str].
+      list[str]. "split-screen" / "bleedImage" may additionally carry an
+      optional "imagePrompt" str (rule 19) — a 15-20 word English AI
+      image-generation prompt, rendered client-side via Pollinations.ai.
     - "title" / "metric": "content" is a non-empty str (joining array content
       with spaces if the model returned one).
     - "timeline": "timelineData" is a non-empty list[{"date": str, "event": str}].
@@ -431,6 +548,16 @@ def _validate_deck_slides(slides_obj: dict) -> list[dict]:
       list[{"id": str, "label": str, "layer": int}] (unique ids, valid layer
       index); "connections" is a list[{"from": str, "to": str}] referencing
       known node ids (may be empty).
+    - "quote_focus": "content" is a non-empty str (the quote/insight; joining
+      array content with spaces if the model returned one); optional
+      "attribution" str.
+    - "formula_heavy": "latexFormula" is a non-empty str (LaTeX, no $/$$
+      delimiters); optional "content" is a list[str] (1-3 explanatory bullets).
+    - "two_column": "content" is a non-empty list[str] (3-5 bullets) and
+      "keyTakeaway" is a required {"title": str, "text": str} panel.
+    Additionally, slides whose "layout" is in HIGHLIGHT_BOX_LAYOUTS may carry an
+    optional "highlightBox": {"type": "tip"|"warning"|"definition", "title":
+    str, "text": str} — dropped (not the whole slide) if malformed.
     Slides whose required data is missing/invalid for their layout are dropped.
     """
     valid: list[dict] = []
@@ -444,21 +571,51 @@ def _validate_deck_slides(slides_obj: dict) -> list[dict]:
         slide_out: dict = {"title": title.strip(), "layout": layout}
 
         if layout in ("bullets", "split-screen", "bleedImage"):
-            if isinstance(content, list):
-                bullets = [str(b).strip() for b in content if str(b).strip()]
-            elif isinstance(content, str):
-                bullets = [b.strip() for b in content.split("\n") if b.strip()]
-            else:
-                bullets = []
+            bullets = _extract_bullets(content)
             if not bullets:
                 continue
             slide_out["content"] = bullets
 
             if layout in ("split-screen", "bleedImage"):
-                # Internal-only field, resolved (and removed) by _attach_images.
-                image_query = str(s.get("imageQuery", "")).strip()
-                if image_query:
-                    slide_out["imageQuery"] = image_query
+                image_prompt = str(s.get("imagePrompt", "")).strip()
+                if image_prompt:
+                    slide_out["imagePrompt"] = image_prompt
+
+        elif layout == "quote_focus":
+            if isinstance(content, list):
+                content_str = " ".join(str(c).strip() for c in content if str(c).strip())
+            else:
+                content_str = str(content).strip()
+            if not content_str:
+                continue
+            slide_out["content"] = content_str
+
+            attribution = str(s.get("attribution", "")).strip()
+            if attribution:
+                slide_out["attribution"] = attribution
+
+        elif layout == "formula_heavy":
+            latex_formula = str(s.get("latexFormula", "")).strip()
+            if not latex_formula:
+                continue
+            slide_out["latexFormula"] = latex_formula
+
+            bullets = _extract_bullets(content)
+            if bullets:
+                slide_out["content"] = bullets
+
+        elif layout == "two_column":
+            bullets = _extract_bullets(content)
+            if not bullets:
+                continue
+            slide_out["content"] = bullets
+
+            key_takeaway = s.get("keyTakeaway")
+            kt_title = str(key_takeaway.get("title", "")).strip() if isinstance(key_takeaway, dict) else ""
+            kt_text  = str(key_takeaway.get("text", "")).strip() if isinstance(key_takeaway, dict) else ""
+            if not (kt_title and kt_text):
+                continue
+            slide_out["keyTakeaway"] = {"title": kt_title, "text": kt_text}
 
         elif layout == "timeline":
             items = []
@@ -559,39 +716,16 @@ def _validate_deck_slides(slides_obj: dict) -> list[dict]:
                 continue
             slide_out["content"] = content_str
 
+        highlight_box = s.get("highlightBox")
+        if layout in HIGHLIGHT_BOX_LAYOUTS and isinstance(highlight_box, dict):
+            hb_type  = str(highlight_box.get("type", "")).strip()
+            hb_title = str(highlight_box.get("title", "")).strip()
+            hb_text  = str(highlight_box.get("text", "")).strip()
+            if hb_type in HIGHLIGHT_BOX_TYPES and hb_title and hb_text:
+                slide_out["highlightBox"] = {"type": hb_type, "title": hb_title, "text": hb_text}
+
         valid.append(slide_out)
     return valid
-
-
-def _attach_images(slides: list[dict]) -> list[dict]:
-    """Resolve each slide's internal "imageQuery" into an optional "image" field.
-
-    "imageQuery" is set by _validate_deck_slides for "split-screen"/"bleedImage"
-    slides only. For each such slide, looks up a photo via the configured
-    provider (services/images.py::get_image_provider — Unsplash today, swappable
-    via IMAGE_PROVIDER) and, on success, sets
-    slide["image"] = {"url": ..., "alt": ..., "credit": {"name": ..., "link": ...}}.
-
-    "imageQuery" is always popped before returning, regardless of outcome — it's
-    an internal lookup key, never part of the public slide contract. If the
-    provider is unconfigured (NullProvider — e.g. no UNSPLASH_ACCESS_KEY) or a
-    lookup errors/returns nothing, the slide is simply left without "image": the
-    frontend (SlideViewer.tsx) renders its existing placeholder visual in that
-    case, so a deck is never blocked or broken by image lookups.
-    """
-    provider = get_image_provider()
-    for slide in slides:
-        query = slide.pop("imageQuery", None)
-        if not query:
-            continue
-        try:
-            image = provider.get_image(query)
-        except Exception as exc:
-            print(f"[Slides] image lookup failed for query={query!r}: {exc}")
-            image = None
-        if image:
-            slide["image"] = image
-    return slides
 
 
 def generate_deck_via_agent(
@@ -608,8 +742,10 @@ def generate_deck_via_agent(
     list[str] | str | number, "timelineData"/"chartData"/"tiles": list[dict]}
     (the last three keys are layout-specific — see _validate_deck_slides).
     "split-screen"/"bleedImage" slides may additionally carry an optional
-    "image": {"url", "alt", "credit": {"name", "link"}} (see _attach_images) —
-    absent when no image provider is configured or no photo was found.
+    "imagePrompt": a 15-20 word English AI-image-generation prompt (rule 19) —
+    the frontend (SlideViewer.tsx) renders this via a Pollinations.ai image
+    URL built directly from the prompt; absent when the model didn't provide
+    one.
 
     `rag_context` is optional aggregated text retrieved via hybrid_search from
     the user's existing FAISS knowledge base (across all of their course
@@ -664,5 +800,4 @@ def generate_deck_via_agent(
     if not valid:
         return [], "AI did not produce a valid slide deck — please try again."
 
-    valid = _attach_images(valid)
     return valid, None

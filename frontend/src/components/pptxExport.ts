@@ -260,6 +260,75 @@ function buildSlideContent(pptx: PptxGenJS, pptxSlide: PptxGenJS.Slide, slide: D
       break;
     }
 
+    case 'quote_focus': {
+      const quote = toText(slide.content);
+      pptxSlide.addText(slide.title, {
+        x: 0.8, y: 0.5, w: SLIDE_W - 1.6, h: 0.5,
+        fontFace: FONT, fontSize: 14, bold: true, color: EXEC_CREAM,
+        align: 'center', valign: 'middle', rtlMode: isHe,
+      });
+      pptxSlide.addText(quote, {
+        x: 1.2, y: 1.6, w: SLIDE_W - 2.4, h: 3.2,
+        fontFace: FONT, fontSize: 30, bold: true, color: EXEC_TEXT,
+        align: 'center', valign: 'middle', rtlMode: isHe,
+      });
+      if (slide.attribution) {
+        pptxSlide.addText(`— ${slide.attribution}`, {
+          x: 1.2, y: 5, w: SLIDE_W - 2.4, h: 0.6,
+          fontFace: FONT, fontSize: 16, bold: true, color: EXEC_ACCENT_DK,
+          align: 'center', valign: 'middle', rtlMode: isHe,
+        });
+      }
+      break;
+    }
+
+    case 'formula_heavy': {
+      addHeading(pptxSlide, slide.title, isHe);
+      pptxSlide.addShape(pptx.ShapeType.roundRect, {
+        x: 1.2, y: 1.5, w: SLIDE_W - 2.4, h: 1.8, rectRadius: 0.06,
+        fill: { color: EXEC_ACCENT, transparency: 92 },
+        line: { color: EXEC_ACCENT, width: 1, transparency: 65 },
+      });
+      /* pptxgenjs has no KaTeX renderer — render the raw LaTeX source as text
+         in a math-leaning font (consistent precedent: slide.imagePrompt's
+         AI-generated image is also not embedded in PPTX export and falls
+         back to a simpler representation). */
+      pptxSlide.addText(slide.latexFormula ?? '', {
+        x: 1.4, y: 1.5, w: SLIDE_W - 2.8, h: 1.8,
+        fontFace: 'Cambria Math', fontSize: 22, bold: true, color: EXEC_TEXT,
+        align: 'center', valign: 'middle',
+      });
+      const formulaBullets = toBullets(slide.content);
+      if (formulaBullets.length > 0) {
+        buildBulletsBlock(pptx, pptxSlide, formulaBullets, isHe, 0.8, 3.5, SLIDE_W - 1.6, SLIDE_H - 4.0);
+      }
+      break;
+    }
+
+    case 'two_column': {
+      addHeading(pptxSlide, slide.title, isHe);
+      buildBulletsBlock(pptx, pptxSlide, toBullets(slide.content), isHe, 0.8, 1.5, SLIDE_W / 2 - 1, SLIDE_H - 2.2);
+
+      const panelX = SLIDE_W / 2 + 0.2, panelY = 1.0, panelW = SLIDE_W / 2 - 0.8, panelH = SLIDE_H - 1.6;
+      pptxSlide.addShape(pptx.ShapeType.roundRect, {
+        x: panelX, y: panelY, w: panelW, h: panelH,
+        rectRadius: 0.06,
+        fill: { color: EXEC_ACCENT, transparency: 88 },
+        line: { color: EXEC_ACCENT, width: 1, transparency: 65 },
+      });
+      const takeaway = slide.keyTakeaway;
+      if (takeaway) {
+        pptxSlide.addText([
+          { text: takeaway.title, options: { bold: true, breakLine: true, fontSize: 20, color: EXEC_ACCENT_DK, paraSpaceAfter: 12 } },
+          { text: takeaway.text,  options: { fontSize: 13, color: EXEC_TEXT } },
+        ], {
+          x: panelX + 0.3, y: panelY + 0.3, w: panelW - 0.6, h: panelH - 0.6,
+          fontFace: FONT, align: 'center', valign: 'middle', rtlMode: isHe,
+        });
+      }
+      break;
+    }
+
     case 'title':
     default: {
       const subtitle = toText(slide.content);

@@ -3,10 +3,22 @@
    {title, layout, content, ...} slides via build_presentation function-calling
    (backend/services/slides.py::generate_deck_via_agent), where "layout" is
    "title" | "bullets" | "metric" | "split-screen" | "timeline" | "barChart" |
-   "tileGrid" | "bleedImage" | "architecture". "content" (string[] | string |
-   number) is used by "title"/"metric"/"bullets"/"split-screen"/"bleedImage";
-   "timeline", "barChart", "tileGrid", and "architecture" instead use
-   timelineData / chartData / tiles / (layers, nodes, connections).
+   "tileGrid" | "bleedImage" | "architecture" | "quote_focus" | "formula_heavy" |
+   "two_column".
+   "content" (string[] | string | number) is used by "title"/"metric"/
+   "bullets"/"split-screen"/"bleedImage"/"quote_focus"/"formula_heavy"/
+   "two_column"; "timeline", "barChart", "tileGrid", and "architecture" instead
+   use timelineData / chartData / tiles / (layers, nodes, connections).
+   "quote_focus" may carry "attribution"; "formula_heavy" requires
+   "latexFormula" (rendered via KaTeX); "two_column" requires "keyTakeaway"
+   ({title, text}), a definition/concept panel rendered beside its bullets.
+   Any slide whose layout is one of "bullets"/"split-screen"/"bleedImage"/
+   "quote_focus"/"formula_heavy" may also carry an optional "highlightBox"
+   callout ({type: 'tip'|'warning'|'definition', title, text}).
+   "split-screen"/"bleedImage" slides may additionally carry an optional
+   "imagePrompt" (a 15-20 word English AI image-generation prompt, see
+   backend/services/slides.py rule 19) — rendered via AIImage, which builds a
+   Pollinations.ai image URL directly from the prompt, no API key required.
 
    Slide rendering (on-screen + print) uses one of 5 light "Matcha Executive
    Light"-family themes (see presentationThemes.ts) via DeckThemeProvider: a
@@ -14,18 +26,24 @@
    background, near-black text, and a single saturated accent color per theme
    for borders/icons/highlights. Each deck is assigned a theme deterministically
    from its content (pickThemeForDeck); the "shuffle theme" control lets the
-   user preview the deck in any of the other themes. */
+   user preview the deck in any of the other themes.
+
+   Bullet rows across "bullets"/"split-screen"/"bleedImage"/"formula_heavy"
+   render a context-relevant lucide icon per bullet (bulletIcon()) instead of a
+   uniform checkmark, picked via lightweight Hebrew/English keyword matching
+   over the bullet text with an icon-cycling fallback. */
 
 'use client';
 
-import { useState } from 'react';
-import NextImage from 'next/image';
+import { useState, useId, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Poppins, Lato, Assistant } from 'next/font/google';
+import katex from 'katex';
 import {
   Target, TrendingUp, Users, Globe, Lightbulb, Shield,
   Clock, CheckCircle, Star, BookOpen, Briefcase, Cpu,
   Database, Layers, Zap, BarChart3, Image as ImageIcon, Shuffle,
+  Quote, AlertTriangle, Info, Award,
 } from 'lucide-react';
 import ChartSlide from './ChartSlide';
 import { exportToPPTX } from './pptxExport';
@@ -40,15 +58,23 @@ const assistant = Assistant({ subsets: ['hebrew', 'latin'], weight: ['400', '500
 
 export type DeckSlideLayout =
   | 'title' | 'bullets' | 'metric' | 'split-screen'
-  | 'timeline' | 'barChart' | 'tileGrid' | 'bleedImage' | 'architecture';
+  | 'timeline' | 'barChart' | 'tileGrid' | 'bleedImage' | 'architecture'
+  | 'quote_focus' | 'formula_heavy' | 'two_column';
 
 export interface DeckTimelineItem { date: string; event: string }
 export interface DeckChartItem    { label: string; percentage: number }
 export interface DeckTile         { iconName: string; title: string; text: string }
 export interface DeckArchNode       { id: string; label: string; layer: number }
 export interface DeckArchConnection { from: string; to: string }
-export interface DeckImageCredit  { name: string; link: string }
-export interface DeckImage        { url: string; alt: string; credit: DeckImageCredit }
+
+/* Optional supplementary callout — see backend/services/slides.py rule 24.
+   Allowed on "bullets" | "split-screen" | "bleedImage" | "quote_focus" |
+   "formula_heavy" slides only. */
+export interface DeckHighlightBox { type: 'tip' | 'warning' | 'definition'; title: string; text: string }
+
+/* Required for "two_column" slides — see backend/services/slides.py rule 25.
+   The prominent key-term/concept definition panel rendered beside the bullets. */
+export interface DeckKeyTakeaway { title: string; text: string }
 
 export interface DeckSlide {
   title:         string;
@@ -60,11 +86,21 @@ export interface DeckSlide {
   layers?:       string[];
   nodes?:        DeckArchNode[];
   connections?:  DeckArchConnection[];
-  /* Optional stock photo for "split-screen"/"bleedImage" slides (see
-     backend/services/images.py). Absent when no image provider is configured
-     or no photo was found — those slides render their existing placeholder
-     visual unchanged. */
-  image?:        DeckImage;
+  /* Optional AI image-generation prompt for "split-screen"/"bleedImage"
+     slides (see backend/services/slides.py rule 19) — a 15-20 word English
+     prompt rendered via AIImage (Pollinations.ai). Absent ⇒ those slides
+     render their existing placeholder visual unchanged. */
+  imagePrompt?:  string;
+  /* "quote_focus" only: short Hebrew label naming the quote/insight's source. */
+  attribution?:  string;
+  /* "formula_heavy" only: LaTeX math expression (no $/$$ delimiters), rendered via KaTeX. */
+  latexFormula?: string;
+  /* Optional callout for "bullets" | "split-screen" | "bleedImage" |
+     "quote_focus" | "formula_heavy" — see DeckHighlightBox. */
+  highlightBox?: DeckHighlightBox;
+  /* "two_column" only (required): the key-term/concept definition panel
+     rendered beside the bullets — see DeckKeyTakeaway. */
+  keyTakeaway?: DeckKeyTakeaway;
 }
 
 /* iconName -> lucide-react component, must match TILE_ICON_NAMES in
@@ -115,17 +151,95 @@ function densityTextClass(items: string[], sizes: readonly [string, string, stri
   return sizes[2];
 }
 
-function CheckIcon() {
+/* Maps a bullet's text to a context-relevant lucide icon via Hebrew/English
+   keyword matching, falling back to a small rotating set of generic icons by
+   index — replaces the previous uniform checkmark so bullet lists read with
+   more visual variety. */
+const BULLET_ICON_RULES: { pattern: RegExp; icon: typeof Target }[] = [
+  { pattern: /יעד|מטרה|target|goal/i,                              icon: Target },
+  { pattern: /צמיחה|עליה|עלייה|גידול|מגמה|growth|increase|trend/i,   icon: TrendingUp },
+  { pattern: /משתמש|לקוח|אנשים|צוות|user|customer|team|people/i,    icon: Users },
+  { pattern: /עולמי|גלובלי|בינלאומי|global|world/i,                 icon: Globe },
+  { pattern: /רעיון|חדשנות|פתרון|תובנה|idea|innovation|insight/i,    icon: Lightbulb },
+  { pattern: /אבטחה|סיכון|הגנה|איום|security|risk|protect|threat/i, icon: Shield },
+  { pattern: /זמן|מהירות|לוח זמנים|מועד|time|speed|schedule|deadline/i, icon: Clock },
+  { pattern: /הושלם|אישור|תקין|completed|success|valid|verified/i, icon: CheckCircle },
+  { pattern: /איכות|מצוינות|הצטיינות|פרס|quality|excellence|award/i, icon: Award },
+  { pattern: /מחקר|לימוד|ספר|תיאוריה|research|study|theory/i,       icon: BookOpen },
+  { pattern: /עסק|שוק|תעשיה|תעשייה|business|market|industry/i,       icon: Briefcase },
+  { pattern: /טכנולוגיה|מחשוב|אלגוריתם|מודל|technology|algorithm|model/i, icon: Cpu },
+  { pattern: /נתונים|מסד נתונים|data|database/i,                    icon: Database },
+  { pattern: /שכבה|מבנה|רמה|layer|structure|level/i,                icon: Layers },
+  { pattern: /אנרגיה|חשמל|כוח|מהיר|energy|power|fast/i,             icon: Zap },
+  { pattern: /סטטיסטיקה|אחוז|נתון מספרי|גרף|statistic|percent|chart|figure/i, icon: BarChart3 },
+];
+
+const BULLET_ICON_FALLBACKS: (typeof Target)[] = [Lightbulb, Target, Star, TrendingUp, CheckCircle, Award];
+
+function bulletIcon(text: string, index: number): typeof Target {
+  const rule = BULLET_ICON_RULES.find(({ pattern }) => pattern.test(text));
+  return rule ? rule.icon : BULLET_ICON_FALLBACKS[index % BULLET_ICON_FALLBACKS.length];
+}
+
+function BulletIconBadge({ icon: Icon }: { icon: typeof Target }) {
   const theme = useDeckTheme();
   return (
     <span
-      className="mt-1 w-5 h-5 rounded-full flex items-center justify-center shrink-0"
+      className="mt-1 w-7 h-7 rounded-full flex items-center justify-center shrink-0"
       style={{ background: hexToRgba(theme.accent, 0.15), border: `1px solid ${theme.accent}` }}
     >
-      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke={theme.accent} strokeWidth={3}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
-      </svg>
+      <Icon className="w-3.5 h-3.5" style={{ color: theme.accent }} />
     </span>
+  );
+}
+
+/* Subtle full-bleed decorative dot-grid background for the lower-density
+   "quote_focus"/"formula_heavy" layouts, which otherwise have a lot of empty
+   canvas. `useId()` keeps the SVG <pattern> id collision-free when every
+   slide renders simultaneously (print view). */
+function SlidePattern({ color }: { color: string }) {
+  const rawId = useId();
+  const patternId = `dot-${rawId.replace(/[^a-zA-Z0-9]/g, '')}`;
+  return (
+    <svg className="absolute inset-0 w-full h-full pointer-events-none" aria-hidden="true">
+      <defs>
+        <pattern id={patternId} width="28" height="28" patternUnits="userSpaceOnUse">
+          <circle cx="2" cy="2" r="1.5" fill={color} />
+        </pattern>
+      </defs>
+      <rect width="100%" height="100%" fill={`url(#${patternId})`} opacity={0.08} />
+    </svg>
+  );
+}
+
+const HIGHLIGHT_BOX_ICONS: Record<DeckHighlightBox['type'], typeof Target> = {
+  tip: Lightbulb,
+  warning: AlertTriangle,
+  definition: Info,
+};
+
+/* Optional supplementary callout — see DeckHighlightBox and
+   HIGHLIGHT_BOX_LAYOUTS in backend/services/slides.py (rule 24). Color
+   follows the active deck theme: tip -> accent, warning -> layerColors[1],
+   definition -> layerColors[3]. */
+function HighlightBox({ box }: { box?: DeckHighlightBox }) {
+  const theme = useDeckTheme();
+  if (!box) return null;
+  const color = box.type === 'warning' ? theme.layerColors[1]
+    : box.type === 'definition' ? theme.layerColors[3]
+    : theme.accent;
+  const Icon = HIGHLIGHT_BOX_ICONS[box.type] ?? Info;
+  return (
+    <div
+      className="rounded-2xl p-4 flex items-start gap-3 shrink-0"
+      style={{ background: hexToRgba(color, 0.10), border: `1px solid ${hexToRgba(color, 0.4)}` }}
+    >
+      <Icon className="w-5 h-5 mt-0.5 shrink-0" style={{ color }} />
+      <div className="min-w-0">
+        <p className="text-sm font-bold mb-1" style={{ color: theme.text, fontFamily: HEADING_FONT }}>{box.title}</p>
+        <p className="text-sm leading-relaxed" style={{ color: theme.cream, fontFamily: BODY_FONT }}>{box.text}</p>
+      </div>
+    </div>
   );
 }
 
@@ -144,42 +258,33 @@ function VisualPlaceholder() {
   );
 }
 
-/* Renders slide.image (an Unsplash photo) full-bleed within its parent, with a
-   bottom gradient scrim + Unsplash attribution (required by Unsplash API
-   guidelines) — the scrim guarantees the credit line stays legible regardless
-   of how busy/dark the photo is. Falls back to `fallback` (the existing
-   themed placeholder) when no image is set, or if the image fails to load —
-   so a broken image is never shown. `rounded` controls corner rounding:
-   true for split-screen's padded visual area, false for bleedImage's
-   edge-to-edge half. */
-function SlideImage({ image, fallback, rounded = true }: { image?: DeckImage; fallback: React.ReactNode; rounded?: boolean }) {
-  const [failed, setFailed] = useState(false);
-  if (!image || failed) return <>{fallback}</>;
+const POLLINATIONS_BASE = 'https://image.pollinations.ai/prompt/';
+
+/* Renders an AI-generated image for slide.imagePrompt full-bleed within its
+   parent, fetched on demand from Pollinations.ai (free, no API key) — the
+   browser requests the image directly and Pollinations generates it on the
+   fly. Shows the themed `fallback` placeholder while the image is generating
+   (can take several seconds) and on load failure, so a broken/blank image is
+   never shown. `rounded` controls corner rounding: true for split-screen's
+   padded visual area, false for bleedImage's edge-to-edge half. */
+function AIImage({ prompt, fallback, rounded = true }: { prompt?: string; fallback: React.ReactNode; rounded?: boolean }) {
+  const [status, setStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
+  if (!prompt || status === 'error') return <>{fallback}</>;
+
+  const src = `${POLLINATIONS_BASE}${encodeURIComponent(prompt)}?width=800&height=600&nologo=true`;
 
   return (
     <div className={`relative w-full h-full overflow-hidden ${rounded ? 'rounded-2xl' : ''}`}>
-      <NextImage
-        src={image.url}
-        alt={image.alt}
-        fill
-        sizes="640px"
-        className="object-cover"
-        onError={() => setFailed(true)}
+      {status === 'loading' && <div className="absolute inset-0">{fallback}</div>}
+      {/* eslint-disable-next-line @next/next/no-img-element -- Pollinations generates the image on demand from the prompt; not a static asset for next/image */}
+      <img
+        src={src}
+        alt={prompt}
+        className="absolute inset-0 w-full h-full object-cover transition-opacity duration-500"
+        style={{ opacity: status === 'loaded' ? 1 : 0 }}
+        onLoad={() => setStatus('loaded')}
+        onError={() => setStatus('error')}
       />
-      <div
-        className="absolute inset-x-0 bottom-0 px-3 py-1.5 flex justify-end"
-        style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.6), transparent)' }}
-        dir="ltr"
-      >
-        <a
-          href={`${image.credit.link}?utm_source=u-note&utm_medium=referral`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-[11px] font-medium text-white/90 hover:text-white hover:underline"
-        >
-          Photo: {image.credit.name} / Unsplash
-        </a>
-      </div>
     </div>
   );
 }
@@ -228,11 +333,12 @@ function BulletsLayout({ slide }: { slide: DeckSlide }) {
       <div className="flex-1 flex flex-col justify-center gap-4 min-h-0 overflow-y-auto">
         {bullets.map((bullet, i) => (
           <div key={i} className="flex items-start gap-3">
-            <CheckIcon />
+            <BulletIconBadge icon={bulletIcon(bullet, i)} />
             <p className={`${textSize} leading-relaxed`} style={{ color: theme.text, fontFamily: BODY_FONT }}>{bullet}</p>
           </div>
         ))}
       </div>
+      {slide.highlightBox && <HighlightBox box={slide.highlightBox} />}
     </div>
   );
 }
@@ -259,14 +365,15 @@ function SplitScreenLayout({ slide }: { slide: DeckSlide }) {
         <div className="flex-1 flex flex-col justify-center gap-4 min-h-0 overflow-y-auto">
           {bullets.map((bullet, i) => (
             <div key={i} className="flex items-start gap-3">
-              <CheckIcon />
+              <BulletIconBadge icon={bulletIcon(bullet, i)} />
               <p className={`${textSize} leading-relaxed`} style={{ color: theme.text, fontFamily: BODY_FONT }}>{bullet}</p>
             </div>
           ))}
         </div>
+        {slide.highlightBox && <HighlightBox box={slide.highlightBox} />}
       </div>
       <div className="w-1/2 p-10">
-        <SlideImage image={slide.image} fallback={<VisualPlaceholder />} />
+        <AIImage prompt={slide.imagePrompt} fallback={<VisualPlaceholder />} />
       </div>
     </div>
   );
@@ -331,15 +438,16 @@ function BleedImageLayout({ slide }: { slide: DeckSlide }) {
         <div className="flex-1 flex flex-col justify-center gap-4 min-h-0 overflow-y-auto">
           {bullets.map((bullet, i) => (
             <div key={i} className="flex items-start gap-3">
-              <CheckIcon />
+              <BulletIconBadge icon={bulletIcon(bullet, i)} />
               <p className={`${textSize} leading-relaxed`} style={{ color: theme.text, fontFamily: BODY_FONT }}>{bullet}</p>
             </div>
           ))}
         </div>
+        {slide.highlightBox && <HighlightBox box={slide.highlightBox} />}
       </div>
       <div className="w-1/2 h-full" style={{ background: hexToRgba(theme.accent, 0.08), borderInlineStart: `1px solid ${hexToRgba(theme.accent, 0.25)}` }}>
-        <SlideImage
-          image={slide.image}
+        <AIImage
+          prompt={slide.imagePrompt}
           rounded={false}
           fallback={
             <div className="w-full h-full flex items-center justify-center">
@@ -432,6 +540,134 @@ function ArchitectureLayout({ slide }: { slide: DeckSlide }) {
   );
 }
 
+/* A single foundational principle/definition/quote drawn from the source
+   material — see backend rule 22. "content" is one full-sentence Hebrew
+   string; "attribution" optionally names its source. */
+function QuoteFocusLayout({ slide }: { slide: DeckSlide }) {
+  const theme = useDeckTheme();
+  const quote = toText(slide.content);
+  return (
+    <div className="w-full h-full flex flex-col items-center justify-center text-center px-20 gap-7 relative overflow-hidden">
+      <SlidePattern color={theme.accent} />
+      <h2 className="relative text-sm font-bold uppercase tracking-widest" style={{ color: theme.cream, fontFamily: HEADING_FONT }}>{slide.title}</h2>
+      <Quote className="relative w-12 h-12" style={{ color: hexToRgba(theme.accent, 0.5) }} />
+      <p className="relative text-3xl md:text-4xl font-bold leading-snug max-w-4xl" style={{ color: theme.text, fontFamily: HEADING_FONT }}>
+        {quote}
+      </p>
+      {slide.attribution && (
+        <p className="relative text-lg font-semibold" style={{ color: theme.accentDark, fontFamily: BODY_FONT }}>
+          — {slide.attribution}
+        </p>
+      )}
+      {slide.highlightBox && (
+        <div className="relative w-full max-w-2xl">
+          <HighlightBox box={slide.highlightBox} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Renders a LaTeX expression (no surrounding $/$$) via KaTeX. Kept LTR —
+   math notation reads left-to-right even inside an RTL slide. */
+function FormulaBlock({ latex }: { latex: string }) {
+  const theme = useDeckTheme();
+  const html = useMemo(() => {
+    try {
+      return katex.renderToString(latex, { throwOnError: false, displayMode: true });
+    } catch {
+      return latex;
+    }
+  }, [latex]);
+  return (
+    <div
+      className="w-full rounded-2xl py-8 px-6 flex items-center justify-center overflow-x-auto shrink-0"
+      style={{ background: hexToRgba(theme.accent, 0.08), border: `1px solid ${hexToRgba(theme.accent, 0.3)}` }}
+      dir="ltr"
+    >
+      <div className="text-3xl md:text-4xl" style={{ color: theme.text }} dangerouslySetInnerHTML={{ __html: html }} />
+    </div>
+  );
+}
+
+/* A mathematical/physical/statistical/algorithmic formula with optional
+   explanatory bullets — see backend rule 23. */
+function FormulaHeavyLayout({ slide }: { slide: DeckSlide }) {
+  const theme = useDeckTheme();
+  const bullets = toBullets(slide.content);
+  const textSize = densityTextClass(bullets, ['text-lg', 'text-base', 'text-sm']);
+  return (
+    <div className="w-full h-full flex flex-col px-16 py-14 gap-7 relative overflow-hidden">
+      <SlidePattern color={theme.accent} />
+      <h2 className="relative text-2xl md:text-3xl font-extrabold leading-snug shrink-0" style={{ color: theme.text, fontFamily: HEADING_FONT }}>{slide.title}</h2>
+      <div className="relative">
+        <FormulaBlock latex={slide.latexFormula ?? ''} />
+      </div>
+      {bullets.length > 0 && (
+        <div className="relative flex-1 flex flex-col justify-center gap-4 min-h-0 overflow-y-auto">
+          {bullets.map((bullet, i) => (
+            <div key={i} className="flex items-start gap-3">
+              <BulletIconBadge icon={bulletIcon(bullet, i)} />
+              <p className={`${textSize} leading-relaxed`} style={{ color: theme.text, fontFamily: BODY_FONT }}>{bullet}</p>
+            </div>
+          ))}
+        </div>
+      )}
+      {slide.highlightBox && (
+        <div className="relative shrink-0">
+          <HighlightBox box={slide.highlightBox} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Bullets paired with a required "keyTakeaway" definition/concept panel —
+   see backend rule 25. Distinct from SplitScreenLayout (which pairs bullets
+   with a photo/placeholder): here the other side is always a themed panel
+   surfacing one key term or principle from the source material. */
+function TwoColumnLayout({ slide }: { slide: DeckSlide }) {
+  const theme = useDeckTheme();
+  const bullets = toBullets(slide.content);
+  const textSize = densityTextClass(bullets, ['text-lg', 'text-base', 'text-sm']);
+  const takeaway = slide.keyTakeaway;
+  return (
+    <div className="w-full h-full flex">
+      <div className="w-1/2 h-full flex flex-col justify-center px-14 py-14 gap-7 min-w-0 min-h-0">
+        <h2 className="text-2xl md:text-3xl font-extrabold leading-snug shrink-0" style={{ color: theme.text, fontFamily: HEADING_FONT }}>{slide.title}</h2>
+        <div className="flex-1 flex flex-col justify-center gap-4 min-h-0 overflow-y-auto">
+          {bullets.map((bullet, i) => (
+            <div key={i} className="flex items-start gap-3">
+              <BulletIconBadge icon={bulletIcon(bullet, i)} />
+              <p className={`${textSize} leading-relaxed`} style={{ color: theme.text, fontFamily: BODY_FONT }}>{bullet}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="w-1/2 h-full p-10 flex items-center justify-center" style={{ background: hexToRgba(theme.accent, 0.08), borderInlineStart: `1px solid ${hexToRgba(theme.accent, 0.25)}` }}>
+        <div
+          className="relative w-full rounded-2xl p-8 flex flex-col items-center text-center gap-4 overflow-hidden"
+          style={{ background: theme.bg, border: `1px solid ${hexToRgba(theme.accent, 0.35)}`, boxShadow: `0 4px 24px ${hexToRgba(theme.text, 0.10)}` }}
+        >
+          <SlidePattern color={theme.accent} />
+          <span
+            className="relative w-14 h-14 rounded-full flex items-center justify-center shrink-0"
+            style={{ background: hexToRgba(theme.accent, 0.15), border: `1px solid ${theme.accent}` }}
+          >
+            <BookOpen className="w-7 h-7" style={{ color: theme.accent }} />
+          </span>
+          {takeaway && (
+            <>
+              <p className="relative text-xl font-extrabold leading-snug" style={{ color: theme.accentDark, fontFamily: HEADING_FONT }}>{takeaway.title}</p>
+              <p className="relative text-base leading-relaxed" style={{ color: theme.text, fontFamily: BODY_FONT }}>{takeaway.text}</p>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SlideContent({ slide, index }: { slide: DeckSlide; index: number }) {
   switch (slide.layout) {
     case 'bullets':      return <BulletsLayout slide={slide} />;
@@ -442,6 +678,9 @@ function SlideContent({ slide, index }: { slide: DeckSlide; index: number }) {
     case 'tileGrid':     return <TileGridLayout slide={slide} />;
     case 'bleedImage':   return <BleedImageLayout slide={slide} />;
     case 'architecture': return <ArchitectureLayout slide={slide} />;
+    case 'quote_focus':  return <QuoteFocusLayout slide={slide} />;
+    case 'formula_heavy': return <FormulaHeavyLayout slide={slide} />;
+    case 'two_column':   return <TwoColumnLayout slide={slide} />;
     case 'title':
     default:             return <TitleLayout slide={slide} variant={index === 0 ? 'cover' : 'divider'} />;
   }
