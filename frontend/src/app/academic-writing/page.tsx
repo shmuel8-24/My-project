@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { Settings as IconSettings, Minus, Plus, Home, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, LogOut } from 'lucide-react';
+import { Settings as IconSettings, Minus, Plus, Home, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, LogOut, Folder } from 'lucide-react';
 import { useAuth }     from '../providers/auth';
 import { useLanguage } from '../providers/language';
 import { useCourse }   from '../providers/course';
@@ -266,6 +266,7 @@ const TR = {
     personalStyleLabel:   'כתוב בשמך',
     navHome:         'בית',
     navStudyLab:     'מרחב לימוד',
+    navMyDocuments:  'המסמכים שלי',
     navProfSim:      'הראש של המרצה',
     navGapFill:      'שליטה בחומר',
     navAcademic:     'כתיבה אקדמית',
@@ -323,6 +324,7 @@ const TR = {
     personalStyleLabel:   'Write as you',
     navHome:         'Home',
     navStudyLab:     'StudyLab',
+    navMyDocuments:  'My Documents',
     navProfSim:      "Professor's Brain",
     navGapFill:      'Mastery',
     navAcademic:     'Academic Writing',
@@ -419,6 +421,7 @@ function Sidebar({ isOpen, onClose, isAdmin, t, lang, userFirstName, userLastNam
               { path: '/presentation-generator',        icon: PresentationIcon, label: t.navPresentation },
               { path: '/workspace/professor-simulator', icon: Brain,           label: t.navProfSim },
               { path: '/mastery',                       icon: Target,          label: t.navGapFill },
+              { path: '/my-documents',                  icon: Folder,          label: t.navMyDocuments },
             ].map(({ path, icon: Icon, label }) => (
               <button key={path} onClick={() => { router.push(path); onClose(); }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all"

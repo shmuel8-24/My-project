@@ -12,11 +12,10 @@ import { useHaptics }                from '../../hooks/useHaptics';
 import { playPop, getSoundEnabled, toggleSound } from '../../utils/audio';
 import type { KeyboardEvent, ChangeEvent } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { Settings as IconSettings, Home as HomeIcon, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, Monitor } from 'lucide-react';
+import { Settings as IconSettings, Home as HomeIcon, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, Monitor, Folder } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import type { FileRejection } from 'react-dropzone';
 import UserProfileModal from './UserProfileModal';
-import { SidebarDocumentsLink } from '../../components/Sidebar';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -2312,7 +2311,14 @@ function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDel
               <Target className="w-4 h-4 shrink-0" />
               {t.navGapFill}
             </button>
-            <SidebarDocumentsLink lang={lang} onNavigate={onClose} />
+            <button
+              onClick={() => { router.push('/my-documents'); onClose(); }}
+              className={['w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all', pathname === '/my-documents' ? 'font-bold' : 'hover:bg-white/5'].join(' ')}
+              style={pathname === '/my-documents' ? { backgroundColor: '#D1E6D9', color: '#183025', fontWeight: 700 } : { color: '#1C3329' }}
+            >
+              <Folder className="w-4 h-4 shrink-0" />
+              {lang === 'he' ? 'המסמכים שלי' : 'My Documents'}
+            </button>
             <button
               onClick={() => { router.push('/settings'); onClose(); }}
               className={['w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all', pathname === '/settings' ? 'font-bold' : 'hover:bg-white/5'].join(' ')}

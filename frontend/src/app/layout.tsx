@@ -5,6 +5,8 @@ import "@uiw/react-md-editor/markdown-editor.css";
 import { LanguageProvider }        from "./providers/language";
 import { AuthProvider }            from "./providers/auth";
 import { CourseProvider }          from "./providers/course";
+import { PresentationProvider }    from "./providers/presentation";
+import GenerationStatusBadge       from "../components/GenerationStatusBadge";
 
 
 const heebo = Heebo({
@@ -66,7 +68,10 @@ export default function RootLayout({
         <LanguageProvider>
           <CourseProvider>
             <AuthProvider>
-              {children}
+              <PresentationProvider>
+                {children}
+                <GenerationStatusBadge />
+              </PresentationProvider>
             </AuthProvider>
           </CourseProvider>
         </LanguageProvider>

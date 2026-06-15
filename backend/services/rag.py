@@ -172,3 +172,24 @@ def hybrid_search(
         safe_chunks.append(chunk)
         safe_metas.append(meta)
     return safe_chunks, safe_metas
+
+
+def get_chunks_for_files(user_id: int, file_ids: list[str]) -> tuple[list[str], list[dict]]:
+    """Return ALL stored chunks for the given file_ids, in original chunk order.
+
+    Unlike hybrid_search (query-driven top-k), this dumps the full indexed text of
+    specific documents — used when a feature needs to analyze a whole document
+    (e.g. a past exam) rather than retrieve the most relevant snippets.
+    """
+    if not file_ids:
+        return [], []
+    col = get_user_collection(user_id)
+    if col.count() == 0:
+        return [], []
+    result = col.get(include=["documents", "metadatas"])
+    chunks, metas = [], []
+    for doc, meta in zip(result["documents"], result["metadatas"]):
+        if meta.get("user_id") == user_id and meta.get("file_id") in file_ids:
+            chunks.append(doc)
+            metas.append(meta)
+    return chunks, metas

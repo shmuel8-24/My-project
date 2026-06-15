@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { Settings as IconSettings, CheckCircle2, X as IconX, Home, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, Monitor, LogOut, GraduationCap } from 'lucide-react';
+import { Settings as IconSettings, CheckCircle2, X as IconX, Home, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, Monitor, LogOut, GraduationCap, Folder, Sparkles } from 'lucide-react';
 import { useAuth }     from '../../providers/auth';
 import { useLanguage } from '../../providers/language';
 import { useCourse }   from '../../providers/course';
@@ -351,6 +351,12 @@ function ProfSimSidebar({ isOpen, onClose, isAdmin, lang, userFirstName, userLas
               {lang === 'he' ? 'שליטה בחומר' : 'Mastery'}
             </button>
 
+            <button onClick={() => { router.push('/my-documents'); onClose(); }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
+              <Folder className="w-4 h-4 shrink-0" />
+              {he ? 'המסמכים שלי' : 'My Documents'}
+            </button>
+
             <button onClick={() => { router.push('/settings'); onClose(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
               <IconSettings className="w-4 h-4 shrink-0" />
@@ -696,7 +702,7 @@ export default function ProfessorSimulatorPage() {
   });
 
   // ── Send / generate ───────────────────────────────────────────────────────────
-  const send = useCallback(async (text: string) => {
+  const send = useCallback(async (text: string, mode: 'simulate' | 'predict_exam' = 'simulate') => {
     if (!text.trim() || sending) return;
 
     if (!canSim) {
@@ -711,17 +717,22 @@ export default function ProfessorSimulatorPage() {
     setSending(true); setChatErr(null);
 
     try {
+      const fileIds = mode === 'predict_exam'
+        ? (sampleExam ? [sampleExam.file_id] : [])
+        : [...files.map(f => f.file_id), ...(sampleExam ? [sampleExam.file_id] : [])];
+
       const res  = await authFetch(`${API}/api/professor-simulator/ask`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          mode,
           professor_name: profName.trim(),
           exam_style:     examStyle,
           trap_types:     examStyle ? [examStyle] : [],
           topics:         topics.trim(),
           question:       text,
           history:        messages.map(m => ({ role: m.role, content: m.content })),
-          file_ids:       [...files.map(f => f.file_id), ...(sampleExam ? [sampleExam.file_id] : [])],
+          file_ids:       fileIds,
         }),
       });
       const data = await safeJson(res);
@@ -756,6 +767,11 @@ export default function ProfessorSimulatorPage() {
   const startSimulation = () => {
     if (!sampleExam) return;
     send('צור שאלת בחינה אופיינית אחת (עם ניתוח מלכודת מפורט) על בסיס חומר הלימוד שלי ומבחן הדוגמה שהעליתי.');
+  };
+
+  const predictExam = () => {
+    if (!sampleExam) return;
+    send('חזה את המבחן הקרוב שלי על סמך המבחנים הקודמים שהעליתי — אילו נושאים צפויים להיבחן?', 'predict_exam');
   };
 
   // ── Derived counters ──────────────────────────────────────────────────────────
@@ -1309,14 +1325,25 @@ export default function ProfessorSimulatorPage() {
                   </div>
                   {canSim && (
                     <div className="flex flex-col items-center gap-2">
-                      <button
-                        onClick={startSimulation}
-                        disabled={sending || !sampleExam}
-                        className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-bold transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
-                        style={!sending && sampleExam ? { background: 'linear-gradient(135deg,#517B3E,#2A3B22)' } : undefined}
-                      >
-                        <span>צור סימולציה</span>
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={startSimulation}
+                          disabled={sending || !sampleExam}
+                          className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-bold transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
+                          style={!sending && sampleExam ? { background: 'linear-gradient(135deg,#517B3E,#2A3B22)' } : undefined}
+                        >
+                          <span>צור סימולציה</span>
+                        </button>
+                        <button
+                          onClick={predictExam}
+                          disabled={sending || showSimWarn || !sampleExam}
+                          className="flex items-center gap-2 px-5 py-2.5 rounded-xl border text-sm font-bold transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                          style={{ background: 'rgba(255,255,255,0.7)', borderColor: '#9DC08B', color: '#2A3B22' }}
+                        >
+                          <Sparkles className="w-4 h-4" />
+                          <span>חזה את המבחן שלי</span>
+                        </button>
+                      </div>
                       {!sampleExam && (
                         <p className="text-xs" style={{ color: '#a3855f' }}>
                           יש להעלות מבחן לדוגמא כדי להתחיל את הסימולציה
@@ -1406,6 +1433,15 @@ export default function ProfessorSimulatorPage() {
                       ? <><Spinner size="sm" /><span>מייצר...</span></>
                       : <span>צור סימולציית מבחן</span>
                     }
+                  </button>
+                  <button
+                    onClick={predictExam}
+                    disabled={sending || showSimWarn || !sampleExam}
+                    className="w-full py-3 rounded-xl border text-sm font-bold flex items-center justify-center gap-2 transition-all hover:opacity-90 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{ background: 'rgba(255,255,255,0.7)', borderColor: '#9DC08B', color: '#2A3B22' }}
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    <span>חזה את המבחן שלי</span>
                   </button>
                   {!sampleExam && (
                     <p className="text-xs text-center" style={{ color: '#a3855f' }}>

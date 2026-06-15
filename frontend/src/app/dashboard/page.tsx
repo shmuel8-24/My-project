@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { Settings as IconSettings, Home, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, LogOut } from 'lucide-react';
+import { Settings as IconSettings, Home, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, LogOut, Folder } from 'lucide-react';
 import { useAuth }     from '../providers/auth';
 import { useLanguage } from '../providers/language';
 import { useCourse, COURSES, type Course } from '../providers/course';
@@ -225,6 +225,10 @@ function DashboardSidebar({ isOpen, onClose, isAdmin, lang, userFirstName, userL
             <button onClick={() => { router.push('/mastery'); onClose(); }}
               className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-[#527061] transition-all duration-150 hover:bg-[#EEF5F0] hover:text-[#1C3329]">
               <Target className="w-4 h-4 shrink-0" />{he ? 'שליטה בחומר' : 'Mastery'}
+            </button>
+            <button onClick={() => { router.push('/my-documents'); onClose(); }}
+              className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-[#527061] transition-all duration-150 hover:bg-[#EEF5F0] hover:text-[#1C3329]">
+              <Folder className="w-4 h-4 shrink-0" />{he ? 'המסמכים שלי' : 'My Documents'}
             </button>
             <button onClick={() => { router.push('/settings'); onClose(); }}
               className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-[#527061] transition-all duration-150 hover:bg-[#EEF5F0] hover:text-[#1C3329]">
@@ -512,6 +516,7 @@ export default function DashboardPage() {
                   <CrystalCard title={he ? 'שליטה בחומר'     : 'Mastery'}          subtitle={he ? 'חידונים ומעקב'                   : 'Quizzes & tracking'}           onClick={() => router.push(`/mastery?course=${selectedCourse.id}`)} />
                   <CrystalCard title={he ? 'כתיבה אקדמית'    : 'Academic Writing'} subtitle={he ? 'כתיבת עבודות בסגנון האישי שלך'  : 'Write papers in your style'}   onClick={() => router.push('/academic-writing')} />
                   <CrystalCard title={he ? 'צור מצגת'        : 'Create Presentation'} subtitle={he ? 'מצגת מקצועית מהחומר שלך'      : 'A professional deck from your materials'} onClick={() => router.push('/presentation-generator')} />
+                  <CrystalCard title={he ? 'המסמכים שלי'     : 'My Documents'}     subtitle={he ? 'ניהול הקבצים שהעלית'             : 'Manage your uploaded files'}   onClick={() => router.push('/my-documents')} />
                 </div>
               </div>
             </>

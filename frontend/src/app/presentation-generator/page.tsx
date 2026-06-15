@@ -3,49 +3,20 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useDropzone } from 'react-dropzone';
-import { Settings as IconSettings, Home, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, Monitor, LogOut } from 'lucide-react';
+import { Settings as IconSettings, Home, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, Monitor, LogOut, Folder } from 'lucide-react';
 import { useAuth }     from '../providers/auth';
 import { useLanguage } from '../providers/language';
 import { useCourse }   from '../providers/course';
+import { usePresentationGenerator } from '../providers/presentation';
 import CoursePill      from '../../components/CoursePill';
-import SlideViewer, { type DeckSlide } from '../../components/SlideViewer';
-
-const API = 'http://127.0.0.1:5003';
+import SlideViewer     from '../../components/SlideViewer';
 
 /* ── Auth / fetch helpers ─────────────────────────────────────────────────── */
-function getToken() {
-  return typeof window !== 'undefined' ? localStorage.getItem('levy_ai_token') : null;
-}
-
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
   try {
     const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
     return JSON.parse(atob(b64));
   } catch { return null; }
-}
-
-async function authFetch(url: string, init: RequestInit = {}) {
-  const token = getToken();
-  return fetch(url, {
-    ...init,
-    headers: {
-      ...((init.headers as Record<string, string>) ?? {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-}
-
-async function safeJson(res: Response): Promise<Record<string, unknown>> {
-  const ct = res.headers.get('content-type') ?? '';
-  if (!ct.includes('application/json')) {
-    const text = await res.text();
-    console.error(
-      `[presentation-generator] Expected JSON but got "${ct || 'unknown content-type'}" (HTTP ${res.status}). Raw response:`,
-      text.slice(0, 1000),
-    );
-    throw new Error(`Unexpected ${res.status} response (not JSON) — see console for the raw body`);
-  }
-  return res.json();
 }
 
 function formatBytes(bytes: number): string {
@@ -141,17 +112,6 @@ function FileTypeIcon({ name }: { name: string }) {
   if (ext === 'pptx') return <span className="text-lg leading-none">📊</span>;
   if (ext === 'docx') return <span className="text-lg leading-none">📃</span>;
   return <span className="text-lg leading-none">📄</span>;
-}
-
-interface PendingFile {
-  id:   string;
-  file: File;
-}
-
-interface SourceResult {
-  filename: string;
-  type:     'document' | 'image' | 'media' | 'unsupported';
-  chars:    number;
 }
 
 /* ── Sidebar ──────────────────────────────────────────────────────────────── */
@@ -284,6 +244,12 @@ function Sidebar({
               {he ? 'שליטה בחומר' : 'Mastery'}
             </button>
 
+            <button onClick={() => { router.push('/my-documents'); onClose(); }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
+              <Folder className="w-4 h-4 shrink-0" />
+              {he ? 'המסמכים שלי' : 'My Documents'}
+            </button>
+
             <button onClick={() => { router.push('/settings'); onClose(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
               <IconSettings className="w-4 h-4 shrink-0" />
@@ -386,7 +352,6 @@ function Sidebar({
 export default function PresentationGeneratorPage() {
   const { user: authUser, isLoading: authLoading } = useAuth();
   const { lang, toggleLanguage } = useLanguage();
-  const { selectedCourse } = useCourse();
   const he = lang === 'he';
 
   // ── Shell state ────────────────────────────────────────────────────────────
@@ -410,20 +375,17 @@ export default function PresentationGeneratorPage() {
   const userInitials = [userFirstName[0], userLastName[0]].filter(Boolean).join('').toUpperCase()
     || (userEmail ? userEmail.slice(0, 2).toUpperCase() : '?');
 
-  const [topic,     setTopic]     = useState('');
-  const [pending,   setPending]   = useState<PendingFile[]>([]);
-  const [loading,   setLoading]   = useState(false);
-  const [error,     setError]     = useState<string | null>(null);
-  const [slides,    setSlides]    = useState<DeckSlide[] | null>(null);
-  const [sources,   setSources]   = useState<SourceResult[]>([]);
+  const {
+    topic, setTopic,
+    pending, addFiles, removeFile,
+    isGenerating: loading,
+    error, slides, sources,
+    generate, reset,
+  } = usePresentationGenerator();
 
   const onDrop = useCallback((accepted: File[]) => {
-    setError(null);
-    setPending(prev => [
-      ...prev,
-      ...accepted.map(file => ({ id: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2)}`, file })),
-    ]);
-  }, []);
+    addFiles(accepted);
+  }, [addFiles]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -445,60 +407,7 @@ export default function PresentationGeneratorPage() {
     },
   });
 
-  const removeFile = useCallback((id: string) => {
-    setPending(prev => prev.filter(p => p.id !== id));
-  }, []);
-
   const totalSize = useMemo(() => pending.reduce((sum, p) => sum + p.file.size, 0), [pending]);
-
-  const generate = useCallback(async () => {
-    if (pending.length === 0 || loading) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const form = new FormData();
-      if (topic.trim()) form.append('topic', topic.trim());
-      if (selectedCourse) form.append('course_name', selectedCourse.name);
-      pending.forEach(p => form.append('files', p.file));
-
-      const res = await authFetch(`${API}/api/generate-presentation`, {
-        method: 'POST',
-        body:   form,
-      });
-      const data = await safeJson(res);
-      if (!res.ok) {
-        setError((data.error as string) ?? (he ? 'שגיאה ביצירת המצגת' : 'Failed to generate the presentation'));
-        return;
-      }
-      setSlides(data.slides as DeckSlide[]);
-      setSources((data.sources ?? []) as SourceResult[]);
-    } catch (err) {
-      console.error('[presentation-generator] generate-presentation failed:', err);
-      setError(he ? 'לא ניתן להתחבר לשרת' : 'Could not connect to the server');
-    } finally {
-      setLoading(false);
-    }
-  }, [pending, topic, loading, he, selectedCourse]);
-
-  const reset = useCallback(() => {
-    setSlides(null);
-    setSources([]);
-    setPending([]);
-    setTopic('');
-    setError(null);
-  }, []);
-
-  // ── Reset on active-course change ─────────────────────────────────────────
-  // When the user switches courses (or clears the active course via CoursePill's
-  // "✕"), any generated deck / pending files belong to the previous course's
-  // context and must not linger on screen. Adjusting state during render (rather
-  // than in an effect) per https://react.dev/learn/you-might-not-need-an-effect.
-  const activeCourseKey = selectedCourse?.id ?? null;
-  const [lastCourseKey, setLastCourseKey] = useState<string | null>(activeCourseKey);
-  if (activeCourseKey !== lastCourseKey) {
-    setLastCourseKey(activeCourseKey);
-    reset();
-  }
 
   // ── Click-outside profile popover ─────────────────────────────────────────
   useEffect(() => {
@@ -543,6 +452,28 @@ export default function PresentationGeneratorPage() {
 
   return (
     <div dir={he ? 'rtl' : 'ltr'} className="h-screen flex flex-col overflow-hidden" style={{ background: '#97AB92' }}>
+
+      {/* ── Organic leaf watermarks — fixed, behind all content ── */}
+      <div className="fixed inset-0 pointer-events-none select-none overflow-hidden" style={{ zIndex: 0 }}>
+        <svg style={{ position:'absolute', top:'-70px', right:'-40px', width:'340px', opacity:.055, transform:'rotate(22deg)' }} viewBox="0 0 100 150" fill="#2A3B22" aria-hidden="true">
+          <path d="M50 8C76 8 92 33 92 62C92 100 70 140 50 148C30 140 8 100 8 62C8 33 24 8 50 8Z"/>
+        </svg>
+        <svg style={{ position:'absolute', bottom:'-50px', left:'-25px', width:'260px', opacity:.042, transform:'rotate(-18deg) scaleX(-1)' }} viewBox="0 0 100 150" fill="#2A3B22" aria-hidden="true">
+          <path d="M50 8C76 8 92 33 92 62C92 100 70 140 50 148C30 140 8 100 8 62C8 33 24 8 50 8Z"/>
+        </svg>
+        <svg style={{ position:'absolute', top:'37%', right:'-12px', width:'170px', opacity:.035, transform:'rotate(48deg)' }} viewBox="0 0 100 150" fill="#517B3E" aria-hidden="true">
+          <path d="M50 8C76 8 92 33 92 62C92 100 70 140 50 148C30 140 8 100 8 62C8 33 24 8 50 8Z"/>
+        </svg>
+        <svg style={{ position:'absolute', top:'18%', left:'-8px', width:'130px', opacity:.030, transform:'rotate(-32deg)' }} viewBox="0 0 100 150" fill="#517B3E" aria-hidden="true">
+          <path d="M50 8C76 8 92 33 92 62C92 100 70 140 50 148C30 140 8 100 8 62C8 33 24 8 50 8Z"/>
+        </svg>
+        <svg style={{ position:'absolute', bottom:'22%', right:'-18px', width:'210px', opacity:.040, transform:'rotate(8deg)' }} viewBox="0 0 100 150" fill="#2A3B22" aria-hidden="true">
+          <path d="M50 8C76 8 92 33 92 62C92 100 70 140 50 148C30 140 8 100 8 62C8 33 24 8 50 8Z"/>
+        </svg>
+        <svg style={{ position:'absolute', top:'62%', left:'-14px', width:'150px', opacity:.027, transform:'rotate(-44deg)' }} viewBox="0 0 100 150" fill="#517B3E" aria-hidden="true">
+          <path d="M50 8C76 8 92 33 92 62C92 100 70 140 50 148C30 140 8 100 8 62C8 33 24 8 50 8Z"/>
+        </svg>
+      </div>
 
       {/* ── Sidebar ── */}
       <Sidebar
@@ -660,7 +591,7 @@ export default function PresentationGeneratorPage() {
       </header>
 
       {/* ── Main ── */}
-      <main className="flex-1 overflow-y-auto">
+      <main className="flex-1 overflow-y-auto relative" style={{ zIndex: 1 }}>
         <div className="max-w-5xl mx-auto px-4 py-8 flex flex-col gap-6">
 
           {!slides && (
@@ -669,7 +600,7 @@ export default function PresentationGeneratorPage() {
               <div className="flex flex-col items-center text-center gap-2 py-2">
                 <PresentationIcon className="w-10 h-10" style={{ color: '#517B3E' }} />
                 <h2 className="text-xl font-bold" style={{ color: '#1C3329' }}>
-                  {he ? 'סוכן AI ליצירת מצגות' : 'AI Presentation Agent'}
+                  {he ? 'יצירת מצגות' : 'Create Presentation'}
                 </h2>
                 <p className="text-sm max-w-lg" style={{ color: '#527061' }}>
                   {he

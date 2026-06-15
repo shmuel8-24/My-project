@@ -16,13 +16,25 @@ from flask import Blueprint, jsonify, request
 from api.middleware import _current_month_key, token_required
 from extensions import TOP_K, client, limiter
 from models import SessionLocal, User, UserDocument
-from services.rag import get_user_collection, hybrid_search
+from services.rag import get_chunks_for_files, get_user_collection, hybrid_search
 
 professor_bp = Blueprint("professor", __name__)
 
 _PROFESSOR_MODEL   = "gpt-4o"
 _MAX_HISTORY       = 10      # conversation turns kept in context
 _MAX_CONTEXT_CHARS = 20_000  # hard cap on RAG text fed to the prompt
+_MAX_PREDICTOR_CONTEXT_CHARS = 40_000  # past-exam analysis needs more than top-k chunks
+
+# Fixed system prompt for the "Predict my exam" quick action — analyzes ONLY the
+# user's uploaded past exams (file_ids), never the general RAG knowledge base.
+_EXAM_PREDICTOR_PROMPT = (
+    "You are an expert exam predictor. The user has uploaded past exams for this course. "
+    "Your task is to analyze ONLY these past exams, identify repeating patterns, recurring "
+    "concepts, and the specific question structures the lecturer favors. Based strictly on "
+    "this historical data, generate a highly probable predicted exam (or list of definitive "
+    "topics) for the upcoming test. Be direct and objective.\n\n"
+    "ענה בעברית, אלא אם המשתמש כתב באנגלית — ואז ענה באנגלית."
+)
 
 
 # ── Prompt builder ─────────────────────────────────────────────────────────────
@@ -81,14 +93,19 @@ def professor_ask(user_id: int):
     """
     Body (all fields optional except *question*):
     {
+      "mode":            "simulate" | "predict_exam",  // default "simulate"
       "professor_name":  "ד\"ר כהן",
       "exam_style":      "שאלות מלכודת עם הנחות שגויות",
       "trap_types":      ["הנחות שגויות", "מקרי קצה"],
       "topics":          "חשבון דיפרנציאלי ואינטגרלי",
       "question":        "תן לי שאלת בחינה אופיינית",
       "history":         [{"role":"user","content":"..."}, ...],
-      "file_ids":        ["abc123", "def456"]   // optional filter
+      "file_ids":        ["abc123", "def456"]   // optional filter ("simulate"); required ("predict_exam")
     }
+
+    When mode == "predict_exam", file_ids must point to the user's uploaded past
+    exams. The full indexed text of those files (not query-driven top-k chunks)
+    is fed to a fixed "expert exam predictor" system prompt.
 
     Response:
     {
@@ -130,6 +147,10 @@ def professor_ask(user_id: int):
     # ── 3. Parse body ────────────────────────────────────────────────────────
     data = request.get_json(silent=True) or {}
 
+    mode = str(data.get("mode") or "simulate").strip().lower()
+    if mode not in ("simulate", "predict_exam"):
+        mode = "simulate"
+
     professor_name = str(data.get("professor_name") or "").strip()
     exam_style     = str(data.get("exam_style")     or "").strip()
     topics         = str(data.get("topics")         or "").strip()
@@ -168,43 +189,57 @@ def professor_ask(user_id: int):
             print(f"[Professor] u{user_id}: rejected unowned file_ids={rejected}")
         file_ids = [f for f in file_ids if f in owned]
 
-    # ── 4. Retrieve RAG context ──────────────────────────────────────────────
-    context_text  = ""
-    chunks_used   = 0
-    try:
-        col = get_user_collection(user_id)
-        if col.count() > 0:
-            if file_ids:
-                # Search each requested file and merge results
-                all_chunks: list[str]  = []
-                all_metas:  list[dict] = []
-                per_file_k = max(2, TOP_K // max(len(file_ids), 1))
-                for fid in file_ids[:4]:   # cap to 4 files to avoid prompt bloat
-                    fc, fm = hybrid_search(user_id, question, per_file_k, file_id=fid)
-                    all_chunks.extend(fc)
-                    all_metas.extend(fm)
-            else:
-                all_chunks, all_metas = hybrid_search(user_id, question, TOP_K)
+    if mode == "predict_exam" and not file_ids:
+        return jsonify({
+            "error": "יש להעלות מבחן ישן אחד לפחות כדי לחזות את המבחן הקרוב.",
+            "status": "error",
+        }), 400
 
-            if all_chunks:
-                context_blocks = [
-                    f"[מסמך: {m.get('source', 'לא ידוע')} | עמ׳ {m.get('page_number', '?')}]\n{c}"
-                    for c, m in zip(all_chunks, all_metas)
-                ]
-                raw_ctx      = "\n\n".join(context_blocks)
-                context_text = raw_ctx[:_MAX_CONTEXT_CHARS]
-                chunks_used  = len(all_chunks)
+    # ── 4. Retrieve RAG context ──────────────────────────────────────────────
+    context_text = ""
+    chunks_used  = 0
+    try:
+        if mode == "predict_exam":
+            all_chunks, all_metas = get_chunks_for_files(user_id, file_ids)
+        else:
+            all_chunks, all_metas = [], []
+            col = get_user_collection(user_id)
+            if col.count() > 0:
+                if file_ids:
+                    # Search each requested file and merge results
+                    per_file_k = max(2, TOP_K // max(len(file_ids), 1))
+                    for fid in file_ids[:4]:   # cap to 4 files to avoid prompt bloat
+                        fc, fm = hybrid_search(user_id, question, per_file_k, file_id=fid)
+                        all_chunks.extend(fc)
+                        all_metas.extend(fm)
+                else:
+                    all_chunks, all_metas = hybrid_search(user_id, question, TOP_K)
+
+        if all_chunks:
+            context_blocks = [
+                f"[מסמך: {m.get('source', 'לא ידוע')} | עמ׳ {m.get('page_number', '?')}]\n{c}"
+                for c, m in zip(all_chunks, all_metas)
+            ]
+            raw_ctx      = "\n\n".join(context_blocks)
+            max_chars    = _MAX_PREDICTOR_CONTEXT_CHARS if mode == "predict_exam" else _MAX_CONTEXT_CHARS
+            context_text = raw_ctx[:max_chars]
+            chunks_used  = len(all_chunks)
     except Exception as rag_exc:
         # Non-fatal: the simulator is still useful without document context
         print(f"[Professor] RAG retrieval failed for u{user_id}: {rag_exc}")
 
     # ── 5. Build message list ────────────────────────────────────────────────
-    system_prompt = _build_system_prompt(professor_name, exam_style, trap_types, topics)
+    if mode == "predict_exam":
+        system_prompt = _EXAM_PREDICTOR_PROMPT
+        context_label = "מבחנים קודמים שהועלו"
+    else:
+        system_prompt = _build_system_prompt(professor_name, exam_style, trap_types, topics)
+        context_label = "חומר לימוד רלוונטי מהמסמכים שלי"
 
     user_turn = question
     if context_text:
         user_turn = (
-            f"---\nחומר לימוד רלוונטי מהמסמכים שלי:\n{context_text}\n---\n\n"
+            f"---\n{context_label}:\n{context_text}\n---\n\n"
             f"בקשתי: {question}"
         )
 
@@ -233,7 +268,7 @@ def professor_ask(user_id: int):
 
         total_tokens = completion.usage.total_tokens if completion.usage else "?"
         print(
-            f"[Professor] u{user_id} | model={_PROFESSOR_MODEL} "
+            f"[Professor] u{user_id} | mode={mode} | model={_PROFESSOR_MODEL} "
             f"| chunks={chunks_used} | tokens={total_tokens}"
         )
         return jsonify({

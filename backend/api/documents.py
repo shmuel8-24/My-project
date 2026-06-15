@@ -6,7 +6,7 @@ import re
 from datetime import datetime, timezone
 
 import fitz
-from flask import Blueprint, Response, jsonify, request, stream_with_context
+from flask import Blueprint, Response, jsonify, request, send_file, stream_with_context
 from werkzeug.utils import secure_filename
 
 from api.middleware import (
@@ -42,6 +42,20 @@ documents_bp = Blueprint("documents", __name__)
 
 _ALLOWED_EXTS = {".pdf", ".pptx", ".png", ".jpg", ".jpeg"}
 _IMG_MIME     = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
+
+_UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "uploads")
+
+
+def _upload_file_path(user_id: int, file_id: str, filename: str) -> str:
+    ext = os.path.splitext(filename)[1].lower()
+    return os.path.join(_UPLOAD_DIR, f"user_{user_id}", f"{file_id}{ext}")
+
+
+def _save_upload_file(user_id: int, file_id: str, filename: str, data: bytes) -> None:
+    path = _upload_file_path(user_id, file_id, filename)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
 
 MAX_HISTORY_MESSAGES = 10
 
@@ -186,6 +200,7 @@ def upload_pdf(user_id: int):
                                         user_id=user_id, file_id=ocr_file_id, filename=filename,
                                         file_size_bytes=len(img_bytes), course_name=course_name))
                                     _ocr_db.commit()
+                                    _save_upload_file(user_id, ocr_file_id, filename, img_bytes)
                             except Exception as reg_exc:
                                 print(f"[OCR] WARNING: ownership registration failed: {reg_exc}")
                                 _ocr_db.rollback()
@@ -305,6 +320,7 @@ def upload_pdf(user_id: int):
                 _reg_db.add(UserDocument(user_id=user_id, file_id=file_id, filename=filename,
                                          file_size_bytes=len(raw_bytes), course_name=course_name))
                 _reg_db.commit()
+                _save_upload_file(user_id, file_id, filename, raw_bytes)
         except Exception as reg_exc:
             print(f"[upload] WARNING: could not register document ownership: {reg_exc}")
             _reg_db.rollback()
@@ -748,6 +764,25 @@ def list_documents(user_id: int):
     }), 200
 
 
+@documents_bp.route("/documents/<file_id>/download", methods=["GET"])
+@token_required
+def download_document(user_id: int, file_id: str):
+    db = SessionLocal()
+    try:
+        record = db.query(UserDocument).filter(
+            UserDocument.user_id == user_id,
+            UserDocument.file_id == file_id,
+        ).first()
+        if not record:
+            return jsonify({"error": "Document not found or not yours."}), 404
+        path = _upload_file_path(user_id, file_id, record.filename)
+        if not os.path.exists(path):
+            return jsonify({"error": "Original file is not available for download."}), 404
+        return send_file(path, as_attachment=True, download_name=record.filename)
+    finally:
+        db.close()
+
+
 @documents_bp.route("/documents/<file_id>", methods=["DELETE"])
 @token_required
 def delete_document(user_id: int, file_id: str):
@@ -772,6 +807,12 @@ def delete_document(user_id: int, file_id: str):
         db.commit()
         rebuild_user_bm25(user_id)
         get_user_images(user_id).pop(filename, None)
+        try:
+            upload_path = _upload_file_path(user_id, file_id, filename)
+            if os.path.exists(upload_path):
+                os.remove(upload_path)
+        except Exception as exc:
+            print(f"[delete_doc] WARNING: could not remove uploaded file for {filename!r}: {exc}")
         print(f"[delete_doc] u{user_id}: deleted {filename!r} (file_id={file_id})")
         return jsonify({"message": f"{filename} deleted successfully."}), 200
     except Exception as exc:

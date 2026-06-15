@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { Settings as IconSettings, Home, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, Monitor, GraduationCap, LogOut } from 'lucide-react';
+import { Settings as IconSettings, Home, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, Monitor, GraduationCap, LogOut, Folder } from 'lucide-react';
 import { useLanguage } from '../providers/language';
 import { useCourse }   from '../providers/course';
 import CoursePill      from '../../components/CoursePill';
@@ -224,6 +224,12 @@ function AdminSidebar({
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
               <Target className="w-4 h-4 shrink-0" />
               {he ? 'שליטה בחומר' : 'Mastery'}
+            </button>
+
+            <button onClick={() => { router.push('/my-documents'); onClose(); }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#517B3E]/10 text-[#2d3b25] text-sm transition-colors">
+              <Folder className="w-4 h-4 shrink-0" />
+              {he ? 'המסמכים שלי' : 'My Documents'}
             </button>
 
             <button onClick={() => { router.push('/settings'); onClose(); }}

@@ -571,14 +571,13 @@ def refresh_token(user_id: int):
 @token_required
 def get_profile_documents(user_id: int):
     from services.rag import get_user_collection as _get_col
+    course_name = (request.args.get("course_name") or "").strip() or None
     db = SessionLocal()
     try:
-        records = (
-            db.query(UserDocument)
-            .filter(UserDocument.user_id == user_id)
-            .order_by(UserDocument.uploaded_at.desc())
-            .all()
-        )
+        query = db.query(UserDocument).filter(UserDocument.user_id == user_id)
+        if course_name:
+            query = query.filter(UserDocument.course_name == course_name)
+        records = query.order_by(UserDocument.uploaded_at.desc()).all()
         chunk_map: dict = {}
         try:
             col = _get_col(user_id)
@@ -597,6 +596,7 @@ def get_profile_documents(user_id: int):
                     "filename":        r.filename,
                     "uploaded_at":     r.uploaded_at.isoformat() if r.uploaded_at else None,
                     "file_size_bytes": r.file_size_bytes,
+                    "course_name":     r.course_name,
                     "chunks":          chunk_map.get(r.file_id, 0),
                 }
                 for r in records
