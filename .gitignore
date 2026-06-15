@@ -56,6 +56,9 @@ chat.db
 backend/chat.db
 backend/data/chat.db
 
+# Backend — local timestamped backups of data/ (contain user PII, never commit)
+backend/backups/
+
 # Node / Next.js
 node_modules/
 .next/

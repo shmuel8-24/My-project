@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useLanguage }   from '../providers/language';
 import { useAuth }       from '../providers/auth';
 import { useCourse }     from '../providers/course';
@@ -167,6 +168,7 @@ const translations = {
     rejectionErr: (n: number) => `${n} קבצ${n === 1 ? '' : 'ים'} נדח${n === 1 ? '' : 'ו'} — ניתן להעלות PDF, PPTX, PNG, JPG בלבד.`,
     uploadErr: 'שגיאה בהעלאת הקבצים.',
     serverErr: 'לא ניתן להתחבר לשרת. בדוק שה-backend פועל על פורט 5003.',
+    fileAlreadyExists: 'הקובץ כבר קיים במערכת',
     chatTitle: 'Workspace',
     docReady: 'מסמך מוכן – ניתן לשאול שאלות',
     waitingPdf: 'ממתין לקובץ PDF',
@@ -294,6 +296,7 @@ const translations = {
     ],
     rejectionErr: (n: number) => `${n} file${n === 1 ? '' : 's'} rejected — only PDF, PPTX, PNG, and JPG are allowed.`,
     uploadErr: 'Error uploading files.',
+    fileAlreadyExists: 'This file already exists in the system',
     serverErr: 'Cannot connect to server. Check that the backend is running on port 5003.',
     chatTitle: 'Workspace',
     docReady: 'Document ready – you can ask questions',
@@ -805,6 +808,15 @@ function PdfUploader({ onUpload, onRemove, t }: {
           Object.values(previewMap).forEach(URL.revokeObjectURL);
           setErrors([...rejectionErrors, data.error ?? t.uploadErr]); return;
         }
+        if (data.status === 'already_exists') {
+          // File was already indexed — nothing new to process, but the doc
+          // is present in the user's library, so refresh the docs list/tab.
+          Object.values(previewMap).forEach(URL.revokeObjectURL);
+          setUploadedFiles([]);
+          setErrors([...rejectionErrors, t.fileAlreadyExists]);
+          onUpload();
+          return;
+        }
         if (data.files?.length) {
           // Revoke preview URLs and clear dropzone — files now live in the "Uploaded Docs" tab
           Object.values(previewMap).forEach(url => URL.revokeObjectURL(url));
@@ -1073,10 +1085,10 @@ function UploadedDocsList({
         )}
       </div>
 
-      {docToDelete && (
+      {docToDelete && createPortal(
         <div
-          className="fixed inset-0 z-[80] flex items-center justify-center p-4 animate-slide-up-fade"
-          style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(8px)' }}
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 animate-slide-up-fade"
+          style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)' }}
           onClick={e => { if (e.target === e.currentTarget && deletingId === null) setDocToDelete(null); }}
         >
           <div
@@ -1129,7 +1141,8 @@ function UploadedDocsList({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

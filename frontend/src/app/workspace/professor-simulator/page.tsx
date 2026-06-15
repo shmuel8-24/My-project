@@ -678,6 +678,7 @@ export default function ProfessorSimulatorPage() {
       const form = new FormData();
       form.append('files', file);
       if (selectedCourse) form.append('course_name', selectedCourse.name);
+      form.append('is_past_exam', '1');
       const res  = await authFetch(`${API}/upload-pdf`, { method: 'POST', body: form });
       const data = await safeJson(res);
       if (!res.ok) { setSampleExamErr((data.error as string) ?? 'שגיאה בהעלאת הקובץ'); return; }
@@ -733,6 +734,7 @@ export default function ProfessorSimulatorPage() {
           question:       text,
           history:        messages.map(m => ({ role: m.role, content: m.content })),
           file_ids:       fileIds,
+          course_name:    selectedCourse?.name ?? '',
         }),
       });
       const data = await safeJson(res);
@@ -762,7 +764,7 @@ export default function ProfessorSimulatorPage() {
       setChatErr('לא ניתן להתחבר לשרת. בדוק שהשרת פועל.');
     }
     finally { setSending(false); }
-  }, [sending, canSim, profName, examStyle, topics, messages, files, sampleExam, refreshUsage]);
+  }, [sending, canSim, profName, examStyle, topics, messages, files, sampleExam, selectedCourse, refreshUsage]);
 
   const startSimulation = () => {
     if (!sampleExam) return;
@@ -1139,10 +1141,10 @@ export default function ProfessorSimulatorPage() {
                 <p className="font-bold text-[#2A3B22] text-sm">חומר מבחן</p>
               </div>
               <span
-                className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                style={{ background: 'rgba(81,123,62,0.09)', color: '#517B3E', border: '1px solid rgba(81,123,62,0.2)' }}
+                className="text-xs font-semibold px-2.5 py-1 rounded-md"
+                style={{ background: 'rgba(255,255,255,0.55)', color: '#517B3E', border: '1px solid rgba(81,123,62,0.2)' }}
               >
-                {fileBadge} קבצים{fileLimit && ` / ${fileLimit}`}
+                {fileBadge} קבצים
               </span>
             </div>
 
@@ -1179,10 +1181,10 @@ export default function ProfessorSimulatorPage() {
               {canUploadMore ? (
                 <div
                   {...getRootProps()}
-                  className="rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-2 py-6 cursor-pointer transition-all text-center"
+                  className="rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-4 p-10 cursor-pointer text-center bg-white/40 hover:bg-[rgba(81,123,62,0.06)] transition-colors duration-200"
                   style={{
                     borderColor:     isDragActive ? '#517B3E' : 'rgba(157,192,139,0.5)',
-                    backgroundColor: isDragActive ? 'rgba(81,123,62,0.07)' : 'rgba(255,255,255,0.4)',
+                    backgroundColor: isDragActive ? 'rgba(81,123,62,0.07)' : undefined,
                     opacity:         uploading ? 0.6 : 1,
                   }}
                 >
@@ -1193,16 +1195,20 @@ export default function ProfessorSimulatorPage() {
                     <p className="text-sm font-bold text-[#517B3E]">שחרר כאן!</p>
                   ) : (
                     <>
-                      <svg className="w-8 h-8 text-[#9DC08B]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
-                      </svg>
-                      <p className="text-sm font-medium text-[#4a5e3a]">גרור קבצים לכאן</p>
-                      <p className="text-xs text-[#9aaf8a]">PDF · PPTX · עד 50 MB</p>
-                      {!isPro && (
-                        <p className="text-[10px] text-[#b4a890] mt-1">
-                          {files.length === 0 ? 'עד 2 קבצים בחשבון החינמי' : `נותר קובץ 1 נוסף`}
-                        </p>
-                      )}
+                      <div className="p-4 rounded-full" style={{ background: 'rgba(157,192,139,0.18)' }}>
+                        <svg className="w-7 h-7 text-[#517B3E]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+                        </svg>
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium text-[#4a5e3a]">גרור קבצים לכאן</p>
+                        <p className="text-xs text-[#9aaf8a]">PDF · PPTX · עד 50 MB</p>
+                        {!isPro && (
+                          <p className="text-[10px] text-[#b4a890]">
+                            {files.length === 0 ? 'עד 2 קבצים בחשבון החינמי' : `נותר קובץ 1 נוסף`}
+                          </p>
+                        )}
+                      </div>
                     </>
                   )}
                 </div>
@@ -1242,9 +1248,18 @@ export default function ProfessorSimulatorPage() {
                 <p className="text-[10px] font-semibold text-[#7a9268] uppercase tracking-wider">
                   סימולציות בחודש זה
                 </p>
-                <span className={`text-xs font-bold ${showSimWarn ? 'text-amber-600' : 'text-[#517B3E]'}`}>
-                  {simLimit === null ? `${simsUsed} ∞` : `${simsUsed} / ${simLimit}`}
-                </span>
+                {simLimit === null ? (
+                  <span
+                    className="text-xs font-semibold px-2.5 py-0.5 rounded"
+                    style={{ background: 'rgba(81,123,62,0.12)', color: '#2A3B22' }}
+                  >
+                    ללא הגבלה
+                  </span>
+                ) : (
+                  <span className={`text-xs font-bold ${showSimWarn ? 'text-amber-600' : 'text-[#517B3E]'}`}>
+                    {simsUsed} / {simLimit}
+                  </span>
+                )}
               </div>
               {simLimit !== null && (
                 <div className="h-1.5 rounded-full bg-stone-200 overflow-hidden">

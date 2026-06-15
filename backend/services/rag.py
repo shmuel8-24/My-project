@@ -4,6 +4,7 @@ import numpy as np
 from rank_bm25 import BM25Okapi
 
 from extensions import RRF_K, TOP_K, _bm25_map, _images_map, embeddings_model
+from models import SessionLocal, UserDocument
 from services.faiss_store import FaissCollection, get_user_store
 
 
@@ -172,6 +173,23 @@ def hybrid_search(
         safe_chunks.append(chunk)
         safe_metas.append(meta)
     return safe_chunks, safe_metas
+
+
+def get_past_exam_file_ids(user_id: int, course_name: str | None = None) -> list[str]:
+    """Return file_ids of documents the user tagged as past exams (UserDocument.is_past_exam),
+    optionally restricted to a single course. Used to ground "Lecturer's Brain" agents
+    (exam prediction / trap-question simulation) in the lecturer's actual past exams."""
+    db = SessionLocal()
+    try:
+        q = db.query(UserDocument.file_id).filter(
+            UserDocument.user_id == user_id,
+            UserDocument.is_past_exam.is_(True),
+        )
+        if course_name:
+            q = q.filter(UserDocument.course_name == course_name)
+        return [row[0] for row in q.all()]
+    finally:
+        db.close()
 
 
 def get_chunks_for_files(user_id: int, file_ids: list[str]) -> tuple[list[str], list[dict]]:

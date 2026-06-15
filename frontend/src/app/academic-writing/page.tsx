@@ -1997,7 +1997,7 @@ export default function AcademicWritingPage() {
         setUploadError(data.error ?? (he ? 'שגיאה בהעלאת הקובץ' : 'Upload failed'));
         return;
       }
-      // Backend returns { files: [{source, file_id, chunks_stored, already_indexed, ...}] }
+      // Backend returns { files: [{source, file_id, chunks_stored, status?, ...}] }
       const uploaded: UploadedFile[] = (data.files ?? []).map((f: { source: string; file_id: string }) => {
         const original = files.find(file => file.name === f.source) ?? files[0];
         return { name: f.source, size: original?.size ?? 0, fileId: f.file_id ?? '' };

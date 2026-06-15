@@ -29,7 +29,7 @@ from extensions import (
 from models import ChatMessage, ChatSession, SessionLocal, UserDocument, sql_func
 from services.code_runner import execute_python_code
 from services.pdf import extract_pptx_slides
-from services.rag import get_user_collection, get_user_images, rebuild_user_bm25, hybrid_search
+from services.rag import get_chunks_for_files, get_user_collection, get_user_images, rebuild_user_bm25, hybrid_search
 from services.security import (
     SECURITY_SYSTEM_INSTRUCTION,
     _DLP_FALLBACK,
@@ -58,6 +58,24 @@ def _save_upload_file(user_id: int, file_id: str, filename: str, data: bytes) ->
         f.write(data)
 
 MAX_HISTORY_MESSAGES = 10
+
+# ── Document summarization intent ───────────────────────────────────────────
+# Standard semantic similarity search fails for whole-document summary requests:
+# a chunk's embedding rarely matches a query like "summarize the document" — the
+# query describes an *action*, not the document's *content*. When this intent is
+# detected, retrieval bypasses hybrid_search entirely and dumps the document's own
+# chunks (in original order, capped to fit the context window) instead.
+_SUMMARY_KEYWORDS = (
+    "סכם", "סיכום", "תקציר",
+    "summarize", "summarise", "summary", "tl;dr", "tldr",
+)
+_MAX_SUMMARY_CONTEXT_CHARS = 40_000
+
+
+def _is_summary_request(text: str) -> bool:
+    lowered = text.lower()
+    return any(kw in lowered for kw in _SUMMARY_KEYWORDS)
+
 
 # ── OCR (optional) ─────────────────────────────────────────────────────────────
 try:
@@ -88,6 +106,11 @@ def upload_pdf(user_id: int):
     # CourseContext). Stamped onto chunk metadata + UserDocument so course-scoped
     # RAG retrieval (e.g. /api/generate-presentation) can filter to this course only.
     course_name = strip_html((request.form.get("course_name") or "").strip()) or None
+
+    # Optional "past exam" tag (sent by the Professor Brain Simulator's past-exam
+    # dropzone). Persisted on UserDocument so exam-prediction agents can later
+    # auto-discover these files via services.rag.get_past_exam_file_ids().
+    is_past_exam = (request.form.get("is_past_exam") or "").strip().lower() in ("1", "true", "yes")
 
     new_text_count = sum(
         1 for f in valid_files
@@ -198,7 +221,8 @@ def upload_pdf(user_id: int):
                                 if not _ocr_exists:
                                     _ocr_db.add(UserDocument(
                                         user_id=user_id, file_id=ocr_file_id, filename=filename,
-                                        file_size_bytes=len(img_bytes), course_name=course_name))
+                                        file_size_bytes=len(img_bytes), course_name=course_name,
+                                        is_past_exam=is_past_exam))
                                     _ocr_db.commit()
                                     _save_upload_file(user_id, ocr_file_id, filename, img_bytes)
                             except Exception as reg_exc:
@@ -239,12 +263,11 @@ def upload_pdf(user_id: int):
             print(f"[upload] u{user_id}: {filename!r} already indexed "
                   f"(file_id={file_id}) — skipping (persistence policy)")
             text_results.append({
-                "source":          filename,
-                "file_id":         file_id,
-                "already_indexed": True,
-                "chunks_stored":   0,
-                "type":            "cached",
-                "message":         "Already indexed — delete and re-upload to refresh.",
+                "source":        filename,
+                "file_id":       file_id,
+                "status":        "already_exists",
+                "chunks_stored": 0,
+                "message":       "Document already exists in the knowledge base.",
             })
             continue
         # ────────────────────────────────────────────────────────────────────
@@ -318,7 +341,8 @@ def upload_pdf(user_id: int):
             ).first()
             if not _exists:
                 _reg_db.add(UserDocument(user_id=user_id, file_id=file_id, filename=filename,
-                                         file_size_bytes=len(raw_bytes), course_name=course_name))
+                                         file_size_bytes=len(raw_bytes), course_name=course_name,
+                                         is_past_exam=is_past_exam))
                 _reg_db.commit()
                 _save_upload_file(user_id, file_id, filename, raw_bytes)
         except Exception as reg_exc:
@@ -354,6 +378,17 @@ def upload_pdf(user_id: int):
     }
     if errors:
         resp["errors"] = errors
+
+    # Top-level convenience flag: every uploaded file was already indexed, so
+    # nothing new was processed. Lets the frontend short-circuit (stop the
+    # spinner, show an "already exists" notice, skip the "new document"
+    # onboarding flow) without inspecting `files[]` itself.
+    duplicates = [r for r in all_results if r.get("status") == "already_exists"]
+    if duplicates and len(duplicates) == len(all_results):
+        resp["status"]   = "already_exists"
+        resp["message"]  = "Document already exists in the knowledge base."
+        resp["document"] = duplicates[0]
+
     return jsonify(resp), 200
 
 
@@ -449,13 +484,51 @@ def ask(user_id: int):
         if last_user_q:
             search_query = f"{last_user_q} {question}"
 
+    # Resolve which document "the document" refers to for summary requests.
+    # If the frontend didn't scope the request to a specific file (the filter
+    # chips only appear when the user has >1 document), fall back to the user's
+    # single document when that's unambiguous; otherwise let it fall through to
+    # normal hybrid_search (can't guess which of several documents is meant).
+    is_summary_request = _is_summary_request(question)
+    summary_file_id     = file_id_filter
+    if is_summary_request and not summary_file_id:
+        _db_docs = SessionLocal()
+        try:
+            _owned_file_ids = [
+                row.file_id for row in
+                _db_docs.query(UserDocument.file_id)
+                .filter(UserDocument.user_id == user_id)
+                .distinct()
+                .all()
+            ]
+        finally:
+            _db_docs.close()
+        if len(_owned_file_ids) == 1:
+            summary_file_id = _owned_file_ids[0]
+        else:
+            is_summary_request = False
+
     def generate():
         try:
             yield f"data: {json.dumps({'type': 'status', 'phase': 'thinking'})}\n\n"
 
-            chunks, metadatas = hybrid_search(
-                user_id, search_query, min(TOP_K, doc_count), file_id=file_id_filter
-            )
+            if is_summary_request and summary_file_id:
+                raw_chunks, raw_metas = get_chunks_for_files(user_id, [summary_file_id])
+                order = sorted(range(len(raw_chunks)), key=lambda i: raw_metas[i].get("chunk_index", i))
+                chunks, metadatas, used_chars = [], [], 0
+                for i in order:
+                    c, m = raw_chunks[i], raw_metas[i]
+                    if chunks and used_chars + len(c) > _MAX_SUMMARY_CONTEXT_CHARS:
+                        break
+                    chunks.append(c)
+                    metadatas.append(m)
+                    used_chars += len(c)
+                print(f"▶ SUMMARY MODE u{user_id}: file_id={summary_file_id} "
+                      f"→ {len(chunks)}/{len(raw_chunks)} chunks, {used_chars} chars")
+            else:
+                chunks, metadatas = hybrid_search(
+                    user_id, search_query, min(TOP_K, doc_count), file_id=file_id_filter
+                )
 
             if not chunks and not tavily_client and not user_images:
                 no_result_answer = "לא נמצאו קטעים רלוונטיים במסמך לשאלה זו. נסה לנסח אחרת."
@@ -535,6 +608,18 @@ def ask(user_id: int):
                     "and relate relevant visual content to the question."
                 )
 
+            summary_instruction = ""
+            if is_summary_request and summary_file_id and chunks:
+                summary_instruction = (
+                    "\n\nDOCUMENT SUMMARY MODE: The DOCUMENT CONTEXT below is the actual "
+                    "extracted content of the requested document, given in its original "
+                    "order (it may be truncated if the document is very long) — it is NOT "
+                    "a search result, so it may not appear directly relevant to the literal "
+                    "wording of the question. Provide a clear, well-structured summary of "
+                    "this content in Hebrew, organized by topic/section, covering the "
+                    "document's main ideas, arguments, and conclusions."
+                )
+
             system_prompt = (
                 SECURITY_SYSTEM_INSTRUCTION
                 + "You are a scientist, engineer, and knowledgeable assistant for U-Note, "
@@ -560,6 +645,7 @@ def ask(user_id: int):
                 + web_search_instruction
                 + code_interpreter_instruction
                 + image_instruction
+                + summary_instruction
             )
 
             text_content = (
@@ -758,6 +844,22 @@ def list_documents(user_id: int):
                 "upload_date": meta.get("upload_date"),
             }
         docs[src]["chunks"] += 1
+
+    # Enrich with course_name / is_past_exam from the SQL ownership registry
+    # (FAISS metadata doesn't carry is_past_exam — it's only on UserDocument).
+    db = SessionLocal()
+    try:
+        registry = {
+            row.file_id: row
+            for row in db.query(UserDocument).filter(UserDocument.user_id == user_id).all()
+        }
+    finally:
+        db.close()
+    for doc in docs.values():
+        record = registry.get(doc["file_id"])
+        doc["course_name"]  = record.course_name  if record else None
+        doc["is_past_exam"] = bool(record.is_past_exam) if record else False
+
     return jsonify({
         "documents":    sorted(docs.values(), key=lambda d: d["name"]),
         "total_chunks": total,

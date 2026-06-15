@@ -16,14 +16,15 @@ from flask import Blueprint, jsonify, request
 from api.middleware import _current_month_key, token_required
 from extensions import TOP_K, client, limiter
 from models import SessionLocal, User, UserDocument
-from services.rag import get_chunks_for_files, get_user_collection, hybrid_search
+from services.rag import get_chunks_for_files, get_past_exam_file_ids, get_user_collection, hybrid_search
 
 professor_bp = Blueprint("professor", __name__)
 
 _PROFESSOR_MODEL   = "gpt-4o"
 _MAX_HISTORY       = 10      # conversation turns kept in context
 _MAX_CONTEXT_CHARS = 20_000  # hard cap on RAG text fed to the prompt
-_MAX_PREDICTOR_CONTEXT_CHARS = 40_000  # past-exam analysis needs more than top-k chunks
+_MAX_PREDICTOR_CONTEXT_CHARS  = 40_000  # past-exam analysis needs more than top-k chunks
+_MAX_PAST_EXAM_STYLE_CHARS    = 8_000   # cap on past-exam context injected into "simulate" mode
 
 # Fixed system prompt for the "Predict my exam" quick action — analyzes ONLY the
 # user's uploaded past exams (file_ids), never the general RAG knowledge base.
@@ -33,6 +34,14 @@ _EXAM_PREDICTOR_PROMPT = (
     "concepts, and the specific question structures the lecturer favors. Based strictly on "
     "this historical data, generate a highly probable predicted exam (or list of definitive "
     "topics) for the upcoming test. Be direct and objective.\n\n"
+    "## כללי הצגה קריטיים (חלים על כל החיזוי)\n"
+    "- הצג את החיזוי כהמלצה אינטואיטיבית של מתרגל/ת מנוסה שמכיר/ה את המבחנים הקודמים — "
+    "לעולם לא כתוצר של ניתוח סטטיסטי, מודל, ניקוד, הסתברות או אלגוריתם.\n"
+    "- אסור בהחלט להשתמש במילים: 'הסתברות', 'אחוזי סיכוי', 'מודל', 'אלגוריתם', 'ניקוד', "
+    "'ניתוח סטטיסטי', 'machine learning', 'probability', 'score', 'algorithm', 'model'.\n"
+    "- סמן את הנושאים החמים ביותר כ'טיפ זהב 💡' או ניסוח דומה — כאילו אתה משתף תחושת בטן "
+    "מהניסיון, למשל: 'טיפ זהב: מומלץ לשלוט בהוכחה הזו, זה נושא קלאסי שחוזר כל שנה'.\n"
+    "- האשליה של אינטואיציה אנושית חייבת להישאר שלמה — אל תרמוז אף פעם שמדובר בחיזוי ממוחשב.\n\n"
     "ענה בעברית, אלא אם המשתמש כתב באנגלית — ואז ענה באנגלית."
 )
 
@@ -44,6 +53,7 @@ def _build_system_prompt(
     exam_style: str,
     trap_types: list[str],
     topics: str,
+    has_past_exams: bool = False,
 ) -> str:
     """
     Frame GPT-4o as a specific professor who thinks like an academic examiner.
@@ -81,6 +91,22 @@ def _build_system_prompt(
         "6. אל תציג יותר מ-4 שאלות בתגובה אחת אלא אם ביקשו במפורש יותר.",
         "7. שמור על טון אקדמי, תובעני, אך מועיל — כמו בשעת קבלת קהל.",
     ]
+
+    if has_past_exams:
+        lines += [
+            "",
+            '## "המוח של המרצה" — ניתוח מבחנים קודמים',
+            'סופקו לך קטעים ממבחנים קודמים של הקורס (בהקשר, תחת הכותרת "מבחנים קודמים של '
+            'הקורס"). מעבר לתפקידך כ-' + name_clause + ', אתה פועל כעת גם כסוכן '
+            '"המוח של המרצה" (Lecturer\'s Brain) של U-Note:',
+            "8. נתח את הקטעים האלה וזהה דפוסים חזרתיים — סוגי שאלות, נושאים שחוזרים, "
+            "ניסוחים אופייניים ורמת הקושי שהמרצה מעדיף/ה.",
+            "9. בכל תשובה — שאלת תרגול, הסבר על נושא, או חיזוי מבחן — קשר אותה במפורש "
+            'לדפוסים מהמבחנים הקודמים, לדוגמה: "שים לב שב-3 המבחנים האחרונים המרצה דרש/ה '
+            'להשתמש בנוסחה הזו בכל שאלה על הנושא — חשוב לדעת אותה בעל פה."',
+            "10. התבסס רק על דפוסים שאתה רואה בקטעים שסופקו — אל תמציא דפוסים שלא קיימים בהם.",
+        ]
+
     return "\n".join(lines)
 
 
@@ -100,12 +126,20 @@ def professor_ask(user_id: int):
       "topics":          "חשבון דיפרנציאלי ואינטגרלי",
       "question":        "תן לי שאלת בחינה אופיינית",
       "history":         [{"role":"user","content":"..."}, ...],
-      "file_ids":        ["abc123", "def456"]   // optional filter ("simulate"); required ("predict_exam")
+      "file_ids":        ["abc123", "def456"],  // optional filter ("simulate"); required ("predict_exam")
+      "course_name":     "אינפי 1"              // optional — scopes past-exam lookup to this course
     }
 
     When mode == "predict_exam", file_ids must point to the user's uploaded past
-    exams. The full indexed text of those files (not query-driven top-k chunks)
+    exams. The full indexed text of those files — merged with any other files the
+    user has tagged is_past_exam=True for this course (services.rag.get_past_exam_file_ids) —
     is fed to a fixed "expert exam predictor" system prompt.
+
+    In mode == "simulate", the full text of the user's is_past_exam=True files for this
+    course (if any) is additionally retrieved and injected as a "מבחנים קודמים של הקורס"
+    context block, and _build_system_prompt appends a "Lecturer's Brain" directive
+    instructing the model to identify recurring patterns and explicitly tie its answers
+    back to those past exams.
 
     Response:
     {
@@ -155,6 +189,7 @@ def professor_ask(user_id: int):
     exam_style     = str(data.get("exam_style")     or "").strip()
     topics         = str(data.get("topics")         or "").strip()
     question       = str(data.get("question")       or "").strip()
+    course_name    = str(data.get("course_name")    or "").strip() or None
 
     raw_traps   = data.get("trap_types") or []
     trap_types  = [str(t).strip() for t in raw_traps if str(t).strip()] \
@@ -198,9 +233,20 @@ def professor_ask(user_id: int):
     # ── 4. Retrieve RAG context ──────────────────────────────────────────────
     context_text = ""
     chunks_used  = 0
+    past_exam_context     = ""
+    past_exam_chunks_used = 0
     try:
+        # Files the user has tagged as past exams (UserDocument.is_past_exam),
+        # scoped to the active course when known — grounds the "Lecturer's
+        # Brain" agent in the lecturer's actual historical exams.
+        past_exam_ids = get_past_exam_file_ids(user_id, course_name)
+
         if mode == "predict_exam":
-            all_chunks, all_metas = get_chunks_for_files(user_id, file_ids)
+            # Merge the explicitly-uploaded sample exam with any other past
+            # exams the user has tagged for this course, so the predictor sees
+            # the full historical record — not just the single freshest upload.
+            merged_ids = list(dict.fromkeys(file_ids + past_exam_ids))
+            all_chunks, all_metas = get_chunks_for_files(user_id, merged_ids)
         else:
             all_chunks, all_metas = [], []
             col = get_user_collection(user_id)
@@ -214,6 +260,19 @@ def professor_ask(user_id: int):
                         all_metas.extend(fm)
                 else:
                     all_chunks, all_metas = hybrid_search(user_id, question, TOP_K)
+
+            # Pull the full text of the lecturer's past exams (not query-driven
+            # top-k) so the agent can recognize recurring patterns/question
+            # types and tie its answers back to them.
+            if past_exam_ids:
+                pe_chunks, pe_metas = get_chunks_for_files(user_id, past_exam_ids)
+                if pe_chunks:
+                    pe_blocks = [
+                        f"[מבחן קודם: {m.get('source', 'לא ידוע')} | עמ׳ {m.get('page_number', '?')}]\n{c}"
+                        for c, m in zip(pe_chunks, pe_metas)
+                    ]
+                    past_exam_context     = "\n\n".join(pe_blocks)[:_MAX_PAST_EXAM_STYLE_CHARS]
+                    past_exam_chunks_used = len(pe_chunks)
 
         if all_chunks:
             context_blocks = [
@@ -233,13 +292,22 @@ def professor_ask(user_id: int):
         system_prompt = _EXAM_PREDICTOR_PROMPT
         context_label = "מבחנים קודמים שהועלו"
     else:
-        system_prompt = _build_system_prompt(professor_name, exam_style, trap_types, topics)
+        system_prompt = _build_system_prompt(
+            professor_name, exam_style, trap_types, topics,
+            has_past_exams=bool(past_exam_context),
+        )
         context_label = "חומר לימוד רלוונטי מהמסמכים שלי"
 
-    user_turn = question
+    context_parts: list[str] = []
     if context_text:
+        context_parts.append(f"{context_label}:\n{context_text}")
+    if past_exam_context:
+        context_parts.append(f"מבחנים קודמים של הקורס (לזיהוי דפוסי המרצה):\n{past_exam_context}")
+
+    user_turn = question
+    if context_parts:
         user_turn = (
-            f"---\n{context_label}:\n{context_text}\n---\n\n"
+            "---\n" + "\n---\n".join(context_parts) + "\n---\n\n"
             f"בקשתי: {question}"
         )
 
@@ -269,7 +337,8 @@ def professor_ask(user_id: int):
         total_tokens = completion.usage.total_tokens if completion.usage else "?"
         print(
             f"[Professor] u{user_id} | mode={mode} | model={_PROFESSOR_MODEL} "
-            f"| chunks={chunks_used} | tokens={total_tokens}"
+            f"| chunks={chunks_used} | past_exam_chunks={past_exam_chunks_used} "
+            f"| tokens={total_tokens}"
         )
         return jsonify({
             "reply":               reply,

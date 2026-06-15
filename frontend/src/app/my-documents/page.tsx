@@ -571,6 +571,22 @@ export default function MyDocumentsPage() {
     fetchDocuments();
   }, [authUser, courseHydrated, fetchDocuments]);
 
+  // Re-fetch when the user returns to this tab/page — covers the case where a
+  // document was uploaded from another page (workspace/academic-writing) and
+  // the user then navigates back here via client-side routing.
+  useEffect(() => {
+    if (!authUser || !courseHydrated) return;
+    function onVisible() {
+      if (document.visibilityState === 'visible') fetchDocuments();
+    }
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [authUser, courseHydrated, fetchDocuments]);
+
   // ── Upload a new document for the active course ───────────────────────────
   const handleFileChange = useCallback(async (e: ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -591,6 +607,11 @@ export default function MyDocumentsPage() {
       const data = await res.json();
       if (!res.ok) {
         setUploadError(data.error ?? (he ? 'העלאת הקובץ נכשלה' : 'Upload failed'));
+        return;
+      }
+      if (data.status === 'already_exists') {
+        setUploadError(he ? 'הקובץ כבר קיים במערכת' : 'This file already exists in the system');
+        fetchDocuments();
         return;
       }
       fetchDocuments();

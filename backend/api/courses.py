@@ -116,6 +116,7 @@ def save_course(user_id: int):
                     "chunk_index": i,
                     "user_id":     user_id,
                     "file_type":   "syllabus",
+                    "course_name": course_name,
                 }
                 for i in range(len(chunks))
             ]
@@ -137,6 +138,7 @@ def save_course(user_id: int):
                         file_id         = syllabus_file_id,
                         filename        = syllabus_filename,
                         file_size_bytes = len(full_syllabus_text.encode("utf-8")),
+                        course_name     = course_name,
                     ))
                     _reg_db.commit()
             except Exception as reg_exc:
@@ -400,7 +402,8 @@ def _reindex_syllabus_for_course(user_id: int, course_name: str, full_text: str)
         chunks  = text_splitter.split_text(full_text)
         metas   = [{"source": fname, "file_name": fname, "file_id": file_id,
                     "page_number": 1, "total_pages": 1, "upload_date": upload_date,
-                    "chunk_index": i, "user_id": user_id, "file_type": "syllabus"}
+                    "chunk_index": i, "user_id": user_id, "file_type": "syllabus",
+                    "course_name": course_name}
                    for i in range(len(chunks))]
         ids     = [f"{fname}_chunk_{i}" for i in range(len(chunks))]
         vectors = embeddings_model.embed_documents(chunks)
@@ -428,9 +431,11 @@ def _reindex_syllabus_for_course(user_id: int, course_name: str, full_text: str)
         sz = len(full_text.encode("utf-8"))
         if doc_rec:
             doc_rec.file_size_bytes = sz
+            doc_rec.course_name     = course_name
         else:
             db.add(UserDocument(user_id=user_id, file_id=file_id,
-                                filename=fname, file_size_bytes=sz))
+                                filename=fname, file_size_bytes=sz,
+                                course_name=course_name))
 
         course.full_syllabus_text = full_text
         course.syllabus_file_id   = file_id

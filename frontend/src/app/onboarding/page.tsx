@@ -1,7 +1,12 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import { AnimatePresence, motion, type Variants } from 'framer-motion';
+import {
+  Globe, Building2, GraduationCap, Layers, Award, BookOpen,
+  PartyPopper, ArrowRight, ArrowLeft, Check, AlertCircle,
+} from 'lucide-react';
 
 const API = 'http://127.0.0.1:5003';
 
@@ -113,6 +118,12 @@ const DEGREE_TYPES = [
   { value: 'specialized', label: 'תואר עם התמחות',     sub: 'With Specialization' },
 ];
 
+const DEGREE_ICONS: Record<string, React.ElementType> = {
+  regular:     GraduationCap,
+  double:      Layers,
+  specialized: Award,
+};
+
 // ─── Shared style helpers ─────────────────────────────────────────────────────
 
 function applyFocusStyle(el: { style: CSSStyleDeclaration }) {
@@ -136,6 +147,15 @@ const baseInputStyle: React.CSSProperties = {
   transition: 'border-color 0.2s, box-shadow 0.2s',
 };
 
+const centeredInputStyle: React.CSSProperties = {
+  ...baseInputStyle,
+  textAlign: 'center',
+  fontSize: '1rem',
+  fontWeight: 600,
+  padding: '15px 44px',
+  borderRadius: 14,
+};
+
 const dropdownStyle: React.CSSProperties = {
   position: 'absolute',
   top: 'calc(100% + 4px)',
@@ -149,10 +169,7 @@ const dropdownStyle: React.CSSProperties = {
   zIndex: 50,
   maxHeight: 224,
   overflowY: 'auto' as const,
-};
-
-const labelStyle: React.CSSProperties = {
-  fontSize: '0.8125rem', fontWeight: 600, color: '#374151',
+  textAlign: 'start' as const,
 };
 
 // ─── Tiny icon components ─────────────────────────────────────────────────────
@@ -185,10 +202,10 @@ function SearchIcon() {
   );
 }
 
-function MiniSpinner() {
+function MiniSpinner({ size = 14 }: { size?: number }) {
   return (
     <span style={{
-      width: 14, height: 14, borderRadius: '50%',
+      width: size, height: size, borderRadius: '50%',
       border: '2px solid rgba(81,123,62,0.25)',
       borderTopColor: '#517B3E',
       display: 'inline-block',
@@ -228,6 +245,32 @@ function DropItem({
   );
 }
 
+// ─── Step chrome helpers ──────────────────────────────────────────────────────
+
+function StepIconBadge({ icon: Icon }: { icon: React.ElementType }) {
+  return (
+    <div
+      className="inline-flex items-center justify-center w-14 h-14 rounded-2xl"
+      style={{ background: 'rgba(81,123,62,0.12)', border: '1.5px solid rgba(81,123,62,0.25)' }}
+    >
+      <Icon className="w-7 h-7" style={{ color: '#517B3E' }} strokeWidth={1.8} />
+    </div>
+  );
+}
+
+function StepHeading({ title, subtitle }: { title: string; subtitle?: string }) {
+  return (
+    <div>
+      <h2 className="text-2xl font-extrabold mb-1.5" style={{ color: '#1e2a45', fontFamily: 'Georgia, serif', lineHeight: 1.3 }}>
+        {title}
+      </h2>
+      {subtitle && (
+        <p className="text-sm" style={{ color: '#8899aa', lineHeight: 1.6 }}>{subtitle}</p>
+      )}
+    </div>
+  );
+}
+
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
 
 function getToken() {
@@ -251,6 +294,16 @@ function LogoMark() {
   );
 }
 
+// ─── Steps + animation ─────────────────────────────────────────────────────────
+
+type StepId = 'country' | 'institution' | 'degree' | 'primaryMajor' | 'secondaryMajor' | 'celebrate';
+
+const slideVariants: Variants = {
+  enter:  (dir: number) => ({ x: dir >= 0 ? 56 : -56, opacity: 0 }),
+  center: { x: 0, opacity: 1 },
+  exit:   (dir: number) => ({ x: dir >= 0 ? -56 : 56, opacity: 0 }),
+};
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function OnboardingPage() {
@@ -263,9 +316,14 @@ export default function OnboardingPage() {
   const [primaryMajor,   setPrimaryMajor]   = useState('');
   const [secondaryMajor, setSecondaryMajor] = useState('');
 
-  // Form state
-  const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState('');
+  // Step / save state
+  const [stepIndex, setStepIndex] = useState(0);
+  const [direction, setDirection] = useState(1);
+  const [error,     setError]     = useState('');
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+
+  const autoAdvanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const submittedRef = useRef(false);
 
   // Institution async combobox state
   const [instOptions,   setInstOptions]   = useState<string[]>([]);
@@ -285,12 +343,27 @@ export default function OnboardingPage() {
   const secondaryRef = useRef<HTMLDivElement>(null);
 
   const showSecondary  = degreeType === 'double' || degreeType === 'specialized';
-  const secondaryLabel = degreeType === 'double' ? 'חוג משני' : 'התמחות';
+  const secondaryLabel = degreeType === 'double' ? 'מה החוג המשני שלך?' : 'מה תחום ההתמחות שלך?';
+
+  const steps = useMemo<StepId[]>(() => {
+    const base: StepId[] = ['country', 'institution', 'degree', 'primaryMajor'];
+    if (showSecondary) base.push('secondaryMajor');
+    base.push('celebrate');
+    return base;
+  }, [showSecondary]);
+
+  const currentStepId = steps[stepIndex] ?? 'celebrate';
 
   // Redirect unauthenticated users
   useEffect(() => {
     if (!getToken()) router.replace('/?login=true');
   }, [router]);
+
+  // Defensive clamp if `steps` shrinks while pointing past its end
+  useEffect(() => {
+    if (stepIndex <= steps.length - 1) return;
+    void Promise.resolve().then(() => setStepIndex(steps.length - 1));
+  }, [steps, stepIndex]);
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -335,6 +408,11 @@ export default function OnboardingPage() {
     secondaryMajor.trim() === '' || m.includes(secondaryMajor)
   );
 
+  // Clear any pending auto-advance timer on unmount
+  useEffect(() => () => {
+    if (autoAdvanceTimer.current) clearTimeout(autoAdvanceTimer.current);
+  }, []);
+
   // ── Keyboard handlers ──────────────────────────────────────────────────────
 
   const handleInstKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -373,48 +451,96 @@ export default function OnboardingPage() {
     } else if (e.key === 'Escape') setSecondaryOpen(false);
   };
 
-  // ── Submit ─────────────────────────────────────────────────────────────────
+  // ── Step navigation ────────────────────────────────────────────────────────
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
-    try {
-      const res = await authFetch(`${API}/api/user/onboarding`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          country,
-          institution,
-          degree_type:     degreeType,
-          primary_major:   primaryMajor.trim(),
-          secondary_major: secondaryMajor.trim(),
-        }),
-      });
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        setError((d as { error?: string }).error ?? 'שגיאה בשמירת הנתונים');
-        return;
-      }
-      localStorage.setItem('levy_ai_country',          country);
-      localStorage.setItem('levy_ai_institution',      institution);
-      localStorage.setItem('levy_ai_degree_type',      degreeType);
-      localStorage.setItem('levy_ai_primary_major',    primaryMajor.trim());
-      localStorage.setItem('levy_ai_secondary_major',  degreeType !== 'regular' ? secondaryMajor.trim() : '');
-      router.push('/workspace');
-    } catch {
-      setError('לא ניתן להתחבר לשרת');
-    } finally {
-      setLoading(false);
-    }
+  const goNext = () => {
+    if (autoAdvanceTimer.current) { clearTimeout(autoAdvanceTimer.current); autoAdvanceTimer.current = null; }
+    setDirection(1);
+    setStepIndex(i => i + 1);
   };
+
+  const goBack = () => {
+    if (autoAdvanceTimer.current) { clearTimeout(autoAdvanceTimer.current); autoAdvanceTimer.current = null; }
+    if (currentStepId === 'celebrate') { submittedRef.current = false; setSaveState('idle'); }
+    setDirection(-1);
+    setStepIndex(i => Math.max(i - 1, 0));
+  };
+
+  const skip = () => router.push('/workspace');
+
+  const selectDegree = (value: string) => {
+    setDegreeType(value);
+    if (value === 'regular') setSecondaryMajor('');
+    if (autoAdvanceTimer.current) clearTimeout(autoAdvanceTimer.current);
+    autoAdvanceTimer.current = setTimeout(() => {
+      setDirection(1);
+      setStepIndex(i => i + 1);
+    }, 500);
+  };
+
+  // ── Save on reaching the celebration step ─────────────────────────────────
+
+  useEffect(() => {
+    if (currentStepId !== 'celebrate' || saveState !== 'idle' || submittedRef.current) return;
+    submittedRef.current = true;
+    const payload = {
+      country,
+      institution,
+      degree_type:     degreeType,
+      primary_major:   primaryMajor.trim(),
+      secondary_major: secondaryMajor.trim(),
+    };
+    console.log('[onboarding] submitting', payload);
+    void Promise.resolve().then(async () => {
+      setSaveState('saving');
+      try {
+        const res = await authFetch(`${API}/api/user/onboarding`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          console.error('[onboarding] save failed', res.status, d);
+          setError((d as { error?: string }).error ?? 'שגיאה בשמירת הנתונים');
+          setSaveState('error');
+          return;
+        }
+        const saved = await res.json().catch(() => ({}));
+        console.log('[onboarding] save succeeded', saved);
+        localStorage.setItem('levy_ai_country',         country);
+        localStorage.setItem('levy_ai_institution',     institution);
+        localStorage.setItem('levy_ai_degree_type',     degreeType);
+        localStorage.setItem('levy_ai_primary_major',   primaryMajor.trim());
+        localStorage.setItem('levy_ai_secondary_major', degreeType !== 'regular' ? secondaryMajor.trim() : '');
+        setError('');
+        setSaveState('success');
+        void import('canvas-confetti').then(({ default: confetti }) => {
+          void confetti({
+            particleCount: 90, spread: 70, startVelocity: 30,
+            gravity: 0.75, decay: 0.93, ticks: 320,
+            colors: ['#517B3E', '#9DC08B', '#D1E6D9', '#F9DE8B'],
+            shapes: ['circle', 'square'],
+            origin: { y: 0.6 },
+          });
+        });
+      } catch (err) {
+        console.error('[onboarding] save request threw', err);
+        setError('לא ניתן להתחבר לשרת');
+        setSaveState('error');
+      }
+    });
+  }, [currentStepId, saveState, country, institution, degreeType, primaryMajor, secondaryMajor]);
+
+  const progressPct = steps.length > 1 ? (stepIndex / (steps.length - 1)) * 100 : 100;
+  const nextDisabled = currentStepId === 'country' && !country;
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <div
       dir="rtl"
-      className="min-h-screen flex flex-col items-center justify-center px-4 py-12 relative overflow-hidden"
+      className="min-h-screen w-full relative overflow-hidden"
       style={{ backgroundColor: '#e8e4d9', fontFamily: 'var(--font-heebo), system-ui, sans-serif' }}
     >
       {/* Organic background blobs */}
@@ -425,347 +551,370 @@ export default function OnboardingPage() {
         <div className="absolute" style={{ bottom: '0%', right: '5%', width: '30%', height: '40%', background: 'radial-gradient(ellipse at 60% 70%, #1e2a45 0%, #263354 60%, transparent 85%)', borderRadius: '70% 30% 30% 70% / 30% 70% 30% 70%', opacity: 0.8 }} />
       </div>
 
-      <div className="relative z-10 w-full animate-slide-up-fade" style={{ maxWidth: 480 }}>
-        {/* Logo */}
-        <div className="flex justify-center mb-6">
-          <LogoMark />
-        </div>
-
-        {/* Glass card */}
-        <div
-          className="rounded-3xl px-8 py-9"
-          style={{
-            background: 'rgba(255,255,255,0.82)',
-            backdropFilter: 'blur(24px)',
-            border: '1px solid rgba(255,255,255,0.75)',
-            boxShadow: '0 20px 60px rgba(30,42,69,0.18), 0 2px 12px rgba(30,42,69,0.08)',
-          }}
-        >
-          {/* Heading */}
-          <div className="mb-7 text-center">
-            <div
-              className="inline-flex items-center justify-center w-12 h-12 rounded-2xl mb-4"
-              style={{ background: 'rgba(81,123,62,0.12)', border: '1.5px solid rgba(81,123,62,0.25)' }}
-            >
-              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="#517B3E" strokeWidth={1.8}>
-                <path strokeLinecap="round" strokeLinejoin="round"
-                  d="M4.26 10.147a60.436 60.436 0 0 0-.491 6.347A48.627 48.627 0 0 1 12 20.904a48.627 48.627 0 0 1 8.232-4.41 60.46 60.46 0 0 0-.491-6.347m-15.482 0a50.57 50.57 0 0 0-2.658-.813A59.905 59.905 0 0 1 12 3.493a59.902 59.902 0 0 1 10.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.697 50.697 0 0 1 12 13.489a50.702 50.702 0 0 1 7.74-3.342M6.75 15a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm0 0v-3.675A55.378 55.378 0 0 1 12 8.443m-7.007 11.55A5.981 5.981 0 0 0 6.75 15.75v-1.5" />
-              </svg>
-            </div>
-            <h1
-              className="text-2xl font-extrabold mb-1"
-              style={{ color: '#1e2a45', fontFamily: 'Georgia, serif', lineHeight: 1.25 }}
-            >
-              פרטי הלימודים
-            </h1>
-            <p className="text-sm" style={{ color: '#8899aa', lineHeight: 1.6 }}>
-              ספר לנו על הלימודים שלך כדי שנוכל להתאים את החוויה
-            </p>
+      {/* Persistent top bar — logo, progress, skip — shared across every slide */}
+      <div className="fixed top-0 inset-x-0 z-20 px-4 pt-6">
+        <div className="mx-auto w-full" style={{ maxWidth: 420 }}>
+          <div className="flex justify-center mb-4">
+            <LogoMark />
           </div>
-
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-
-            {/* ── 1. Country ── */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <label style={labelStyle}>מדינה</label>
-              <div className="relative">
-                <select
-                  value={country}
-                  onChange={e => {
-                    setCountry(e.target.value);
-                    setInstitution('');
-                    setInstOptions([]);
-                    setInstOpen(false);
-                  }}
-                  style={{
-                    ...baseInputStyle,
-                    appearance: 'none',
-                    paddingInlineEnd: 40,
-                    cursor: 'pointer',
-                    color: country ? '#1a2540' : '#9ca3af',
-                  }}
-                  onFocus={e => applyFocusStyle(e.target)}
-                  onBlur={e => applyBlurStyle(e.target)}
-                >
-                  <option value="" disabled>בחר מדינה...</option>
-                  {COUNTRIES.map(c => (
-                    <option key={c.value} value={c.value}>{c.label}</option>
-                  ))}
-                </select>
-                <span className="absolute top-1/2 -translate-y-1/2 pointer-events-none" style={{ insetInlineEnd: 12 }}>
-                  <Chevron />
-                </span>
-              </div>
-            </div>
-
-            {/* ── 2. Institution (async combobox) ── */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <label style={labelStyle}>
-                מוסד לימודים
-                {!country && (
-                  <span style={{ fontWeight: 400, color: '#9ca3af', marginRight: 6, fontSize: '0.75rem' }}>
-                    (בחר מדינה תחילה)
-                  </span>
-                )}
-              </label>
-              <div ref={instRef} style={{ position: 'relative' }}>
-                <input
-                  type="text"
-                  value={institution}
-                  onChange={e => {
-                    const val = e.target.value;
-                    setInstitution(val);
-                    setInstHighlight(-1);
-                    if (val.length < 2) { setInstOptions([]); setInstOpen(false); setInstLoading(false); }
-                    else if (country) setInstLoading(true);
-                  }}
-                  onFocus={e => {
-                    applyFocusStyle(e.target);
-                    if (instOptions.length > 0) setInstOpen(true);
-                  }}
-                  onBlur={e => applyBlurStyle(e.target)}
-                  onKeyDown={handleInstKeyDown}
-                  placeholder={!country ? 'בחר מדינה תחילה' : 'הקלד לחיפוש מוסד לימודים...'}
-                  disabled={!country}
-                  style={{
-                    ...baseInputStyle,
-                    paddingInlineEnd: 40,
-                    opacity: !country ? 0.55 : 1,
-                    cursor: !country ? 'not-allowed' : 'text',
-                  }}
-                />
-                <span className="absolute top-1/2 -translate-y-1/2 pointer-events-none" style={{ insetInlineEnd: 12 }}>
-                  {instLoading ? <MiniSpinner /> : <SearchIcon />}
-                </span>
-
-                {instOpen && instOptions.length > 0 && (
-                  <div style={dropdownStyle}>
-                    {instOptions.map((opt, i) => (
-                      <DropItem
-                        key={opt}
-                        text={opt}
-                        highlighted={i === instHighlight}
-                        last={i === instOptions.length - 1}
-                        onSelect={() => { setInstitution(opt); setInstOpen(false); setInstHighlight(-1); }}
-                        onHover={() => setInstHighlight(i)}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* ── 3. Degree type ── */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <label style={labelStyle}>סוג התואר</label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-                {DEGREE_TYPES.map(dt => {
-                  const isSelected = degreeType === dt.value;
-                  return (
-                    <button
-                      key={dt.value}
-                      type="button"
-                      onClick={() => { setDegreeType(dt.value); if (dt.value === 'regular') setSecondaryMajor(''); }}
-                      style={{
-                        padding: '10px 8px',
-                        borderRadius: 10,
-                        border: isSelected ? '1.5px solid #517B3E' : '1.5px solid rgba(200,190,170,0.6)',
-                        background: isSelected ? 'rgba(81,123,62,0.09)' : 'rgba(255,255,255,0.6)',
-                        cursor: 'pointer',
-                        textAlign: 'center',
-                        transition: 'all 0.15s',
-                      }}
-                    >
-                      {isSelected
-                        ? (
-                          <div className="flex justify-center mb-1">
-                            <span className="w-4 h-4 rounded-full flex items-center justify-center" style={{ background: '#517B3E' }}>
-                              <svg className="w-2.5 h-2.5" viewBox="0 0 10 10" fill="white">
-                                <path d="M2 5l2.5 2.5L8 3" stroke="white" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" fill="none" />
-                              </svg>
-                            </span>
-                          </div>
-                        )
-                        : <div style={{ height: 24 }} />
-                      }
-                      <p style={{ fontSize: '0.75rem', fontWeight: 700, color: isSelected ? '#517B3E' : '#374151', lineHeight: 1.3 }}>
-                        {dt.label}
-                      </p>
-                      <p style={{ fontSize: '0.6875rem', color: isSelected ? '#6B904A' : '#9ca3af', marginTop: 2 }}>
-                        {dt.sub}
-                      </p>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* ── 4. Primary major (static combobox) ── */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <label style={labelStyle}>חוג ראשי</label>
-              <div ref={primaryRef} style={{ position: 'relative' }}>
-                <input
-                  type="text"
-                  value={primaryMajor}
-                  onChange={e => { setPrimaryMajor(e.target.value); setPrimaryHighlight(-1); }}
-                  onFocus={e => { applyFocusStyle(e.target); setPrimaryOpen(true); }}
-                  onBlur={e => applyBlurStyle(e.target)}
-                  onKeyDown={handlePrimaryKeyDown}
-                  placeholder="לדוגמה: מדעי המחשב, הנדסה, כלכלה..."
-                  style={{ ...baseInputStyle, paddingInlineEnd: 40 }}
-                />
-                <span className="absolute top-1/2 -translate-y-1/2 pointer-events-none" style={{ insetInlineEnd: 12 }}>
-                  <ChevronRotate open={primaryOpen} />
-                </span>
-
-                {primaryOpen && filteredPrimary.length > 0 && (
-                  <div style={dropdownStyle}>
-                    {filteredPrimary.map((m, i) => (
-                      <DropItem
-                        key={m}
-                        text={m}
-                        highlighted={i === primaryHighlight}
-                        last={i === filteredPrimary.length - 1}
-                        onSelect={() => { setPrimaryMajor(m); setPrimaryOpen(false); setPrimaryHighlight(-1); }}
-                        onHover={() => setPrimaryHighlight(i)}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* ── 5. Secondary major / specialization (conditional) ── */}
-            {showSecondary && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }} className="animate-slide-up-fade">
-                <label style={labelStyle}>{secondaryLabel}</label>
-                <div ref={secondaryRef} style={{ position: 'relative' }}>
-                  <input
-                    type="text"
-                    value={secondaryMajor}
-                    onChange={e => { setSecondaryMajor(e.target.value); setSecondaryHighlight(-1); }}
-                    onFocus={e => { applyFocusStyle(e.target); setSecondaryOpen(true); }}
-                    onBlur={e => applyBlurStyle(e.target)}
-                    onKeyDown={handleSecondaryKeyDown}
-                    placeholder={degreeType === 'double' ? 'לדוגמה: פיזיקה, פילוסופיה...' : 'לדוגמה: בינה מלאכותית, ניהול...'}
-                    style={{ ...baseInputStyle, paddingInlineEnd: 40 }}
-                  />
-                  <span className="absolute top-1/2 -translate-y-1/2 pointer-events-none" style={{ insetInlineEnd: 12 }}>
-                    <ChevronRotate open={secondaryOpen} />
-                  </span>
-
-                  {secondaryOpen && filteredSecondary.length > 0 && (
-                    <div style={dropdownStyle}>
-                      {filteredSecondary.map((m, i) => (
-                        <DropItem
-                          key={m}
-                          text={m}
-                          highlighted={i === secondaryHighlight}
-                          last={i === filteredSecondary.length - 1}
-                          onSelect={() => { setSecondaryMajor(m); setSecondaryOpen(false); setSecondaryHighlight(-1); }}
-                          onHover={() => setSecondaryHighlight(i)}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Error */}
-            {error && (
-              <p style={{ fontSize: '0.875rem', color: '#dc2626', textAlign: 'center' }}>{error}</p>
-            )}
-
-            {/* Back + Submit row */}
-            <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
+          <div style={{ height: 6, borderRadius: 999, background: 'rgba(81,123,62,0.12)', overflow: 'hidden' }}>
+            <motion.div
+              style={{ height: '100%', borderRadius: 999, background: 'linear-gradient(90deg, #6B9053, #517B3E)' }}
+              animate={{ width: `${progressPct}%` }}
+              transition={{ duration: 0.45, ease: 'easeOut' }}
+            />
+          </div>
+          <div className="flex items-center justify-between mt-2">
+            <span className="text-xs font-medium" style={{ color: '#9ca3af' }}>
+              שלב {Math.min(stepIndex + 1, steps.length)} מתוך {steps.length}
+            </span>
+            {currentStepId !== 'celebrate' && (
               <button
                 type="button"
-                onClick={() => router.back()}
-                style={{
-                  flex: 1,
-                  padding: '13px 0',
-                  borderRadius: 12,
-                  border: '1.5px solid rgba(180,170,155,0.55)',
-                  background: 'transparent',
-                  color: '#6b7280',
-                  fontSize: '0.9375rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  transition: 'all 0.15s',
-                }}
+                onClick={skip}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.75rem', color: '#9ca3af', textDecoration: 'underline', textDecorationColor: 'transparent', transition: 'color 0.15s' }}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#517B3E'; (e.currentTarget as HTMLButtonElement).style.textDecorationColor = '#517B3E'; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = '#9ca3af'; (e.currentTarget as HTMLButtonElement).style.textDecorationColor = 'transparent'; }}
               >
-                חזור
+                דלג על שלב זה
               </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* One full-screen slide at a time */}
+      <AnimatePresence mode="wait" custom={direction} initial={false}>
+        <motion.div
+          key={currentStepId}
+          custom={direction}
+          variants={slideVariants}
+          initial="enter"
+          animate="center"
+          exit="exit"
+          transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+          className="fixed inset-0 z-10 flex flex-col items-center justify-center px-4 overflow-y-auto"
+          style={{ paddingTop: 120, paddingBottom: 64 }}
+        >
+          <div className="w-full flex flex-col items-center text-center gap-[18px]" style={{ maxWidth: 420 }}>
+
+                {/* ── Country ── */}
+                {currentStepId === 'country' && (
+                  <>
+                    <StepIconBadge icon={Globe} />
+                    <StepHeading title="מאיזו מדינה אתה/את?" subtitle="כך נוכל להציע לך מוסדות לימוד ותכנים מתאימים" />
+                    <div className="relative w-full" style={{ maxWidth: 320 }}>
+                      <select
+                        value={country}
+                        onChange={e => {
+                          setCountry(e.target.value);
+                          setInstitution('');
+                          setInstOptions([]);
+                          setInstOpen(false);
+                        }}
+                        style={{
+                          ...centeredInputStyle,
+                          appearance: 'none',
+                          cursor: 'pointer',
+                          color: country ? '#1a2540' : '#9ca3af',
+                        }}
+                        onFocus={e => applyFocusStyle(e.target)}
+                        onBlur={e => applyBlurStyle(e.target)}
+                      >
+                        <option value="" disabled>בחר מדינה...</option>
+                        {COUNTRIES.map(c => (
+                          <option key={c.value} value={c.value}>{c.label}</option>
+                        ))}
+                      </select>
+                      <span className="absolute top-1/2 -translate-y-1/2 pointer-events-none" style={{ insetInlineEnd: 16 }}>
+                        <Chevron />
+                      </span>
+                    </div>
+                  </>
+                )}
+
+                {/* ── Institution ── */}
+                {currentStepId === 'institution' && (
+                  <>
+                    <StepIconBadge icon={Building2} />
+                    <StepHeading title="באיזה מוסד אתה/את לומד/ת?" subtitle="התחל/י להקליד וחפש/י מהרשימה" />
+                    <div ref={instRef} className="relative w-full" style={{ maxWidth: 320 }}>
+                      <input
+                        type="text"
+                        value={institution}
+                        onChange={e => {
+                          const val = e.target.value;
+                          setInstitution(val);
+                          setInstHighlight(-1);
+                          if (val.length < 2) { setInstOptions([]); setInstOpen(false); setInstLoading(false); }
+                          else setInstLoading(true);
+                        }}
+                        onFocus={e => {
+                          applyFocusStyle(e.target);
+                          if (instOptions.length > 0) setInstOpen(true);
+                        }}
+                        onBlur={e => applyBlurStyle(e.target)}
+                        onKeyDown={handleInstKeyDown}
+                        placeholder="הקלד לחיפוש מוסד לימודים..."
+                        style={centeredInputStyle}
+                      />
+                      <span className="absolute top-1/2 -translate-y-1/2 pointer-events-none" style={{ insetInlineEnd: 16 }}>
+                        {instLoading ? <MiniSpinner /> : <SearchIcon />}
+                      </span>
+
+                      {instOpen && instOptions.length > 0 && (
+                        <div style={dropdownStyle}>
+                          {instOptions.map((opt, i) => (
+                            <DropItem
+                              key={opt}
+                              text={opt}
+                              highlighted={i === instHighlight}
+                              last={i === instOptions.length - 1}
+                              onSelect={() => { setInstitution(opt); setInstOpen(false); setInstHighlight(-1); }}
+                              onHover={() => setInstHighlight(i)}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+
+                {/* ── Degree type ── */}
+                {currentStepId === 'degree' && (
+                  <>
+                    <StepIconBadge icon={GraduationCap} />
+                    <StepHeading title="איזה סוג תואר אתה/את עושה?" subtitle="זה עוזר לנו להבין את מבנה הלימודים שלך" />
+                    <div className="flex flex-col gap-3 w-full" style={{ maxWidth: 340 }}>
+                      {DEGREE_TYPES.map(dt => {
+                        const isSelected = degreeType === dt.value;
+                        const Icon = DEGREE_ICONS[dt.value];
+                        return (
+                          <button
+                            key={dt.value}
+                            type="button"
+                            onClick={() => selectDegree(dt.value)}
+                            className="flex items-center gap-3.5"
+                            style={{
+                              padding: '16px 18px',
+                              borderRadius: 16,
+                              border: isSelected ? '2px solid #517B3E' : '1.5px solid rgba(200,190,170,0.6)',
+                              background: isSelected ? 'rgba(81,123,62,0.10)' : 'rgba(255,255,255,0.65)',
+                              boxShadow: isSelected ? '0 6px 20px rgba(81,123,62,0.18)' : '0 2px 8px rgba(30,42,69,0.04)',
+                              cursor: 'pointer',
+                              textAlign: 'start',
+                              transition: 'all 0.15s',
+                            }}
+                          >
+                            <span
+                              className="flex items-center justify-center w-10 h-10 rounded-xl shrink-0"
+                              style={{ background: isSelected ? 'rgba(81,123,62,0.18)' : 'rgba(81,123,62,0.08)' }}
+                            >
+                              <Icon className="w-5 h-5" style={{ color: '#517B3E' }} strokeWidth={1.8} />
+                            </span>
+                            <span style={{ flex: 1 }}>
+                              <p style={{ fontSize: '0.9375rem', fontWeight: 700, color: isSelected ? '#517B3E' : '#1e2a45', lineHeight: 1.3 }}>
+                                {dt.label}
+                              </p>
+                              <p style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: 2 }}>
+                                {dt.sub}
+                              </p>
+                            </span>
+                            {isSelected && (
+                              <span className="flex items-center justify-center w-6 h-6 rounded-full shrink-0" style={{ background: '#517B3E' }}>
+                                <Check className="w-3.5 h-3.5" style={{ color: 'white' }} strokeWidth={2.5} />
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+
+                {/* ── Primary major ── */}
+                {currentStepId === 'primaryMajor' && (
+                  <>
+                    <StepIconBadge icon={BookOpen} />
+                    <StepHeading title="מה החוג הראשי שלך?" subtitle="לדוגמה: מדעי המחשב, הנדסה, כלכלה..." />
+                    <div ref={primaryRef} className="relative w-full" style={{ maxWidth: 320 }}>
+                      <input
+                        type="text"
+                        value={primaryMajor}
+                        onChange={e => { setPrimaryMajor(e.target.value); setPrimaryHighlight(-1); }}
+                        onFocus={e => { applyFocusStyle(e.target); setPrimaryOpen(true); }}
+                        onBlur={e => applyBlurStyle(e.target)}
+                        onKeyDown={handlePrimaryKeyDown}
+                        placeholder="הקלד או בחר מהרשימה..."
+                        style={centeredInputStyle}
+                      />
+                      <span className="absolute top-1/2 -translate-y-1/2 pointer-events-none" style={{ insetInlineEnd: 16 }}>
+                        <ChevronRotate open={primaryOpen} />
+                      </span>
+
+                      {primaryOpen && filteredPrimary.length > 0 && (
+                        <div style={dropdownStyle}>
+                          {filteredPrimary.map((m, i) => (
+                            <DropItem
+                              key={m}
+                              text={m}
+                              highlighted={i === primaryHighlight}
+                              last={i === filteredPrimary.length - 1}
+                              onSelect={() => { setPrimaryMajor(m); setPrimaryOpen(false); setPrimaryHighlight(-1); }}
+                              onHover={() => setPrimaryHighlight(i)}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+
+                {/* ── Secondary major / specialization ── */}
+                {currentStepId === 'secondaryMajor' && (
+                  <>
+                    <StepIconBadge icon={Layers} />
+                    <StepHeading
+                      title={secondaryLabel}
+                      subtitle={degreeType === 'double' ? 'לדוגמה: פיזיקה, פילוסופיה...' : 'לדוגמה: בינה מלאכותית, ניהול...'}
+                    />
+                    <div ref={secondaryRef} className="relative w-full" style={{ maxWidth: 320 }}>
+                      <input
+                        type="text"
+                        value={secondaryMajor}
+                        onChange={e => { setSecondaryMajor(e.target.value); setSecondaryHighlight(-1); }}
+                        onFocus={e => { applyFocusStyle(e.target); setSecondaryOpen(true); }}
+                        onBlur={e => applyBlurStyle(e.target)}
+                        onKeyDown={handleSecondaryKeyDown}
+                        placeholder="הקלד או בחר מהרשימה..."
+                        style={centeredInputStyle}
+                      />
+                      <span className="absolute top-1/2 -translate-y-1/2 pointer-events-none" style={{ insetInlineEnd: 16 }}>
+                        <ChevronRotate open={secondaryOpen} />
+                      </span>
+
+                      {secondaryOpen && filteredSecondary.length > 0 && (
+                        <div style={dropdownStyle}>
+                          {filteredSecondary.map((m, i) => (
+                            <DropItem
+                              key={m}
+                              text={m}
+                              highlighted={i === secondaryHighlight}
+                              last={i === filteredSecondary.length - 1}
+                              onSelect={() => { setSecondaryMajor(m); setSecondaryOpen(false); setSecondaryHighlight(-1); }}
+                              onHover={() => setSecondaryHighlight(i)}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+
+                {/* ── Celebration / save ── */}
+                {currentStepId === 'celebrate' && (
+                  <>
+                    {saveState === 'error' ? (
+                      <>
+                        <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl" style={{ background: 'rgba(220,38,38,0.10)', border: '1.5px solid rgba(220,38,38,0.25)' }}>
+                          <AlertCircle className="w-7 h-7" style={{ color: '#dc2626' }} strokeWidth={1.8} />
+                        </div>
+                        <StepHeading title="אופס, הייתה תקלה" subtitle={error || 'שגיאה בשמירת הנתונים'} />
+                        <button
+                          type="button"
+                          onClick={() => { submittedRef.current = false; setSaveState('idle'); }}
+                          style={{
+                            padding: '13px 32px', borderRadius: 12, fontSize: '0.9375rem', fontWeight: 700,
+                            color: 'white', backgroundColor: '#517B3E', border: 'none', cursor: 'pointer',
+                            boxShadow: '0 4px 16px rgba(81,123,62,0.38)',
+                          }}
+                        >
+                          ניסיון חוזר
+                        </button>
+                      </>
+                    ) : saveState === 'success' ? (
+                      <>
+                        <motion.div
+                          initial={{ scale: 0.5, opacity: 0, rotate: -15 }}
+                          animate={{ scale: 1, opacity: 1, rotate: 0 }}
+                          transition={{ type: 'spring', stiffness: 260, damping: 18 }}
+                          className="inline-flex items-center justify-center w-16 h-16 rounded-2xl"
+                          style={{ background: 'rgba(81,123,62,0.12)', border: '1.5px solid rgba(81,123,62,0.25)' }}
+                        >
+                          <PartyPopper className="w-8 h-8" style={{ color: '#517B3E' }} strokeWidth={1.8} />
+                        </motion.div>
+                        <StepHeading title="הכל מוכן! 🎉" subtitle="שמרנו את הפרטים שלך — אפשר להתחיל" />
+                        <button
+                          type="button"
+                          onClick={() => router.push('/workspace')}
+                          style={{
+                            padding: '14px 36px', borderRadius: 12, fontSize: '1rem', fontWeight: 700,
+                            color: 'white', backgroundColor: '#517B3E', border: 'none', cursor: 'pointer',
+                            boxShadow: '0 4px 16px rgba(81,123,62,0.38)',
+                          }}
+                        >
+                          קח אותי ללוח הבקרה
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <MiniSpinner size={28} />
+                        <StepHeading title="רק רגע..." subtitle="שומרים את הפרטים שלך" />
+                      </>
+                    )}
+                  </>
+                )}
+
+          </div>
+
+          {/* Error (non-celebration steps) */}
+          {error && currentStepId !== 'celebrate' && (
+            <p style={{ fontSize: '0.875rem', color: '#dc2626', textAlign: 'center', marginTop: 8 }}>{error}</p>
+          )}
+
+          {/* Navigation */}
+          {currentStepId !== 'celebrate' && (
+            <div className="flex gap-3 mt-7 w-full" style={{ maxWidth: 420 }}>
+              {stepIndex > 0 && (
+                <button
+                  type="button"
+                  onClick={goBack}
+                  className="flex items-center justify-center gap-1.5"
+                  style={{
+                    flex: 1, padding: '13px 0', borderRadius: 12,
+                    border: '1.5px solid rgba(180,170,155,0.55)', background: 'transparent',
+                    color: '#6b7280', fontSize: '0.9375rem', fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s',
+                  }}
+                >
+                  <ArrowRight className="w-4 h-4" />
+                  חזור
+                </button>
+              )}
               <button
-                type="submit"
-                disabled={loading}
+                type="button"
+                onClick={goNext}
+                disabled={nextDisabled}
+                className="flex items-center justify-center gap-1.5"
                 style={{
-                  flex: 2,
-                  padding: '13px 0',
-                  borderRadius: 12,
-                  fontSize: '1rem',
-                  fontWeight: 700,
-                  color: 'white',
-                  backgroundColor: loading ? '#6B9053' : '#517B3E',
-                  border: 'none',
-                  cursor: loading ? 'not-allowed' : 'pointer',
-                  boxShadow: loading ? 'none' : '0 4px 16px rgba(81,123,62,0.38)',
+                  flex: 2, padding: '13px 0', borderRadius: 12, fontSize: '1rem', fontWeight: 700,
+                  color: 'white', backgroundColor: nextDisabled ? '#9DC08B' : '#517B3E', border: 'none',
+                  cursor: nextDisabled ? 'not-allowed' : 'pointer',
+                  boxShadow: nextDisabled ? 'none' : '0 4px 16px rgba(81,123,62,0.38)',
                   transition: 'background-color 0.2s, box-shadow 0.2s',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 8,
                 }}
               >
-                {loading && (
-                  <span style={{
-                    width: 16, height: 16, borderRadius: '50%',
-                    border: '2px solid rgba(255,255,255,0.35)',
-                    borderTopColor: 'white',
-                    display: 'inline-block',
-                    animation: 'spin 0.8s linear infinite',
-                    flexShrink: 0,
-                  }} />
-                )}
-                {loading ? 'שומר...' : 'המשך לדשבורד'}
+                הבא
+                <ArrowLeft className="w-4 h-4" />
               </button>
             </div>
-          </form>
+          )}
+        </motion.div>
+      </AnimatePresence>
 
-          {/* Skip */}
-          <div className="mt-5 text-center">
-            <button
-              onClick={() => router.push('/workspace')}
-              style={{
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                fontSize: '0.875rem',
-                color: '#9ca3af',
-                textDecoration: 'underline',
-                textDecorationColor: 'transparent',
-                transition: 'color 0.15s, text-decoration-color 0.15s',
-              }}
-              onMouseEnter={e => {
-                (e.currentTarget as HTMLButtonElement).style.color = '#517B3E';
-                (e.currentTarget as HTMLButtonElement).style.textDecorationColor = '#517B3E';
-              }}
-              onMouseLeave={e => {
-                (e.currentTarget as HTMLButtonElement).style.color = '#9ca3af';
-                (e.currentTarget as HTMLButtonElement).style.textDecorationColor = 'transparent';
-              }}
-            >
-              דלג על שלב זה
-            </button>
-          </div>
-        </div> {/* glass card */}
-
-        {/* Footer note */}
-        <p className="text-center mt-5 text-xs" style={{ color: 'rgba(30,42,69,0.45)' }}>
-          ניתן לעדכן פרטים אלה בכל עת דרך הגדרות הפרופיל
-        </p>
-      </div>
+      {/* Footer note — persistent across every slide */}
+      <p className="fixed bottom-4 inset-x-0 z-20 text-center text-xs px-4" style={{ color: 'rgba(30,42,69,0.45)' }}>
+        ניתן לעדכן פרטים אלה בכל עת דרך הגדרות הפרופיל
+      </p>
 
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
