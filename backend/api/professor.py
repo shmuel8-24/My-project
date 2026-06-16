@@ -156,7 +156,7 @@ def professor_ask(user_id: int):
             "status": "error",
         }), 503
 
-    # ── 2. Enforce free-tier simulation limit ────────────────────────────────
+    # ── 2. Track simulation usage (no limit enforced — platform is free) ────────
     _db_plan = SessionLocal()
     try:
         _u = _db_plan.query(User).filter(User.id == user_id).first()
@@ -166,13 +166,6 @@ def professor_ask(user_id: int):
         if _u.prof_sim_month_key != _month:
             _u.prof_sim_month_key   = _month
             _u.prof_sims_this_month = 0
-        if (_u.plan_type or "basic").lower() == "basic" and _u.prof_sims_this_month >= 2:
-            _db_plan.commit()
-            return jsonify({
-                "error":        "הגעת למגבלת 2 סימולציות בחשבון החינמי. שדרג ל-Pro לסימולציות ללא הגבלה!",
-                "status":       "error",
-                "limit_reached": True,
-            }), 403
         _u.prof_sims_this_month += 1
         _db_plan.commit()
     finally:

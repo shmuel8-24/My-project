@@ -7,8 +7,6 @@ from flask import Blueprint, jsonify, request
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from api.middleware import (
-    BASIC_QUESTION_LIMIT,
-    BASIC_UPLOAD_LIMIT,
     _get_user_refreshed,
     _make_token,
     token_required,
@@ -574,7 +572,10 @@ def get_profile_documents(user_id: int):
     course_name = (request.args.get("course_name") or "").strip() or None
     db = SessionLocal()
     try:
-        query = db.query(UserDocument).filter(UserDocument.user_id == user_id)
+        query = db.query(UserDocument).filter(
+            UserDocument.user_id == user_id,
+            UserDocument.is_session_only == False,  # noqa: E712
+        )
         if course_name:
             query = query.filter(UserDocument.course_name == course_name)
         records = query.order_by(UserDocument.uploaded_at.desc()).all()
@@ -597,6 +598,7 @@ def get_profile_documents(user_id: int):
                     "uploaded_at":     r.uploaded_at.isoformat() if r.uploaded_at else None,
                     "file_size_bytes": r.file_size_bytes,
                     "course_name":     r.course_name,
+                    "is_past_exam":    bool(r.is_past_exam),
                     "chunks":          chunk_map.get(r.file_id, 0),
                 }
                 for r in records
@@ -615,16 +617,15 @@ def get_usage(user_id: int):
         if not user:
             return jsonify({"error": "User not found"}), 404
         db.commit()
-        plan = (user.plan_type or "basic").lower()
         return jsonify({
-            "plan_type":             plan,
-            "subscription_end_date": user.subscription_end_date.isoformat() if user.subscription_end_date else None,
+            "plan_type":             "pro",
+            "subscription_end_date": None,
             "uploads_this_month":    user.uploads_this_month,
-            "upload_limit":          BASIC_UPLOAD_LIMIT if plan == "basic" else None,
+            "upload_limit":          None,
             "questions_this_month":  user.questions_this_month,
-            "question_limit":        BASIC_QUESTION_LIMIT if plan == "basic" else None,
+            "question_limit":        None,
             "prof_sims_this_month":  user.prof_sims_this_month or 0,
-            "prof_sim_limit":        2 if plan == "basic" else None,
+            "prof_sim_limit":        None,
         }), 200
     finally:
         db.close()

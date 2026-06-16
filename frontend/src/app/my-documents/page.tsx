@@ -663,6 +663,20 @@ export default function MyDocumentsPage() {
         setDeleteError(he ? 'שגיאה במחיקת המסמך.' : 'Error deleting document.');
         return;
       }
+      // Purge any localStorage references so academic-writing/workspace don't
+      // show stale entries for this deleted file.
+      try {
+        const raw = localStorage.getItem('unote_academic_uploads');
+        if (raw) {
+          const parsed = JSON.parse(raw) as Array<{ fileId?: string }>;
+          const filtered = parsed.filter(f => f.fileId !== docToDelete.file_id);
+          if (filtered.length !== parsed.length) {
+            filtered.length > 0
+              ? localStorage.setItem('unote_academic_uploads', JSON.stringify(filtered))
+              : localStorage.removeItem('unote_academic_uploads');
+          }
+        }
+      } catch { /* non-critical */ }
       setDocuments(prev => prev.filter(d => d.file_id !== docToDelete.file_id));
       setDocToDelete(null);
     } catch {

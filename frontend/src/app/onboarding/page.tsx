@@ -320,10 +320,10 @@ export default function OnboardingPage() {
   const [stepIndex, setStepIndex] = useState(0);
   const [direction, setDirection] = useState(1);
   const [error,     setError]     = useState('');
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+  const [saveState, setSaveState] = useState<'idle' | 'success' | 'error'>('idle');
+  const [isLoading, setIsLoading] = useState(false);
 
   const autoAdvanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const submittedRef = useRef(false);
 
   // Institution async combobox state
   const [instOptions,   setInstOptions]   = useState<string[]>([]);
@@ -461,12 +461,61 @@ export default function OnboardingPage() {
 
   const goBack = () => {
     if (autoAdvanceTimer.current) { clearTimeout(autoAdvanceTimer.current); autoAdvanceTimer.current = null; }
-    if (currentStepId === 'celebrate') { submittedRef.current = false; setSaveState('idle'); }
+    if (currentStepId === 'celebrate') { setSaveState('idle'); setError(''); }
     setDirection(-1);
     setStepIndex(i => Math.max(i - 1, 0));
   };
 
   const skip = () => router.push('/workspace');
+
+  const submitForm = async () => {
+    if (isLoading) return;
+    setIsLoading(true);
+    setError('');
+    const payload = {
+      country,
+      institution,
+      degree_type:     degreeType,
+      primary_major:   primaryMajor.trim(),
+      secondary_major: secondaryMajor.trim(),
+    };
+    try {
+      const res = await authFetch(`${API}/api/user/onboarding`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        setError((d as { error?: string }).error ?? 'שגיאה בשמירת הנתונים');
+        setSaveState('error');
+        return;
+      }
+      await res.json().catch(() => ({}));
+      localStorage.setItem('levy_ai_country',         country);
+      localStorage.setItem('levy_ai_institution',     institution);
+      localStorage.setItem('levy_ai_degree_type',     degreeType);
+      localStorage.setItem('levy_ai_primary_major',   primaryMajor.trim());
+      localStorage.setItem('levy_ai_secondary_major', degreeType !== 'regular' ? secondaryMajor.trim() : '');
+      setError('');
+      setSaveState('success');
+      void import('canvas-confetti').then(({ default: confetti }) => {
+        void confetti({
+          particleCount: 90, spread: 70, startVelocity: 30,
+          gravity: 0.75, decay: 0.93, ticks: 320,
+          colors: ['#517B3E', '#9DC08B', '#D1E6D9', '#F9DE8B'],
+          shapes: ['circle', 'square'],
+          origin: { y: 0.6 },
+        });
+      });
+    } catch (err) {
+      console.error('[onboarding] save request threw', err);
+      setError('לא ניתן להתחבר לשרת');
+      setSaveState('error');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const selectDegree = (value: string) => {
     setDegreeType(value);
@@ -477,60 +526,6 @@ export default function OnboardingPage() {
       setStepIndex(i => i + 1);
     }, 500);
   };
-
-  // ── Save on reaching the celebration step ─────────────────────────────────
-
-  useEffect(() => {
-    if (currentStepId !== 'celebrate' || saveState !== 'idle' || submittedRef.current) return;
-    submittedRef.current = true;
-    const payload = {
-      country,
-      institution,
-      degree_type:     degreeType,
-      primary_major:   primaryMajor.trim(),
-      secondary_major: secondaryMajor.trim(),
-    };
-    console.log('[onboarding] submitting', payload);
-    void Promise.resolve().then(async () => {
-      setSaveState('saving');
-      try {
-        const res = await authFetch(`${API}/api/user/onboarding`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        if (!res.ok) {
-          const d = await res.json().catch(() => ({}));
-          console.error('[onboarding] save failed', res.status, d);
-          setError((d as { error?: string }).error ?? 'שגיאה בשמירת הנתונים');
-          setSaveState('error');
-          return;
-        }
-        const saved = await res.json().catch(() => ({}));
-        console.log('[onboarding] save succeeded', saved);
-        localStorage.setItem('levy_ai_country',         country);
-        localStorage.setItem('levy_ai_institution',     institution);
-        localStorage.setItem('levy_ai_degree_type',     degreeType);
-        localStorage.setItem('levy_ai_primary_major',   primaryMajor.trim());
-        localStorage.setItem('levy_ai_secondary_major', degreeType !== 'regular' ? secondaryMajor.trim() : '');
-        setError('');
-        setSaveState('success');
-        void import('canvas-confetti').then(({ default: confetti }) => {
-          void confetti({
-            particleCount: 90, spread: 70, startVelocity: 30,
-            gravity: 0.75, decay: 0.93, ticks: 320,
-            colors: ['#517B3E', '#9DC08B', '#D1E6D9', '#F9DE8B'],
-            shapes: ['circle', 'square'],
-            origin: { y: 0.6 },
-          });
-        });
-      } catch (err) {
-        console.error('[onboarding] save request threw', err);
-        setError('לא ניתן להתחבר לשרת');
-        setSaveState('error');
-      }
-    });
-  }, [currentStepId, saveState, country, institution, degreeType, primaryMajor, secondaryMajor]);
 
   const progressPct = steps.length > 1 ? (stepIndex / (steps.length - 1)) * 100 : 100;
   const nextDisabled = currentStepId === 'country' && !country;
@@ -822,7 +817,7 @@ export default function OnboardingPage() {
                         <StepHeading title="אופס, הייתה תקלה" subtitle={error || 'שגיאה בשמירת הנתונים'} />
                         <button
                           type="button"
-                          onClick={() => { submittedRef.current = false; setSaveState('idle'); }}
+                          onClick={() => { setSaveState('idle'); setError(''); }}
                           style={{
                             padding: '13px 32px', borderRadius: 12, fontSize: '0.9375rem', fontWeight: 700,
                             color: 'white', backgroundColor: '#517B3E', border: 'none', cursor: 'pointer',
@@ -856,10 +851,41 @@ export default function OnboardingPage() {
                           קח אותי ללוח הבקרה
                         </button>
                       </>
-                    ) : (
+                    ) : isLoading ? (
                       <>
                         <MiniSpinner size={28} />
                         <StepHeading title="רק רגע..." subtitle="שומרים את הפרטים שלך" />
+                      </>
+                    ) : (
+                      <>
+                        <StepIconBadge icon={PartyPopper} />
+                        <StepHeading title="הכל מוכן — מתחילים?" subtitle="לחץ/י על סיים כדי לשמור את הפרטים שלך ולהתחיל" />
+                        <div className="flex flex-col gap-3 w-full" style={{ maxWidth: 320 }}>
+                          <button
+                            type="button"
+                            onClick={submitForm}
+                            style={{
+                              padding: '14px 36px', borderRadius: 12, fontSize: '1rem', fontWeight: 700,
+                              color: 'white', backgroundColor: '#517B3E', border: 'none', cursor: 'pointer',
+                              boxShadow: '0 4px 16px rgba(81,123,62,0.38)',
+                            }}
+                          >
+                            סיים!
+                          </button>
+                          <button
+                            type="button"
+                            onClick={goBack}
+                            className="flex items-center justify-center gap-1.5"
+                            style={{
+                              padding: '13px 0', borderRadius: 12,
+                              border: '1.5px solid rgba(180,170,155,0.55)', background: 'transparent',
+                              color: '#6b7280', fontSize: '0.9375rem', fontWeight: 600, cursor: 'pointer',
+                            }}
+                          >
+                            <ArrowRight className="w-4 h-4" />
+                            חזור
+                          </button>
+                        </div>
                       </>
                     )}
                   </>

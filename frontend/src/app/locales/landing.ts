@@ -4,7 +4,6 @@ const landing = {
     navHome: 'בית',
     navSolutions: 'פתרונות',
     navBlog: 'בלוג',
-    navPricing: 'תמחור',
     navLogin: 'התחבר',
     navGetStarted: 'התחל עכשיו',
     langToggle: 'EN',
@@ -51,25 +50,6 @@ const landing = {
         readMore: 'קרא עוד',
       },
     ],
-
-    // Pricing section
-    pricingTitle: 'החבילות שלנו',
-    planProBadge: 'הכי פופולרי ⭐',
-    planBasic: 'חינם',
-    planBasicPrice: '0 ₪',
-    planBasicFeatures: ['2 העלאות PDF בחודש', '15 שאלות AI בחודש', 'גישה בסיסית לדאשבורד'],
-    planPro: 'Pro — הסטודנט החכם',
-    planProPrice: '29 ₪ / חודש',
-    planProFeatures: ['העלאות ללא הגבלה', 'סוכני AI אישיים', 'דאשבורד סטטיסטיקות מלא', 'תמיכה בעברית ובאנגלית'],
-    planSemester: 'המסלול הסמסטריאלי',
-    planSemesterPrice: '100 ₪ / ל-4 חודשים',
-    planSemesterSave: 'המשתלם ביותר לסמסטר שלם',
-    ctaButton: 'התחל עכשיו',
-
-    // Footer
-    footerPricing: 'תמחור כפוחלים',
-    footerGithub: 'התחבר',
-    footerContact: 'העחוניין',
 
     // Login modal
     loginTitle: 'התחברות',
@@ -171,7 +151,6 @@ const landing = {
     navHome: 'Home',
     navSolutions: 'Solutions',
     navBlog: 'Blog',
-    navPricing: 'Pricing',
     navLogin: 'Login',
     navGetStarted: 'Get Started',
     langToggle: 'עב',
@@ -218,25 +197,6 @@ const landing = {
         readMore: 'Read More',
       },
     ],
-
-    // Pricing section
-    pricingTitle: 'Our Pricing',
-    planProBadge: 'Most Popular ⭐',
-    planBasic: 'Free',
-    planBasicPrice: '$0',
-    planBasicFeatures: ['2 PDF uploads / month', '15 AI questions / month', 'Basic dashboard access'],
-    planPro: 'Pro — Smart Student',
-    planProPrice: '29 ₪ / month',
-    planProFeatures: ['Unlimited uploads', 'Personal AI agents', 'Full statistics dashboard', 'Bilingual support'],
-    planSemester: 'Semester Pass',
-    planSemesterPrice: '100 ₪ / 4 months',
-    planSemesterSave: 'Best value for a full semester',
-    ctaButton: 'Get Started',
-
-    // Footer
-    footerPricing: 'Pricing Plans',
-    footerGithub: 'GitHub',
-    footerContact: 'Contact',
 
     // Login modal
     loginTitle: 'Sign In',

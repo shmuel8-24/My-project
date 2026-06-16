@@ -539,9 +539,6 @@ export default function DashboardPage() {
         </div>
       </main>
 
-      <footer className="py-3 text-center text-xs shrink-0 relative" style={{ borderTop:'1px solid rgba(255,255,255,0.06)', color:D.textLabel, zIndex:1 }}>
-        U-Note · {he ? 'מופעל על ידי OpenAI ו-Flask' : 'Powered by OpenAI and Flask'}
-      </footer>
     </div>
   );
 }

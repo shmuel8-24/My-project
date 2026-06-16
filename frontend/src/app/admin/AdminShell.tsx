@@ -523,11 +523,6 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
         {children}
       </main>
 
-      {/* ── Footer ── */}
-      <footer className="py-3 text-center text-xs text-[#9aaf8a] shrink-0 relative"
-        style={{ borderTop: '1px solid rgba(157,192,139,0.25)', zIndex: 1 }}>
-        U-Note · {he ? 'מופעל על ידי OpenAI ו-Flask' : 'Powered by OpenAI and Flask'}
-      </footer>
 
     </div>
   );

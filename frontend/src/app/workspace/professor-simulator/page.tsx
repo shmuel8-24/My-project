@@ -7,14 +7,11 @@ import { useAuth }     from '../../providers/auth';
 import { useLanguage } from '../../providers/language';
 import { useCourse }   from '../../providers/course';
 import CoursePill      from '../../../components/CoursePill';
-import { UpgradeModal } from '../UpgradeModal';
 import { useDropzone } from 'react-dropzone';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 const API = 'http://127.0.0.1:5003';
-const FREE_FILE_LIMIT = 2;
-const FREE_SIM_LIMIT  = 2;
 
 // ── Exam style presets ────────────────────────────────────────────────────────
 const STYLE_OPTIONS = [
@@ -36,12 +33,6 @@ interface UploadedFile {
   name:    string;
   file_id: string;
   size:    number;
-}
-
-interface UsageData {
-  plan_type:            string;
-  prof_sims_this_month: number;
-  prof_sim_limit:       number | null;
 }
 
 // ── Auth / fetch helpers ──────────────────────────────────────────────────────
@@ -480,15 +471,6 @@ export default function ProfessorSimulatorPage() {
   const { lang, toggleLanguage } = useLanguage();
   const { selectedCourse, courseHydrated } = useCourse();
 
-  // ── Usage / plan ────────────────────────────────────────────────────────────
-  const [usage, setUsage] = useState<UsageData | null>(null);
-
-  const isPro     = usage ? ['pro', 'semester'].includes(usage.plan_type) : false;
-  const simsUsed  = usage?.prof_sims_this_month ?? 0;
-  const simLimit  = isPro ? null : FREE_SIM_LIMIT;
-  const canSim    = simLimit === null || simsUsed < simLimit;
-  const fileLimit = isPro ? null : FREE_FILE_LIMIT;
-
   // ── Professor config — derived from the active course's own metadata ────────
   const [examStyle, setExamStyle] = useState('');
   const [courseDetails, setCourseDetails] = useState<{ lecturer_name: string; ta_name: string; has_tirgul: boolean } | null>(null);
@@ -536,10 +518,6 @@ export default function ProfessorSimulatorPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
-  // ── Upgrade modal ─────────────────────────────────────────────────────────────
-  const [upgradeOpen, setUpgradeOpen]   = useState(false);
-  const [upgradeMsg,  setUpgradeMsg]    = useState('');
-
   // ── Header / sidebar / profile state ──────────────────────────────────────
   const [sidebarOpen,        setSidebarOpen]        = useState(false);
   const [showLogoutModal,    setShowLogoutModal]    = useState(false);
@@ -574,17 +552,6 @@ export default function ProfessorSimulatorPage() {
     if (!selectedCourse) router.replace('/course-picker');
   }, [authLoading, authUser, courseHydrated, selectedCourse, router]);
 
-  // ── Fetch usage ───────────────────────────────────────────────────────────────
-  const refreshUsage = useCallback(() => {
-    if (!authUser) return;
-    authFetch(`${API}/api/usage`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d) setUsage(d); })
-      .catch(() => {});
-  }, [authUser]);
-
-  useEffect(() => { refreshUsage(); }, [refreshUsage]);
-
   // ── Profile popover click-outside ────────────────────────────────────────────
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -615,31 +582,12 @@ export default function ProfessorSimulatorPage() {
   }, [messages, sending]);
 
   // ── File upload (dropzone) ───────────────────────────────────────────────────
-  const canUploadMore = fileLimit === null || files.length < fileLimit;
-
   const onDrop = useCallback(async (accepted: File[]) => {
     if (accepted.length === 0) return;
-
-    if (!canUploadMore) {
-      setUpgradeMsg('הגעת למגבלת 2 קבצים במסלול החינמי. שדרג ל-Pro להעלאה ללא הגבלה!');
-      setUpgradeOpen(true);
-      return;
-    }
-
-    const toUpload = fileLimit !== null
-      ? accepted.slice(0, fileLimit - files.length)
-      : accepted;
-
-    if (toUpload.length === 0) {
-      setUpgradeMsg('הגעת למגבלת 2 קבצים במסלול החינמי. שדרג ל-Pro להעלאה ללא הגבלה!');
-      setUpgradeOpen(true);
-      return;
-    }
-
     setUploading(true); setUploadErr(null);
     try {
       const form = new FormData();
-      toUpload.forEach(f => form.append('files', f));
+      accepted.forEach(f => form.append('files', f));
       if (selectedCourse) form.append('course_name', selectedCourse.name);
       const res  = await authFetch(`${API}/upload-pdf`, { method: 'POST', body: form });
       const data = await safeJson(res);
@@ -653,7 +601,7 @@ export default function ProfessorSimulatorPage() {
       setUploadErr('לא ניתן להתחבר לשרת');
     }
     finally { setUploading(false); }
-  }, [canUploadMore, fileLimit, files.length, selectedCourse]);
+  }, [selectedCourse]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -661,7 +609,7 @@ export default function ProfessorSimulatorPage() {
       'application/pdf': ['.pdf'],
       'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
     },
-    disabled: uploading || (!isPro && files.length >= FREE_FILE_LIMIT),
+    disabled: uploading,
   });
 
   // ── Sample exam (required — gates the simulation start) ──────────────────────
@@ -706,12 +654,6 @@ export default function ProfessorSimulatorPage() {
   const send = useCallback(async (text: string, mode: 'simulate' | 'predict_exam' = 'simulate') => {
     if (!text.trim() || sending) return;
 
-    if (!canSim) {
-      setUpgradeMsg('הגעת למגבלת 2 סימולציות בחשבון החינמי. שדרג ל-Pro לסימולציות ללא הגבלה!');
-      setUpgradeOpen(true);
-      return;
-    }
-
     const userMsg: ProfMsg = { id: `u-${Date.now()}`, role: 'user', content: text };
     setMessages(prev => [...prev, userMsg]);
     setInput('');
@@ -740,13 +682,7 @@ export default function ProfessorSimulatorPage() {
       const data = await safeJson(res);
 
       if (!res.ok) {
-        if (data.limit_reached) {
-          setUpgradeMsg('הגעת למגבלת 2 סימולציות בחשבון החינמי. שדרג ל-Pro לסימולציות ללא הגבלה!');
-          setUpgradeOpen(true);
-          setMessages(prev => prev.filter(m => m.id !== userMsg.id));
-        } else {
-          setChatErr((data.error as string) ?? 'שגיאה ביצירת הסימולציה');
-        }
+        setChatErr((data.error as string) ?? 'שגיאה ביצירת הסימולציה');
         return;
       }
 
@@ -755,7 +691,6 @@ export default function ProfessorSimulatorPage() {
         role:    'assistant',
         content: data.reply as string,
       }]);
-      refreshUsage();
     } catch (err) {
       // Distinguish "server returned garbage" (HTML error page → safeJson threw)
       // from a genuine network failure — both used to collapse into the same
@@ -764,7 +699,7 @@ export default function ProfessorSimulatorPage() {
       setChatErr('לא ניתן להתחבר לשרת. בדוק שהשרת פועל.');
     }
     finally { setSending(false); }
-  }, [sending, canSim, profName, examStyle, topics, messages, files, sampleExam, selectedCourse, refreshUsage]);
+  }, [sending, profName, examStyle, topics, messages, files, sampleExam, selectedCourse]);
 
   const startSimulation = () => {
     if (!sampleExam) return;
@@ -775,12 +710,6 @@ export default function ProfessorSimulatorPage() {
     if (!sampleExam) return;
     send('חזה את המבחן הקרוב שלי על סמך המבחנים הקודמים שהעליתי — אילו נושאים צפויים להיבחן?', 'predict_exam');
   };
-
-  // ── Derived counters ──────────────────────────────────────────────────────────
-  const simsLeft      = simLimit === null ? null : Math.max(0, simLimit - simsUsed);
-  const simBarPct     = simLimit ? Math.min(100, (simsUsed / simLimit) * 100) : 0;
-  const fileBadge     = fileLimit ? `${files.length} / ${fileLimit}` : `${files.length}`;
-  const showSimWarn   = !isPro && simsUsed >= FREE_SIM_LIMIT;
 
   // ── Shared card style ─────────────────────────────────────────────────────────
   const card = {
@@ -1144,7 +1073,7 @@ export default function ProfessorSimulatorPage() {
                 className="text-xs font-semibold px-2.5 py-1 rounded-md"
                 style={{ background: 'rgba(255,255,255,0.55)', color: '#517B3E', border: '1px solid rgba(81,123,62,0.2)' }}
               >
-                {fileBadge} קבצים
+                {files.length} קבצים
               </span>
             </div>
 
@@ -1178,57 +1107,34 @@ export default function ProfessorSimulatorPage() {
               )}
 
               {/* Drop zone */}
-              {canUploadMore ? (
-                <div
-                  {...getRootProps()}
-                  className="rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-4 p-10 cursor-pointer text-center bg-white/40 hover:bg-[rgba(81,123,62,0.06)] transition-colors duration-200"
-                  style={{
-                    borderColor:     isDragActive ? '#517B3E' : 'rgba(157,192,139,0.5)',
-                    backgroundColor: isDragActive ? 'rgba(81,123,62,0.07)' : undefined,
-                    opacity:         uploading ? 0.6 : 1,
-                  }}
-                >
-                  <input {...getInputProps()} />
-                  {uploading ? (
-                    <><Spinner /><p className="text-sm text-[#517B3E] font-medium">מעלה...</p></>
-                  ) : isDragActive ? (
-                    <p className="text-sm font-bold text-[#517B3E]">שחרר כאן!</p>
-                  ) : (
-                    <>
-                      <div className="p-4 rounded-full" style={{ background: 'rgba(157,192,139,0.18)' }}>
-                        <svg className="w-7 h-7 text-[#517B3E]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
-                        </svg>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium text-[#4a5e3a]">גרור קבצים לכאן</p>
-                        <p className="text-xs text-[#9aaf8a]">PDF · PPTX · עד 50 MB</p>
-                        {!isPro && (
-                          <p className="text-[10px] text-[#b4a890]">
-                            {files.length === 0 ? 'עד 2 קבצים בחשבון החינמי' : `נותר קובץ 1 נוסף`}
-                          </p>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-              ) : (
-                /* Limit reached banner */
-                <div
-                  className="rounded-xl px-4 py-3 text-center"
-                  style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.25)' }}
-                >
-                  <p className="text-xs font-semibold text-amber-700">הגבלת הקבצים במסלול החינמי</p>
-                  <p className="text-[10px] text-amber-600 mt-0.5">שדרג ל-Pro להעלאה ללא הגבלה</p>
-                  <button
-                    onClick={() => { setUpgradeMsg('שדרג ל-Pro להעלאת קבצים ללא הגבלה!'); setUpgradeOpen(true); }}
-                    className="mt-2 text-[11px] font-bold text-white px-3 py-1 rounded-lg transition-all hover:opacity-90"
-                    style={{ background: 'linear-gradient(135deg,#517B3E,#2A3B22)' }}
-                  >
-                    שדרג ל-Pro
-                  </button>
-                </div>
-              )}
+              <div
+                {...getRootProps()}
+                className="rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-4 p-10 cursor-pointer text-center bg-white/40 hover:bg-[rgba(81,123,62,0.06)] transition-colors duration-200"
+                style={{
+                  borderColor:     isDragActive ? '#517B3E' : 'rgba(157,192,139,0.5)',
+                  backgroundColor: isDragActive ? 'rgba(81,123,62,0.07)' : undefined,
+                  opacity:         uploading ? 0.6 : 1,
+                }}
+              >
+                <input {...getInputProps()} />
+                {uploading ? (
+                  <><Spinner /><p className="text-sm text-[#517B3E] font-medium">מעלה...</p></>
+                ) : isDragActive ? (
+                  <p className="text-sm font-bold text-[#517B3E]">שחרר כאן!</p>
+                ) : (
+                  <>
+                    <div className="p-4 rounded-full" style={{ background: 'rgba(157,192,139,0.18)' }}>
+                      <svg className="w-7 h-7 text-[#517B3E]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+                      </svg>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium text-[#4a5e3a]">גרור קבצים לכאן</p>
+                      <p className="text-xs text-[#9aaf8a]">PDF · PPTX · עד 50 MB</p>
+                    </div>
+                  </>
+                )}
+              </div>
 
               {uploadErr && (
                 <p className="text-xs text-red-500 flex items-center gap-1.5">
@@ -1237,62 +1143,6 @@ export default function ProfessorSimulatorPage() {
               )}
             </div>
           </div>
-
-          {/* ── Usage counter ── */}
-          {usage && (
-            <div
-              style={{ ...card, padding: '1rem 1.25rem' }}
-              className="space-y-2"
-            >
-              <div className="flex justify-between items-center">
-                <p className="text-[10px] font-semibold text-[#7a9268] uppercase tracking-wider">
-                  סימולציות בחודש זה
-                </p>
-                {simLimit === null ? (
-                  <span
-                    className="text-xs font-semibold px-2.5 py-0.5 rounded"
-                    style={{ background: 'rgba(81,123,62,0.12)', color: '#2A3B22' }}
-                  >
-                    ללא הגבלה
-                  </span>
-                ) : (
-                  <span className={`text-xs font-bold ${showSimWarn ? 'text-amber-600' : 'text-[#517B3E]'}`}>
-                    {simsUsed} / {simLimit}
-                  </span>
-                )}
-              </div>
-              {simLimit !== null && (
-                <div className="h-1.5 rounded-full bg-stone-200 overflow-hidden">
-                  <div
-                    className="h-full rounded-full transition-all duration-500"
-                    style={{
-                      width: `${simBarPct}%`,
-                      background: showSimWarn
-                        ? 'linear-gradient(90deg,#f59e0b,#d97706)'
-                        : 'linear-gradient(90deg,#517B3E,#6B904A)',
-                    }}
-                  />
-                </div>
-              )}
-              {showSimWarn && (
-                <div className="text-center pt-1">
-                  <p className="text-[10px] text-amber-600 font-medium">הגבלת הסימולציות הגיעה</p>
-                  <button
-                    onClick={() => { setUpgradeMsg('שדרג ל-Pro לסימולציות ללא הגבלה!'); setUpgradeOpen(true); }}
-                    className="mt-1.5 text-[11px] font-bold text-white px-3 py-1 rounded-lg hover:opacity-90 transition-all"
-                    style={{ background: 'linear-gradient(135deg,#517B3E,#2A3B22)' }}
-                  >
-                    שדרג ל-Pro
-                  </button>
-                </div>
-              )}
-              {simsLeft !== null && simsLeft > 0 && (
-                <p className="text-[10px] text-[#9aaf8a] text-center">
-                  נותרו {simsLeft} סימולציות החודש
-                </p>
-              )}
-            </div>
-          )}
 
         </div>
 
@@ -1338,34 +1188,32 @@ export default function ProfessorSimulatorPage() {
                       הגדר את פרטי המרצה ולחץ &quot;צור סימולציה&quot; כדי להתחיל
                     </p>
                   </div>
-                  {canSim && (
-                    <div className="flex flex-col items-center gap-2">
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={startSimulation}
-                          disabled={sending || !sampleExam}
-                          className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-bold transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
-                          style={!sending && sampleExam ? { background: 'linear-gradient(135deg,#517B3E,#2A3B22)' } : undefined}
-                        >
-                          <span>צור סימולציה</span>
-                        </button>
-                        <button
-                          onClick={predictExam}
-                          disabled={sending || showSimWarn || !sampleExam}
-                          className="flex items-center gap-2 px-5 py-2.5 rounded-xl border text-sm font-bold transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
-                          style={{ background: 'rgba(255,255,255,0.7)', borderColor: '#9DC08B', color: '#2A3B22' }}
-                        >
-                          <Sparkles className="w-4 h-4" />
-                          <span>חזה את המבחן שלי</span>
-                        </button>
-                      </div>
-                      {!sampleExam && (
-                        <p className="text-xs" style={{ color: '#a3855f' }}>
-                          יש להעלות מבחן לדוגמא כדי להתחיל את הסימולציה
-                        </p>
-                      )}
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={startSimulation}
+                        disabled={sending || !sampleExam}
+                        className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-bold transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
+                        style={!sending && sampleExam ? { background: 'linear-gradient(135deg,#517B3E,#2A3B22)' } : undefined}
+                      >
+                        <span>צור סימולציה</span>
+                      </button>
+                      <button
+                        onClick={predictExam}
+                        disabled={sending || !sampleExam}
+                        className="flex items-center gap-2 px-5 py-2.5 rounded-xl border text-sm font-bold transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                        style={{ background: 'rgba(255,255,255,0.7)', borderColor: '#9DC08B', color: '#2A3B22' }}
+                      >
+                        <Sparkles className="w-4 h-4" />
+                        <span>חזה את המבחן שלי</span>
+                      </button>
                     </div>
-                  )}
+                    {!sampleExam && (
+                      <p className="text-xs" style={{ color: '#a3855f' }}>
+                        יש להעלות מבחן לדוגמא כדי להתחיל את הסימולציה
+                      </p>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -1440,9 +1288,9 @@ export default function ProfessorSimulatorPage() {
                 <div className="flex flex-col gap-1.5">
                   <button
                     onClick={startSimulation}
-                    disabled={sending || showSimWarn || !sampleExam}
+                    disabled={sending || !sampleExam}
                     className="w-full py-3 rounded-xl text-white text-sm font-bold flex items-center justify-center gap-2 transition-all hover:opacity-90 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
-                    style={!showSimWarn && sampleExam ? { background: 'linear-gradient(135deg,#517B3E,#2A3B22)' } : undefined}
+                    style={sampleExam ? { background: 'linear-gradient(135deg,#517B3E,#2A3B22)' } : undefined}
                   >
                     {sending
                       ? <><Spinner size="sm" /><span>מייצר...</span></>
@@ -1451,7 +1299,7 @@ export default function ProfessorSimulatorPage() {
                   </button>
                   <button
                     onClick={predictExam}
-                    disabled={sending || showSimWarn || !sampleExam}
+                    disabled={sending || !sampleExam}
                     className="w-full py-3 rounded-xl border text-sm font-bold flex items-center justify-center gap-2 transition-all hover:opacity-90 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
                     style={{ background: 'rgba(255,255,255,0.7)', borderColor: '#9DC08B', color: '#2A3B22' }}
                   >
@@ -1476,39 +1324,20 @@ export default function ProfessorSimulatorPage() {
                     placeholder="כתוב תשובה או שאל שאלה המשך..."
                     dir="auto"
                     rows={2}
-                    disabled={sending || showSimWarn}
+                    disabled={sending}
                     className="flex-1 rounded-xl px-3.5 py-2.5 text-sm outline-none transition-all resize-none disabled:opacity-50"
                     style={{ ...inputStyle, maxHeight: '80px' }}
                     onFocus={focusGreen} onBlur={blurGreen}
                   />
                   <button
                     onClick={() => send(input)}
-                    disabled={!input.trim() || sending || showSimWarn}
+                    disabled={!input.trim() || sending}
                     className="px-4 rounded-xl text-white font-bold transition-all active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed self-end"
                     style={{ background: '#517B3E', paddingTop: '0.6rem', paddingBottom: '0.6rem' }}
                   >
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
                     </svg>
-                  </button>
-                </div>
-              )}
-
-              {/* Limit reached inline prompt */}
-              {showSimWarn && (
-                <div
-                  className="mt-2 flex items-center justify-between rounded-xl px-4 py-2.5"
-                  style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)' }}
-                >
-                  <p className="text-xs text-amber-700">
-                    הגעת למגבלת הסימולציות החינמיות (2/2)
-                  </p>
-                  <button
-                    onClick={() => { setUpgradeMsg('שדרג ל-Pro לסימולציות ללא הגבלה!'); setUpgradeOpen(true); }}
-                    className="text-xs font-bold text-white px-3 py-1 rounded-lg hover:opacity-90 transition-all"
-                    style={{ background: 'linear-gradient(135deg,#517B3E,#2A3B22)' }}
-                  >
-                    שדרג ל-Pro
                   </button>
                 </div>
               )}
@@ -1523,25 +1352,6 @@ export default function ProfessorSimulatorPage() {
         </div>
 
       </main>
-
-      {/* ── Upgrade modal ── */}
-      {upgradeOpen && (
-        <>
-          {/* Reason banner above modal */}
-          <div
-            className="fixed top-0 inset-x-0 z-[61] flex justify-center pointer-events-none"
-            style={{ paddingTop: '1.5rem' }}
-          >
-            <div
-              className="pointer-events-auto px-5 py-3 rounded-2xl text-sm font-medium text-center max-w-md"
-              style={{ background: 'rgba(42,59,34,0.92)', color: '#D9EBD0', backdropFilter: 'blur(12px)' }}
-            >
-              {upgradeMsg}
-            </div>
-          </div>
-          <UpgradeModal lang="he" onClose={() => setUpgradeOpen(false)} />
-        </>
-      )}
 
     </div>
   );

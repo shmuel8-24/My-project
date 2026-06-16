@@ -10,8 +10,6 @@ from flask import Blueprint, Response, jsonify, request, send_file, stream_with_
 from werkzeug.utils import secure_filename
 
 from api.middleware import (
-    BASIC_QUESTION_LIMIT,
-    BASIC_UPLOAD_LIMIT,
     _get_user_refreshed,
     _save_ai_message,
     token_required,
@@ -59,22 +57,240 @@ def _save_upload_file(user_id: int, file_id: str, filename: str, data: bytes) ->
 
 MAX_HISTORY_MESSAGES = 10
 
-# ── Document summarization intent ───────────────────────────────────────────
-# Standard semantic similarity search fails for whole-document summary requests:
-# a chunk's embedding rarely matches a query like "summarize the document" — the
-# query describes an *action*, not the document's *content*. When this intent is
-# detected, retrieval bypasses hybrid_search entirely and dumps the document's own
-# chunks (in original order, capped to fit the context window) instead.
+# ── Educational Synthesis (document summarization) ───────────────────────────
+# Standard semantic similarity search fails for summary requests: a chunk's
+# embedding rarely matches "summarize" — the query describes an *action*, not
+# *content*. When this intent is detected, retrieval fetches the ENTIRE document
+# in original order, then _educational_synthesize() transforms it into an
+# actionable study guide (Bottom Line → Key Concepts → Exam Perspective →
+# Topic Overview). Documents larger than _MAP_REDUCE_THRESHOLD chars use a
+# two-phase Map-Reduce: each ~12 K-char segment is extracted independently,
+# then all extracts are synthesized into one cohesive educational brief.
 _SUMMARY_KEYWORDS = (
     "סכם", "סיכום", "תקציר",
     "summarize", "summarise", "summary", "tl;dr", "tldr",
 )
-_MAX_SUMMARY_CONTEXT_CHARS = 40_000
+
+_MAP_REDUCE_THRESHOLD = 35_000  # chars; docs longer than this use Map-Reduce
+_MAP_CHUNK_SIZE       = 12_000  # chars per Map-phase segment
+
+_MAP_EXTRACT_SYSTEM = (
+    "You are extracting key academic content from one section of a study document "
+    "to build a comprehensive student study guide. From this section, extract:\n"
+    "1. All technical terms and their definitions\n"
+    "2. Core concepts, arguments, theorems, formulas, or experimental findings\n"
+    "3. Numerical data, named laws, or results a lecturer would examine\n"
+    "4. The logical structure/argument of this section in 1-2 sentences\n\n"
+    "Be concise and factual. Preserve the source language (Hebrew or English) "
+    "of key terms. Output plain prose — no filler, no meta-commentary."
+)
+
+_EDUCATIONAL_SYNTHESIS_SYSTEM = (
+    "You are an expert academic tutor creating an actionable exam-preparation study guide "
+    "for a university student. The document content (or pre-extracted key points) is below.\n\n"
+    "Structure your response EXACTLY as follows — use these Markdown headers verbatim:\n\n"
+    "## Bottom Line\n"
+    "Two sentences only. What is the single core idea or thesis of this document? "
+    "What must the student walk away knowing above all else?\n\n"
+    "## Key Concepts\n"
+    "A structured list of every important term, theorem, formula, or framework. "
+    "For each entry:\n"
+    "- **[Term / Concept]**: Plain-language definition. "
+    "Why it matters / how it typically appears in exam questions.\n"
+    "Include ALL named entities: laws, models, algorithms, people, experiments, equations.\n\n"
+    "## Exam Perspective\n"
+    "List 4-6 specific exam questions a lecturer is likely to ask based on the document's "
+    "emphasis and depth. Write each as a real exam question, then add one line: "
+    "'Correct answer must include: ...' with the 2-3 key points any good answer needs.\n\n"
+    "## Topic Overview\n"
+    "5-8 bullet points walking through the document's logical structure and main arguments. "
+    "This is YOUR synthesis — do not copy text verbatim.\n\n"
+    "RULES:\n"
+    "- If the document is in Hebrew, write the entire response in Hebrew.\n"
+    "- Use LaTeX ($...$ inline, $$...$$ display) for every mathematical expression.\n"
+    "- Be direct and exam-focused. This is a study guide, not a summary."
+)
 
 
 def _is_summary_request(text: str) -> bool:
     lowered = text.lower()
     return any(kw in lowered for kw in _SUMMARY_KEYWORDS)
+
+
+def _educational_synthesize(full_text: str, doc_name: str, original_question: str) -> str:
+    """Return an educational study guide for *full_text*.
+
+    Short docs (≤ _MAP_REDUCE_THRESHOLD chars) → single synthesis call.
+    Long docs → Map-Reduce: extract key points per segment, then synthesize.
+    """
+    if len(full_text) <= _MAP_REDUCE_THRESHOLD:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": _EDUCATIONAL_SYNTHESIS_SYSTEM},
+                {"role": "user", "content": (
+                    f"Document: {doc_name}\n\n---\n{full_text}\n---\n\n"
+                    "Create the study guide now."
+                )},
+            ],
+            temperature=0,
+            max_tokens=2500,
+        )
+        return resp.choices[0].message.content or ""
+
+    # Map phase: extract key points from each segment independently
+    segments: list[str] = []
+    start = 0
+    while start < len(full_text):
+        segments.append(full_text[start : start + _MAP_CHUNK_SIZE])
+        start += _MAP_CHUNK_SIZE
+
+    print(f"[SummaryMapReduce] {doc_name!r}: {len(full_text)} chars → {len(segments)} segments")
+    extracts: list[str] = []
+    for i, seg in enumerate(segments, start=1):
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": _MAP_EXTRACT_SYSTEM},
+                {"role": "user", "content": (
+                    f"Document: '{doc_name}' — Section {i}/{len(segments)}\n\n{seg}"
+                )},
+            ],
+            temperature=0,
+            max_tokens=800,
+        )
+        extract = resp.choices[0].message.content or ""
+        extracts.append(f"=== Section {i}/{len(segments)} ===\n{extract}")
+        print(f"[SummaryMapReduce] segment {i}/{len(segments)} extracted ({len(extract)} chars)")
+
+    # Reduce phase: synthesize all extracts into one educational brief
+    combined = "\n\n".join(extracts)
+    if len(combined) > 30_000:
+        combined = combined[:30_000] + "\n\n...[further sections omitted for length]"
+
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": _EDUCATIONAL_SYNTHESIS_SYSTEM},
+            {"role": "user", "content": (
+                f"Document: '{doc_name}' (processed in {len(segments)} sections)\n\n"
+                "Below are the key points extracted from each section. "
+                "Synthesize ALL of them into one cohesive study guide — do not "
+                "repeat section headers from the extracts.\n\n"
+                f"---\n{combined}\n---\n\n"
+                "Create the unified study guide now."
+            )},
+        ],
+        temperature=0,
+        max_tokens=2500,
+    )
+    return resp.choices[0].message.content or ""
+
+
+# ── Ephemeral analysis (no persistence) ────────────────────────────────────────
+_EPHEMERAL_MAX_CHARS = 60_000
+
+_EPHEMERAL_SYSTEM = (
+    "אתה עוזר לימודי מומחה. לפניך תוכן ממסמכים שהמשתמש העלה לניתוח מיידי. "
+    "ענה בצורה מפורטת ומובנית על השאלה בהתבסס אך ורק על התוכן שסופק. "
+    "השתמש בציטוטים ישירים ובדוגמאות מהמסמך כשרלוונטי. "
+    "אם התשובה אינה במסמך, ציין זאת בבירור — אל תמציא מידע שאינו בטקסט. "
+    "ענה בשפה שבה נשאלת השאלה (עברית אם בעברית, אנגלית אם באנגלית)."
+)
+
+
+def _extract_text_ephemeral(raw_bytes: bytes, ext: str, filename: str) -> str:
+    """Extract plain text from a PDF or PPTX file entirely in-memory."""
+    try:
+        if ext == ".pptx":
+            slides_data, _ = extract_pptx_slides(raw_bytes)
+            return "\n\n".join(s.get("text", "") for s in slides_data if s.get("text"))
+        else:
+            parts: list[str] = []
+            with fitz.open(stream=raw_bytes, filetype="pdf") as doc:
+                for page in doc:
+                    t = page.get_text("text")
+                    if t and t.strip():
+                        parts.append(t)
+            return "\n\n".join(parts)
+    except Exception as exc:
+        print(f"[ephemeral] text extraction failed for {filename!r}: {exc}")
+        return ""
+
+
+@documents_bp.route("/api/ephemeral-ask", methods=["POST"])
+@token_required
+def ephemeral_ask(user_id: int):
+    """
+    Analyse uploaded file(s) in-memory and answer a question.
+    Nothing reaches FAISS, SQLite, or the uploads folder — fully ephemeral.
+    SSE format is identical to /ask so the frontend uses the same reader.
+    """
+    question = strip_html((request.form.get("question") or "").strip())
+    question = redact_pii(question)
+    if not question:
+        return jsonify({"error": "question is required"}), 400
+
+    raw_files   = request.files.getlist("files")
+    valid_files = [f for f in raw_files if f and f.filename]
+    if not valid_files:
+        return jsonify({"error": "at least one file is required"}), 400
+
+    history_raw = (request.form.get("history") or "[]").strip()
+    try:
+        history: list[dict] = json.loads(history_raw)
+        if not isinstance(history, list):
+            history = []
+    except Exception:
+        history = []
+
+    # Extract text from each file in-memory — zero side-effects
+    context_parts: list[str] = []
+    for file in valid_files:
+        fname = secure_filename(file.filename)
+        ext   = os.path.splitext(fname.lower())[1]
+        if ext not in {".pdf", ".pptx"}:
+            continue
+        text = _extract_text_ephemeral(file.read(), ext, fname)
+        if text.strip():
+            context_parts.append(f"[{fname}]\n{text}")
+
+    if not context_parts:
+        return jsonify({"error": "no extractable text found in the uploaded files"}), 422
+
+    full_context = "\n\n---\n\n".join(context_parts)
+    if len(full_context) > _EPHEMERAL_MAX_CHARS:
+        full_context = full_context[:_EPHEMERAL_MAX_CHARS] + "\n\n[... תוכן קוצר בגלל אורך המסמך ...]"
+
+    def generate():
+        try:
+            yield f"data: {json.dumps({'type': 'status', 'phase': 'thinking'})}\n\n"
+
+            msgs: list[dict] = [
+                {"role": "system", "content": _EPHEMERAL_SYSTEM},
+                {"role": "user",   "content": f"תוכן המסמך:\n\n{full_context}"},
+            ]
+            for turn in history[-6:]:
+                role    = turn.get("role", "")
+                content = turn.get("content", "")
+                if role in ("user", "assistant") and content:
+                    msgs.append({"role": role, "content": content})
+            msgs.append({"role": "user", "content": question})
+
+            resp        = client.chat.completions.create(
+                model="gpt-4o-mini", messages=msgs, max_tokens=2000, stream=False,
+            )
+            full_answer = resp.choices[0].message.content or ""
+
+            yield f"data: {json.dumps({'type': 'result', 'answer': full_answer, 'session_id': None, 'sources': [], 'citations': []})}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        content_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ── OCR (optional) ─────────────────────────────────────────────────────────────
@@ -110,7 +326,10 @@ def upload_pdf(user_id: int):
     # Optional "past exam" tag (sent by the Professor Brain Simulator's past-exam
     # dropzone). Persisted on UserDocument so exam-prediction agents can later
     # auto-discover these files via services.rag.get_past_exam_file_ids().
-    is_past_exam = (request.form.get("is_past_exam") or "").strip().lower() in ("1", "true", "yes")
+    is_past_exam    = (request.form.get("is_past_exam")    or "").strip().lower() in ("1", "true", "yes")
+    # Session-only uploads (from academic-writing) are indexed in FAISS for RAG
+    # but are filtered out of "My Documents" and workspace document lists.
+    is_session_only = (request.form.get("is_session_only") or "").strip().lower() in ("1", "true", "yes")
 
     new_text_count = sum(
         1 for f in valid_files
@@ -120,13 +339,7 @@ def upload_pdf(user_id: int):
         _db_gate = SessionLocal()
         try:
             _gate_user = _get_user_refreshed(_db_gate, user_id)
-            if _gate_user and _gate_user.plan_type.lower() == "basic":
-                if _gate_user.uploads_this_month + new_text_count > BASIC_UPLOAD_LIMIT:
-                    return jsonify({
-                        "error":        "Monthly limit reached. Upgrade to Pro!",
-                        "uploads_used": _gate_user.uploads_this_month,
-                        "upload_limit": BASIC_UPLOAD_LIMIT,
-                    }), 403
+            if _gate_user:
                 _gate_user.uploads_this_month += new_text_count
             _db_gate.commit()
         finally:
@@ -222,7 +435,7 @@ def upload_pdf(user_id: int):
                                     _ocr_db.add(UserDocument(
                                         user_id=user_id, file_id=ocr_file_id, filename=filename,
                                         file_size_bytes=len(img_bytes), course_name=course_name,
-                                        is_past_exam=is_past_exam))
+                                        is_past_exam=is_past_exam, is_session_only=is_session_only))
                                     _ocr_db.commit()
                                     _save_upload_file(user_id, ocr_file_id, filename, img_bytes)
                             except Exception as reg_exc:
@@ -342,7 +555,7 @@ def upload_pdf(user_id: int):
             if not _exists:
                 _reg_db.add(UserDocument(user_id=user_id, file_id=file_id, filename=filename,
                                          file_size_bytes=len(raw_bytes), course_name=course_name,
-                                         is_past_exam=is_past_exam))
+                                         is_past_exam=is_past_exam, is_session_only=is_session_only))
                 _reg_db.commit()
                 _save_upload_file(user_id, file_id, filename, raw_bytes)
         except Exception as reg_exc:
@@ -439,13 +652,7 @@ def ask(user_id: int):
     db = SessionLocal()
     try:
         _ask_user = _get_user_refreshed(db, user_id)
-        if _ask_user and _ask_user.plan_type.lower() == "basic":
-            if _ask_user.questions_this_month >= BASIC_QUESTION_LIMIT:
-                return jsonify({
-                    "error":          "Monthly limit reached. Upgrade to Pro!",
-                    "questions_used": _ask_user.questions_this_month,
-                    "question_limit": BASIC_QUESTION_LIMIT,
-                }), 403
+        if _ask_user:
             _ask_user.questions_this_month += 1
 
         if session_id_in:
@@ -513,22 +720,49 @@ def ask(user_id: int):
             yield f"data: {json.dumps({'type': 'status', 'phase': 'thinking'})}\n\n"
 
             if is_summary_request and summary_file_id:
+                # Educational Synthesis path — fully self-contained, returns early.
+                # Bypasses the normal context-building and tool-calling flow entirely.
                 raw_chunks, raw_metas = get_chunks_for_files(user_id, [summary_file_id])
-                order = sorted(range(len(raw_chunks)), key=lambda i: raw_metas[i].get("chunk_index", i))
-                chunks, metadatas, used_chars = [], [], 0
-                for i in order:
-                    c, m = raw_chunks[i], raw_metas[i]
-                    if chunks and used_chars + len(c) > _MAX_SUMMARY_CONTEXT_CHARS:
-                        break
-                    chunks.append(c)
-                    metadatas.append(m)
-                    used_chars += len(c)
-                print(f"▶ SUMMARY MODE u{user_id}: file_id={summary_file_id} "
-                      f"→ {len(chunks)}/{len(raw_chunks)} chunks, {used_chars} chars")
-            else:
-                chunks, metadatas = hybrid_search(
-                    user_id, search_query, min(TOP_K, doc_count), file_id=file_id_filter
-                )
+                if not raw_chunks:
+                    _no_text = "לא נמצא תוכן במסמך לסיכום."
+                    _save_ai_message(session_id, _no_text)
+                    yield f"data: {json.dumps({'type': 'result', 'answer': _no_text, 'sources': [], 'citation_sources': [], 'chunks_used': 0, 'searched_web': False, 'web_sources': [], 'session_id': session_id, 'executed_code': '', 'code_output': '', 'images': []}, ensure_ascii=False)}\n\n"
+                    return
+
+                order       = sorted(range(len(raw_chunks)), key=lambda i: raw_metas[i].get("chunk_index", i))
+                full_text   = "\n\n".join(raw_chunks[i] for i in order)
+                doc_name    = raw_metas[order[0]].get("source", "document") if order else "document"
+                total_chars = len(full_text)
+                uses_map_reduce = total_chars > _MAP_REDUCE_THRESHOLD
+
+                print(f"▶ EDUCATIONAL SUMMARY u{user_id}: file_id={summary_file_id} "
+                      f"→ {len(raw_chunks)} chunks, {total_chars} chars"
+                      + (" [MAP-REDUCE]" if uses_map_reduce else " [DIRECT]"))
+
+                if uses_map_reduce:
+                    yield f"data: {json.dumps({'type': 'status', 'phase': 'analyzing_sections'})}\n\n"
+
+                answer = _educational_synthesize(full_text, doc_name, question)
+                _save_ai_message(session_id, answer or "")
+                _summary_payload = json.dumps({
+                    "type": "result",
+                    "answer": answer,
+                    "sources": [doc_name],
+                    "citation_sources": [{"file_name": doc_name, "page_number": None, "file_id": summary_file_id}],
+                    "chunks_used": len(raw_chunks),
+                    "searched_web": False,
+                    "web_sources": [],
+                    "session_id": session_id,
+                    "executed_code": "",
+                    "code_output": "",
+                    "images": [],
+                }, ensure_ascii=False)
+                yield f"data: {_summary_payload}\n\n"
+                return
+
+            chunks, metadatas = hybrid_search(
+                user_id, search_query, min(TOP_K, doc_count), file_id=file_id_filter
+            )
 
             if not chunks and not tavily_client and not user_images:
                 no_result_answer = "לא נמצאו קטעים רלוונטיים במסמך לשאלה זו. נסה לנסח אחרת."
@@ -608,18 +842,6 @@ def ask(user_id: int):
                     "and relate relevant visual content to the question."
                 )
 
-            summary_instruction = ""
-            if is_summary_request and summary_file_id and chunks:
-                summary_instruction = (
-                    "\n\nDOCUMENT SUMMARY MODE: The DOCUMENT CONTEXT below is the actual "
-                    "extracted content of the requested document, given in its original "
-                    "order (it may be truncated if the document is very long) — it is NOT "
-                    "a search result, so it may not appear directly relevant to the literal "
-                    "wording of the question. Provide a clear, well-structured summary of "
-                    "this content in Hebrew, organized by topic/section, covering the "
-                    "document's main ideas, arguments, and conclusions."
-                )
-
             system_prompt = (
                 SECURITY_SYSTEM_INSTRUCTION
                 + "You are a scientist, engineer, and knowledgeable assistant for U-Note, "
@@ -645,7 +867,6 @@ def ask(user_id: int):
                 + web_search_instruction
                 + code_interpreter_instruction
                 + image_instruction
-                + summary_instruction
             )
 
             text_content = (
@@ -828,41 +1049,54 @@ def ask(user_id: int):
 @documents_bp.route("/documents", methods=["GET"])
 @token_required
 def list_documents(user_id: int):
-    col   = get_user_collection(user_id)
-    total = col.count()
-    if total == 0:
-        return jsonify({"documents": [], "total_chunks": 0}), 200
-    all_metas = col.get(include=["metadatas"])["metadatas"]
-    docs: dict[str, dict] = {}
-    for meta in all_metas:
-        src = meta.get("source", "Unknown")
-        if src not in docs:
-            docs[src] = {
-                "name":        src,
-                "chunks":      0,
-                "file_id":     meta.get("file_id", ""),
-                "upload_date": meta.get("upload_date"),
-            }
-        docs[src]["chunks"] += 1
-
-    # Enrich with course_name / is_past_exam from the SQL ownership registry
-    # (FAISS metadata doesn't carry is_past_exam — it's only on UserDocument).
+    # SQL is the authoritative ownership registry — build the list from UserDocument
+    # then enrich with chunk counts from FAISS.  This keeps /documents and
+    # /api/profile/documents in sync and prevents orphan FAISS chunks from
+    # appearing as ghost files.
     db = SessionLocal()
     try:
-        registry = {
-            row.file_id: row
-            for row in db.query(UserDocument).filter(UserDocument.user_id == user_id).all()
-        }
+        records = (
+            db.query(UserDocument)
+            .filter(
+                UserDocument.user_id == user_id,
+                UserDocument.is_session_only == False,  # noqa: E712
+            )
+            .order_by(UserDocument.uploaded_at.desc())
+            .all()
+        )
     finally:
         db.close()
-    for doc in docs.values():
-        record = registry.get(doc["file_id"])
-        doc["course_name"]  = record.course_name  if record else None
-        doc["is_past_exam"] = bool(record.is_past_exam) if record else False
+
+    if not records:
+        return jsonify({"documents": [], "total_chunks": 0}), 200
+
+    # Count chunks per file_id from FAISS (best-effort; 0 if store is empty/missing)
+    chunk_map: dict[str, int] = {}
+    try:
+        col = get_user_collection(user_id)
+        if col.count() > 0:
+            for meta in col.get(include=["metadatas"])["metadatas"]:
+                fid = meta.get("file_id", "")
+                if fid:
+                    chunk_map[fid] = chunk_map.get(fid, 0) + 1
+    except Exception:
+        pass
+
+    docs = [
+        {
+            "name":         r.filename,
+            "file_id":      r.file_id,
+            "chunks":       chunk_map.get(r.file_id, 0),
+            "upload_date":  r.uploaded_at.isoformat() if r.uploaded_at else None,
+            "course_name":  r.course_name,
+            "is_past_exam": bool(r.is_past_exam),
+        }
+        for r in records
+    ]
 
     return jsonify({
-        "documents":    sorted(docs.values(), key=lambda d: d["name"]),
-        "total_chunks": total,
+        "documents":    docs,
+        "total_chunks": sum(chunk_map.values()),
     }), 200
 
 

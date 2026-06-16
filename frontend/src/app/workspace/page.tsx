@@ -169,6 +169,10 @@ const translations = {
     uploadErr: 'שגיאה בהעלאת הקבצים.',
     serverErr: 'לא ניתן להתחבר לשרת. בדוק שה-backend פועל על פורט 5003.',
     fileAlreadyExists: 'הקובץ כבר קיים במערכת',
+    ephemeralToggleSave:  'שמור בספרייה',
+    ephemeralToggleQuick: 'ניתוח מהיר ⚡',
+    ephemeralBadge:       '⚡ זמני – לא נשמר',
+    ephemeralHint:        'הקובץ לא ייכנס לספרייה – ניתוח חד-פעמי',
     chatTitle: 'Workspace',
     docReady: 'מסמך מוכן – ניתן לשאול שאלות',
     waitingPdf: 'ממתין לקובץ PDF',
@@ -226,10 +230,6 @@ const translations = {
     navStudyLab: 'מרחב לימוד',
     navAdmin: 'Admin',
     navDashboard: 'Platform',
-    usageUploads:   (used: number, limit: number) => `${used}/${limit} העלאות בוצעו`,
-    usageQuestions: (used: number, limit: number) => `${used}/${limit} שאלות נשאלו`,
-    usageUnlimited: 'Pro — ללא הגבלה',
-    upgradePrompt:  'שדרג ל-Pro',
     filterLabel:    'סנן לפי קובץ:',
     filterAll:      'הכל',
     micStart:       'הקלט שאלה קולית',
@@ -297,6 +297,10 @@ const translations = {
     rejectionErr: (n: number) => `${n} file${n === 1 ? '' : 's'} rejected — only PDF, PPTX, PNG, and JPG are allowed.`,
     uploadErr: 'Error uploading files.',
     fileAlreadyExists: 'This file already exists in the system',
+    ephemeralToggleSave:  'Save to library',
+    ephemeralToggleQuick: 'Quick analysis ⚡',
+    ephemeralBadge:       '⚡ Temp – not saved',
+    ephemeralHint:        "File won't be stored – one-time analysis only",
     serverErr: 'Cannot connect to server. Check that the backend is running on port 5003.',
     chatTitle: 'Workspace',
     docReady: 'Document ready – you can ask questions',
@@ -355,10 +359,6 @@ const translations = {
     navStudyLab: 'StudyLab',
     navAdmin: 'Admin',
     navDashboard: 'Platform',
-    usageUploads:   (used: number, limit: number) => `${used}/${limit} uploads used`,
-    usageQuestions: (used: number, limit: number) => `${used}/${limit} questions used`,
-    usageUnlimited: 'Pro — unlimited',
-    upgradePrompt:  'Upgrade to Pro',
     filterLabel:    'Filter by file:',
     filterAll:      'All',
     micStart:       'Record voice question',
@@ -779,18 +779,30 @@ function QuizModal({ questions, loading, error, lang, t, onClose, onRetry }: {
 }
 
 /* ─── PDF Uploader ──────────────────────────────────────────────────────────── */
-function PdfUploader({ onUpload, onRemove, t }: {
+function PdfUploader({ onUpload, onRemove, t, onEphemeralFiles }: {
   onUpload: () => void; onRemove: () => void; t: T;
+  onEphemeralFiles?: (files: File[] | null) => void;
 }) {
   const { selectedCourse } = useCourse();
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [uploading, setUploading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const [ephemeralMode, setEphemeralMode] = useState(false);
+  const [ephemeralBrowserFiles, setEphemeralBrowserFiles] = useState<File[]>([]);
 
   const onDrop = useCallback(
     async (accepted: File[], rejected: FileRejection[]) => {
       const rejectionErrors: string[] = rejected.length ? [t.rejectionErr(rejected.length)] : [];
       if (!accepted.length) { setErrors(rejectionErrors); return; }
+
+      // Ephemeral mode: hold files in browser memory — zero server side-effects
+      if (ephemeralMode) {
+        setErrors(rejectionErrors);
+        const next = [...ephemeralBrowserFiles, ...accepted];
+        setEphemeralBrowserFiles(next);
+        onEphemeralFiles?.(next);
+        return;
+      }
 
       const previewMap: Record<string, string> = {};
       for (const file of accepted) {
@@ -830,7 +842,7 @@ function PdfUploader({ onUpload, onRemove, t }: {
         setErrors([...rejectionErrors, t.serverErr]);
       } finally { setUploading(false); }
     },
-    [onUpload, t, selectedCourse],
+    [onUpload, t, selectedCourse, ephemeralMode, ephemeralBrowserFiles, onEphemeralFiles],
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -848,6 +860,12 @@ function PdfUploader({ onUpload, onRemove, t }: {
     b < 1_048_576 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1_048_576).toFixed(1)} MB`;
 
   const handleRemoveFile = (name: string) => {
+    if (ephemeralMode) {
+      const next = ephemeralBrowserFiles.filter(f => f.name !== name);
+      setEphemeralBrowserFiles(next);
+      onEphemeralFiles?.(next.length > 0 ? next : null);
+      return;
+    }
     const target = uploadedFiles.find(f => f.name === name);
     if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
     const next = uploadedFiles.filter(f => f.name !== name);
@@ -855,7 +873,7 @@ function PdfUploader({ onUpload, onRemove, t }: {
     if (next.length === 0) onRemove();
   };
 
-  const hasFiles = uploadedFiles.length > 0;
+  const hasFiles = ephemeralMode ? ephemeralBrowserFiles.length > 0 : uploadedFiles.length > 0;
 
   return (
     <div className="flex flex-col gap-4 h-full">
@@ -875,9 +893,46 @@ function PdfUploader({ onUpload, onRemove, t }: {
           </div>
         </div>
 
+        {/* Mode toggle: Save vs Ephemeral */}
+        <div className="flex rounded-xl overflow-hidden" style={{ border: '1px solid #BCCAB5', background: '#D4E1CE' }}>
+          <button
+            onClick={() => { setEphemeralMode(false); setEphemeralBrowserFiles([]); onEphemeralFiles?.(null); }}
+            className="flex-1 py-2 text-xs font-semibold transition-all duration-200"
+            style={!ephemeralMode ? { background: '#517B3E', color: '#fff' } : { color: '#517B3E', background: 'transparent' }}>
+            {t.ephemeralToggleSave}
+          </button>
+          <button
+            onClick={() => setEphemeralMode(true)}
+            className="flex-1 py-2 text-xs font-semibold transition-all duration-200"
+            style={ephemeralMode ? { background: '#517B3E', color: '#fff' } : { color: '#517B3E', background: 'transparent' }}>
+            {t.ephemeralToggleQuick}
+          </button>
+        </div>
+        {ephemeralMode && (
+          <p className="text-xs text-[#7a9268] -mt-3 text-center">{t.ephemeralHint}</p>
+        )}
+
         {hasFiles && (
           <div className="flex flex-col gap-2 max-h-48 overflow-y-auto">
-            {uploadedFiles.map(file => {
+            {ephemeralMode
+              ? ephemeralBrowserFiles.map(file => (
+                <div key={file.name}
+                  className="flex items-center gap-3 rounded-xl px-4 py-3"
+                  style={{ background: '#FFF8E7', border: '1px solid #F0D88A' }}>
+                  <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'rgba(240,180,60,0.15)', border: '1px solid rgba(240,180,60,0.3)' }}>
+                    <IconDoc className="w-5 h-5 text-[#B88A00]" />
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-[#2d3b25] text-xs truncate">{file.name}</p>
+                    <p className="text-xs text-[#7a9268]">{fmt(file.size)} · {t.ephemeralBadge}</p>
+                  </div>
+                  <button onClick={() => handleRemoveFile(file.name)} aria-label={t.removeFile}
+                    className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-red-100/60 transition-colors shrink-0">
+                    <IconX className="w-4 h-4 text-[#7a9268] hover:text-red-500" />
+                  </button>
+                </div>
+              ))
+              : uploadedFiles.map(file => {
               const isPptx  = file.fileType === 'pptx';
               const isImage = file.fileType === 'image';
               return (
@@ -1157,9 +1212,10 @@ interface ChatInterfaceProps {
   onSessionsUpdated: () => void;
   lang: Lang;
   t: T;
+  ephemeralFiles?: File[];
 }
 
-function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, onSessionsUpdated, lang, t }: ChatInterfaceProps) {
+function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, onSessionsUpdated, lang, t, ephemeralFiles }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [localSessionId, setLocalSessionId] = useState<number | null>(sessionId);
   const [input, setInput] = useState('');
@@ -1226,20 +1282,34 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
 
   const send = useCallback(async (text?: string) => {
     const q = (text ?? input).trim();
-    if (!q || loading || !hasDoc) return;
+    const isEphemeral = !!(ephemeralFiles && ephemeralFiles.length > 0);
+    if (!q || loading || (!hasDoc && !isEphemeral)) return;
     const userMsg: Message = { id: `u${Date.now()}`, role: 'user', content: q };
     setMessages(prev => [...prev, userMsg]);
     setInput(''); setLoading(true); setSearchPhase('thinking');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
     try {
-      const payload: Record<string, unknown> = { message: q, session_id: localSessionId };
-      if (selectedFileId) payload.file_id = selectedFileId;
-      const response = await authFetch(`${API}/ask`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      let response: Response;
+      if (isEphemeral) {
+        const fd = new FormData();
+        for (const file of ephemeralFiles!) fd.append('files', file);
+        fd.append('question', q);
+        const historyPayload = messages
+          .filter(m => m.role === 'user' || m.role === 'assistant')
+          .slice(-12)
+          .map(m => ({ role: m.role as string, content: m.content }));
+        fd.append('history', JSON.stringify(historyPayload));
+        response = await authFetch(`${API}/api/ephemeral-ask`, { method: 'POST', body: fd });
+      } else {
+        const payload: Record<string, unknown> = { message: q, session_id: localSessionId };
+        if (selectedFileId) payload.file_id = selectedFileId;
+        response = await authFetch(`${API}/ask`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      }
       if (!response.ok) {
         const errData = await response.json();
         throw new Error(errData.error ?? t.commErr);
@@ -1287,7 +1357,7 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
     } catch (err) {
       setMessages(prev => [...prev, { id: `e${Date.now()}`, role: 'assistant', content: err instanceof Error ? err.message : String(err) }]);
     } finally { setLoading(false); setSearchPhase('thinking'); }
-  }, [input, loading, hasDoc, localSessionId, selectedFileId, onSessionCreated, onSessionsUpdated, t]);
+  }, [input, loading, hasDoc, ephemeralFiles, messages, localSessionId, selectedFileId, onSessionCreated, onSessionsUpdated, t]);
 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
@@ -1795,310 +1865,6 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
   );
 }
 
-/* ─── Pricing modal ──────────────────────────────────────────────────────────── */
-function PricingModal({ onClose }: { onClose: () => void }) {
-  const { lang } = useLanguage();
-  const [selected, setSelected] = useState<'monthly' | 'semester'>('semester');
-  const [closing, setClosing] = useState(false);
-  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const handleClose = useCallback(() => {
-    setClosing(true);
-    closeTimerRef.current = setTimeout(onClose, 230);
-  }, [onClose]);
-
-  // Clear timer on unmount to prevent stale-closure side effects
-  useEffect(() => () => { if (closeTimerRef.current) clearTimeout(closeTimerRef.current); }, []);
-
-  useEffect(() => {
-    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') handleClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [handleClose]);
-
-  const he = lang === 'he';
-
-  const CHECK = (
-    <svg className="w-[14px] h-[14px] shrink-0" fill="none" viewBox="0 0 24 24"
-      stroke="currentColor" strokeWidth={2.5} style={{ color: '#517B3E' }}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-    </svg>
-  );
-
-  return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6"
-      style={{
-        backgroundColor: 'rgba(12,22,10,0.52)',
-        backdropFilter: 'blur(18px)',
-        animation: closing
-          ? 'overlay-exit 0.24s ease-in both'
-          : 'overlay-enter 0.3s ease-out both',
-      }}
-      onClick={e => { if (e.target === e.currentTarget) handleClose(); }}
-    >
-      {/* ── Modal card ── */}
-      <div
-        dir={he ? 'rtl' : 'ltr'}
-        className="relative w-full max-w-2xl rounded-3xl overflow-hidden"
-        style={{
-          background: 'rgba(248,252,244,0.97)',
-          backdropFilter: 'blur(28px)',
-          border: '1px solid rgba(157,192,139,0.28)',
-          boxShadow: '0 20px 56px rgba(20,36,16,0.18), 0 4px 16px rgba(81,123,62,0.10)',
-          maxHeight: '92vh',
-          overflowY: 'auto',
-          animation: closing
-            ? 'pricing-exit 0.22s cubic-bezier(0.4,0,0.6,1) both'
-            : 'pricing-enter 0.38s cubic-bezier(0.16,1,0.3,1) both',
-        }}
-      >
-        {/* ── Decorative organic background ── */}
-        <div className="absolute inset-0 pointer-events-none overflow-hidden" aria-hidden="true">
-          {/* Radial bloom — top-end corner */}
-          <div className="absolute -top-24 -end-20 w-80 h-80 rounded-full"
-            style={{ background: 'radial-gradient(circle at center, rgba(164,214,136,0.2) 0%, transparent 65%)' }} />
-          {/* Radial bloom — bottom-start corner */}
-          <div className="absolute -bottom-20 -start-20 w-72 h-72 rounded-full"
-            style={{ background: 'radial-gradient(circle at center, rgba(81,123,62,0.09) 0%, transparent 65%)' }} />
-          {/* Concentric ripple rings — centred */}
-          <div className="absolute rounded-full" style={{
-            width: 440, height: 440,
-            top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
-            border: '1px solid rgba(157,192,139,0.08)',
-          }} />
-          <div className="absolute rounded-full" style={{
-            width: 290, height: 290,
-            top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
-            border: '1px solid rgba(157,192,139,0.06)',
-          }} />
-
-          {/* Minimalist bonsai — bottom-end */}
-          <svg width="96" height="96" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg"
-            className="absolute bottom-4 end-4" style={{ opacity: 0.065 }}>
-            <path d="M48 90 C47 76 45 66 48 54" stroke="#2A3B22" strokeWidth="3.5" strokeLinecap="round"/>
-            <path d="M48 63 C43 57 32 54 23 47" stroke="#2A3B22" strokeWidth="2.5" strokeLinecap="round"/>
-            <path d="M48 57 C53 50 63 47 72 40" stroke="#2A3B22" strokeWidth="2.5" strokeLinecap="round"/>
-            <path d="M48 54 C47 45 47 37 48 31" stroke="#2A3B22" strokeWidth="2" strokeLinecap="round"/>
-            <circle cx="21" cy="43" r="11" fill="#517B3E"/>
-            <circle cx="32" cy="36" r="9" fill="#2A3B22"/>
-            <circle cx="72" cy="36" r="10" fill="#517B3E"/>
-            <circle cx="59" cy="29" r="8" fill="#2A3B22"/>
-            <circle cx="48" cy="25" r="12" fill="#517B3E"/>
-            <circle cx="40" cy="31" r="7" fill="#3d5530"/>
-            <rect x="38" y="90" width="20" height="5" rx="2.5" fill="#2A3B22"/>
-            <path d="M35 90 L37 98 H59 L61 90 Z" fill="#3d5530"/>
-          </svg>
-
-          {/* Minimalist matcha cup — top-start */}
-          <svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg"
-            className="absolute top-3 start-3" style={{ opacity: 0.07 }}>
-            <path d="M28 22 C27 17 31 16 30 11" stroke="#517B3E" strokeWidth="1.8" strokeLinecap="round"/>
-            <path d="M40 20 C39 15 43 14 42 9" stroke="#517B3E" strokeWidth="1.8" strokeLinecap="round"/>
-            <path d="M52 22 C51 17 55 16 54 11" stroke="#517B3E" strokeWidth="1.8" strokeLinecap="round"/>
-            <rect x="17" y="26" width="46" height="6" rx="3" fill="#2A3B22"/>
-            <path d="M21 32 L23 60 H57 L59 32 Z" fill="#517B3E"/>
-            <path d="M59 36 C68 36 70 41 70 45 C70 49 68 54 59 54"
-              stroke="#2A3B22" strokeWidth="3" fill="none" strokeLinecap="round"/>
-            <ellipse cx="40" cy="62" rx="25" ry="4.5" fill="#2A3B22"/>
-          </svg>
-        </div>
-
-        {/* ── Header ── */}
-        <div className="relative px-6 pt-5 pb-3 flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-black text-[#1a2e14] leading-snug tracking-tight">
-              {he ? 'שדרג את החשבון שלך' : 'Upgrade Your Account'}
-            </h2>
-            <p className="text-[13px] text-[#7a9268] mt-1">
-              {he ? 'בחר את המסלול המתאים לך' : 'Choose the plan that fits you'}
-            </p>
-          </div>
-          <button
-            onClick={handleClose}
-            aria-label={he ? 'סגור' : 'Close'}
-            className="shrink-0 mt-0.5 p-2 rounded-xl transition-all"
-            style={{ color: '#9aad8a', background: 'rgba(157,192,139,0.10)' }}
-            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(157,192,139,0.22)'; (e.currentTarget as HTMLButtonElement).style.color = '#517B3E'; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(157,192,139,0.10)'; (e.currentTarget as HTMLButtonElement).style.color = '#9aad8a'; }}
-          >
-            <IconX className="w-4 h-4" />
-          </button>
-        </div>
-
-        {/* Thin divider */}
-        <div className="mx-5 mb-4" style={{ height: '1px', background: 'rgba(157,192,139,0.22)' }} />
-
-        {/* ── Side-by-side plan cards ──
-            RTL flex-row: first child → right (Semester)
-                          second child → left (Monthly)            ── */}
-        <div className="px-5 flex flex-col sm:flex-row gap-3">
-
-          {/* Semester — right in RTL, first in DOM */}
-          <button
-            type="button"
-            onClick={() => setSelected('semester')}
-            className="flex-1 text-start rounded-2xl relative overflow-hidden transition-all"
-            style={{
-              padding: '0 20px 20px',
-              background: selected === 'semester'
-                ? 'rgba(192,232,170,0.32)'
-                : 'rgba(214,240,198,0.20)',
-              border: selected === 'semester'
-                ? '1.5px solid rgba(81,123,62,0.45)'
-                : '1.5px solid rgba(157,192,139,0.30)',
-              boxShadow: selected === 'semester'
-                ? '0 4px 22px rgba(81,123,62,0.13)'
-                : 'none',
-            }}
-          >
-            {/* Full-width top banner badge */}
-            <div
-              className="flex items-center justify-center gap-1.5 py-1.5 -mx-5 mb-4 text-[10px] font-bold tracking-widest uppercase"
-              style={{
-                background: 'linear-gradient(90deg, #2A3B22 0%, #517B3E 50%, #2A3B22 100%)',
-                color: 'rgba(255,255,255,0.9)',
-                letterSpacing: '0.08em',
-              }}
-            >
-              <IconSparkles className="w-3 h-3" />
-              {he ? 'הכי משתלם' : 'Best Value'}
-            </div>
-
-            {/* Radio + title row */}
-            <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-              <div
-                className="w-[17px] h-[17px] rounded-full border-2 flex items-center justify-center shrink-0 transition-all"
-                style={{ borderColor: selected === 'semester' ? '#517B3E' : 'rgba(157,192,139,0.5)' }}
-              >
-                {selected === 'semester' && (
-                  <div className="w-[7px] h-[7px] rounded-full" style={{ background: '#517B3E' }} />
-                )}
-              </div>
-              <span className="text-[15px] font-bold text-[#1a2e14]">
-                {he ? 'סמסטר' : 'Semester'}
-              </span>
-              <span
-                className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-full tracking-wide"
-                style={{ background: 'rgba(81,123,62,0.14)', color: '#2A3B22' }}
-              >
-                {he ? 'חיסכון 15%' : 'Save 15%'}
-              </span>
-            </div>
-
-            {/* Price */}
-            <div className="leading-none mb-0.5">
-              <span className="text-[44px] font-black text-[#1a2e14]">₪100</span>
-            </div>
-            <p className="text-[12px] text-[#7a9268]">{he ? 'ל-4 חודשים' : 'for 4 months'}</p>
-            <p className="text-[12px] font-semibold mb-4" style={{ color: '#517B3E' }}>
-              {he ? '₪25 לחודש בלבד' : '₪25/month only'}
-            </p>
-
-            {/* Features */}
-            <ul className="space-y-2.5 mb-4">
-              {(he
-                ? ['כל תכונות ה-Pro', 'חיסכון של 15%', 'שקט נפשי לכל הסמסטר']
-                : ['All Pro features', 'Save 15%', 'Peace of mind all semester']
-              ).map(f => (
-                <li key={f} className="flex items-center gap-2.5 text-[13px] text-[#3a5228]">
-                  {CHECK}{f}
-                </li>
-              ))}
-            </ul>
-
-            <p className="text-[11px]" style={{ color: 'rgba(100,130,80,0.85)' }}>
-              {he ? 'תשלום חד פעמי — ללא חיוב חוזר' : 'One-time payment — no recurring charges'}
-            </p>
-          </button>
-
-          {/* Monthly — left in RTL, second in DOM */}
-          <button
-            type="button"
-            onClick={() => setSelected('monthly')}
-            className="flex-1 text-start rounded-2xl p-5 transition-all"
-            style={{
-              background: selected === 'monthly'
-                ? '#EAF3E6'
-                : '#DCE8D6',
-              border: selected === 'monthly'
-                ? '1.5px solid #9CB896'
-                : '1.5px solid #BCCAB5',
-              boxShadow: selected === 'monthly'
-                ? '0 4px 18px rgba(81,123,62,0.09)'
-                : 'none',
-            }}
-          >
-            {/* Radio + title */}
-            <div className="flex items-center gap-2 mb-1.5">
-              <div
-                className="w-[17px] h-[17px] rounded-full border-2 flex items-center justify-center shrink-0 transition-all"
-                style={{ borderColor: selected === 'monthly' ? '#517B3E' : 'rgba(157,192,139,0.5)' }}
-              >
-                {selected === 'monthly' && (
-                  <div className="w-[7px] h-[7px] rounded-full" style={{ background: '#517B3E' }} />
-                )}
-              </div>
-              <span className="text-[15px] font-bold text-[#1a2e14]">
-                {he ? 'מסלול חודשי' : 'Monthly Plan'}
-              </span>
-            </div>
-
-            {/* Price */}
-            <div className="leading-none mb-0.5">
-              <span className="text-[44px] font-black text-[#1a2e14]">₪29</span>
-            </div>
-            <p className="text-[12px] text-[#7a9268] mb-5">{he ? 'לחודש' : '/month'}</p>
-
-            {/* Features */}
-            <ul className="space-y-2.5 mb-4">
-              {(he
-                ? ['גישה מלאה ל-AI', 'העלאת קבצים ללא הגבלה', 'תמיכה מועדפת']
-                : ['Full AI access', 'Unlimited file uploads', 'Priority support']
-              ).map(f => (
-                <li key={f} className="flex items-center gap-2.5 text-[13px] text-[#3a5228]">
-                  {CHECK}{f}
-                </li>
-              ))}
-            </ul>
-
-            <p className="text-[11px]" style={{ color: 'rgba(100,130,80,0.85)' }}>
-              {he ? 'חיוב חודשי חוזר' : 'Recurring monthly billing'}
-            </p>
-          </button>
-        </div>
-
-        {/* ── Disabled CTA ── */}
-        <div className="px-5 pt-4 pb-6">
-          <button
-            disabled
-            className="w-full py-3.5 rounded-full flex items-center justify-center gap-2 cursor-not-allowed"
-            style={{
-              background: 'linear-gradient(135deg, #2A3B22 0%, #3d5530 100%)',
-              color: 'rgba(200,225,185,0.38)',
-              fontSize: '0.875rem',
-              fontWeight: 700,
-              opacity: 0.46,
-              letterSpacing: '0.01em',
-            }}
-          >
-            <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round"
-                d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
-            </svg>
-            {he ? 'מעבר לתשלום' : 'Continue to Payment'}
-          </button>
-          <p className="text-center text-[11px] text-[#7a9268] mt-2.5 leading-snug">
-            {he
-              ? 'התשלום יהיה זמין בקרוב (המערכת בשדרוג)'
-              : 'Payment coming soon (system upgrade in progress)'}
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 /* ─── Logout confirmation modal ─────────────────────────────────────────────── */
 function LogoutConfirmModal({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
   const { lang } = useLanguage();
@@ -2471,13 +2237,6 @@ function Sidebar({ sessions, currentSessionId, onNewChat, onSelectSession, onDel
   );
 }
 
-interface UsageInfo {
-  plan_type: string;
-  uploads_this_month: number;
-  upload_limit: number | null;
-  questions_this_month: number;
-  question_limit: number | null;
-}
 
 /* ─── Root page ──────────────────────────────────────────────────────────────── */
 
@@ -2534,14 +2293,10 @@ function Home() {
   const [userGender, setUserGender]             = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_gender')          ?? '') : '');
 
   const [hasDoc, setHasDoc]                     = useState(false);
+  const [ephemeralFiles, setEphemeralFiles]     = useState<File[]>([]);
 
-  /* ── Usage ── */
-  const [usage, setUsage] = useState<UsageInfo | null>(null);
-  const fetchUsage = useCallback(async () => {
-    try {
-      const res = await authFetch(`${API}/api/usage`);
-      if (res.ok) setUsage(await res.json());
-    } catch { /* backend not running */ }
+  const handleEphemeralFiles = useCallback((files: File[] | null) => {
+    setEphemeralFiles(files ?? []);
   }, []);
 
   /* ── Left panel tabs + document list ── */
@@ -2570,7 +2325,6 @@ function Home() {
   const [sidebarOpen, setSidebarOpen]           = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [showLogoutModal, setShowLogoutModal]   = useState(false);
-  const [showPricingModal, setShowPricingModal] = useState(false);
   const [rateLimitToast, setRateLimitToast]     = useState(false);
   const [profilePopoverOpen, setProfilePopoverOpen] = useState(false);
   const profilePopoverRef   = useRef<HTMLDivElement>(null);
@@ -2661,15 +2415,6 @@ function Home() {
     if (!selectedCourse) router.replace('/course-picker');
   }, [authLoading, authUser, courseHydrated, selectedCourse, router]);
 
-  // Fetch usage stats once after auth is confirmed.
-  useEffect(() => {
-    if (!isAuthenticated) return;
-    authFetch(`${API}/api/usage`)
-      .then(r => r.ok ? r.json() : null)
-      .then((data: UsageInfo | null) => { if (data) setUsage(data); })
-      .catch(() => {});
-  }, [isAuthenticated]);
-
   // Fetch existing docs on auth — auto-switch to docs tab if user already has uploads.
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -2750,10 +2495,9 @@ function Home() {
   const handleUpload = useCallback(() => {
     if (!hasDoc) startNewChat();
     setHasDoc(true);
-    fetchUsage();
     fetchDocs();
     setLeftPanelTab('docs');
-  }, [hasDoc, startNewChat, fetchUsage, fetchDocs]);
+  }, [hasDoc, startNewChat, fetchDocs]);
 
   const handleRemove = useCallback(() => {
     setHasDoc(false); startNewChat();
@@ -2761,6 +2505,19 @@ function Home() {
 
   const handleDeleteDoc = useCallback(async (fileId: string) => {
     await authFetch(`${API}/documents/${fileId}`, { method: 'DELETE' });
+    // Purge stale localStorage reference so academic-writing/my-documents stay in sync.
+    try {
+      const raw = localStorage.getItem('unote_academic_uploads');
+      if (raw) {
+        const parsed = JSON.parse(raw) as Array<{ fileId?: string }>;
+        const filtered = parsed.filter(f => f.fileId !== fileId);
+        if (filtered.length !== parsed.length) {
+          filtered.length > 0
+            ? localStorage.setItem('unote_academic_uploads', JSON.stringify(filtered))
+            : localStorage.removeItem('unote_academic_uploads');
+        }
+      }
+    } catch { /* non-critical */ }
     const newDocs = await fetchDocs();
     if (newDocs.length === 0) {
       startNewChat();
@@ -2990,52 +2747,12 @@ function Home() {
         />
       )}
 
-      {/* ── Pricing modal ─────────────────────────────────────────────────────── */}
-      {showPricingModal && (
-        <PricingModal onClose={() => setShowPricingModal(false)} />
-      )}
-
       {/* ── Main content ─────────────────────────────────────────────────────── */}
       <div ref={mainScrollRef} className="flex-1 flex flex-col overflow-y-auto">
         <div className="flex-1 flex flex-col max-w-7xl mx-auto w-full px-4 py-6 md:px-8 md:py-8">
         <main className="flex-1 flex flex-col md:flex-row gap-5 md:gap-7 min-h-0 matcha-workspace-main" style={{ background: 'transparent' }}>
           <style dangerouslySetInnerHTML={{ __html: MATCHA_LEAF_CSS }} />
           <div className="w-full md:w-[38%] flex flex-col relative" style={{ zIndex: 1 }}>
-            {/* ── Usage indicator (Basic plan only) ────────────────────────── */}
-            {usage && (
-              <div className="mb-3 rounded-xl px-4 py-2.5 flex items-center justify-between gap-3 text-xs"
-                style={{
-                  background: '#DCE8D6',
-                  border: '1px solid #BCCAB5',
-                  boxShadow: '0 2px 8px rgba(20,42,16,0.08)',
-                }}>
-                {usage.plan_type === 'basic' ? (
-                  <>
-                    <div className="flex items-center gap-3 text-slate-500">
-                      <span>
-                        <span className={`font-bold ${usage.uploads_this_month >= (usage.upload_limit ?? 0) ? 'text-red-500' : 'text-slate-700'}`}>
-                          {t.usageUploads(usage.uploads_this_month, usage.upload_limit ?? 2)}
-                        </span>
-                      </span>
-                      <span className="text-slate-300">·</span>
-                      <span>
-                        <span className={`font-bold ${usage.questions_this_month >= (usage.question_limit ?? 0) ? 'text-red-500' : 'text-slate-700'}`}>
-                          {t.usageQuestions(usage.questions_this_month, usage.question_limit ?? 15)}
-                        </span>
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => setShowPricingModal(true)}
-                      className="shrink-0 text-[#517B3E] font-semibold hover:underline transition-colors bg-transparent border-none cursor-pointer p-0"
-                      style={{ fontSize: '0.72rem' }}>
-                      {t.upgradePrompt} →
-                    </button>
-                  </>
-                ) : (
-                  <span className="text-[#517B3E] font-semibold">{t.usageUnlimited}</span>
-                )}
-              </div>
-            )}
             {/* ── Left panel tab switcher ──────────────────────────────── */}
             <div className="flex rounded-xl overflow-hidden mb-1" style={{ border: '1px solid #BCCAB5', background: '#DCE8D6' }}>
               <button
@@ -3057,7 +2774,7 @@ function Home() {
             </div>
 
             {leftPanelTab === 'upload' && (
-              <PdfUploader key={pdfKey} onUpload={handleUpload} onRemove={handleRemove} t={t} />
+              <PdfUploader key={pdfKey} onUpload={handleUpload} onRemove={handleRemove} t={t} onEphemeralFiles={handleEphemeralFiles} />
             )}
             {leftPanelTab === 'docs' && (
               <UploadedDocsList docs={docList} onDelete={handleDeleteDoc} t={t} lang={lang} />
@@ -3068,13 +2785,14 @@ function Home() {
             <div className="flex-1 flex flex-col min-h-0">
               <ChatInterface
                 key={chatKey}
-                hasDoc={hasDoc}
+                hasDoc={hasDoc || ephemeralFiles.length > 0}
                 sessionId={currentSessionId}
                 initialMessages={initialMessages}
                 onSessionCreated={handleSessionCreated}
                 onSessionsUpdated={fetchSessions}
                 lang={lang}
                 t={t}
+                ephemeralFiles={ephemeralFiles.length > 0 ? ephemeralFiles : undefined}
               />
             </div>
 
@@ -3082,9 +2800,6 @@ function Home() {
         </main>
         </div>
 
-        <footer className="py-3 text-center text-xs text-[#9aaf8a] shrink-0 relative z-10" style={{ borderTop: '1px solid rgba(157,192,139,0.25)' }}>
-          {t.footer}
-        </footer>
       </div>
     </div>
   );

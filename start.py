@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Unified startup script — runs Flask backend and Next.js frontend in parallel."""
 
+
 import os
 import signal
+import socket
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 
@@ -13,6 +16,7 @@ BLUE  = "\033[94m"
 GREEN = "\033[92m"
 BOLD  = "\033[1m"
 RESET = "\033[0m"
+WARN  = "\033[93m"
 
 ROOT         = Path(__file__).parent
 BACKEND_DIR  = ROOT / "backend"
@@ -21,6 +25,46 @@ FRONTEND_DIR = ROOT / "frontend"
 # Ensure /usr/local/bin is on PATH so npm/node are found (required on macOS)
 env = os.environ.copy()
 env["PATH"] = f"/usr/local/bin:{env.get('PATH', '')}"
+
+
+def is_port_in_use(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(1)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def free_port(port: int) -> None:
+    """Kill any process listening on *port* (macOS/Linux: uses lsof)."""
+    if not is_port_in_use(port):
+        return
+    print(f"{WARN}{BOLD}[startup] {RESET}Port {port} is in use — killing existing process…")
+    try:
+        result = subprocess.run(
+            ["lsof", "-ti", f":{port}"],
+            capture_output=True, text=True
+        )
+        pids = [p for p in result.stdout.strip().split() if p.isdigit()]
+        for pid in pids:
+            try:
+                os.kill(int(pid), signal.SIGKILL)
+                print(f"{WARN}{BOLD}[startup] {RESET}Killed PID {pid} on port {port}")
+            except (ProcessLookupError, PermissionError):
+                pass
+        # Give the OS a moment to release the port
+        for _ in range(10):
+            time.sleep(0.5)
+            if not is_port_in_use(port):
+                break
+    except FileNotFoundError:
+        print(f"{WARN}{BOLD}[startup] {RESET}lsof not found — cannot auto-free port {port}")
+
+
+def check_dir(path: Path, label: str) -> None:
+    if not path.is_dir():
+        sys.exit(
+            f"\n{BOLD}ERROR:{RESET} {label} directory not found: {path}\n"
+            "Make sure you are running start.py from the project root."
+        )
 
 
 def stream_output(stream, label, color):
@@ -72,9 +116,17 @@ def kill_group(proc):
 
 
 def main():
+    # Verify directories exist before attempting to launch anything
+    check_dir(BACKEND_DIR,  "Backend")
+    check_dir(FRONTEND_DIR, "Frontend")
+
     print(f"\n{BOLD}Starting U-Note{RESET}")
     print(f"  {BLUE}{BOLD}[BACKEND] {RESET} Flask   → http://localhost:5003")
     print(f"  {GREEN}{BOLD}[FRONTEND]{RESET} Next.js → http://localhost:3000\n")
+
+    # Free ports before starting so stale processes don't cause EADDRINUSE
+    free_port(3000)
+    free_port(5003)
 
     # Prefer the venv Python so backend deps are available without activation
     venv_python = BACKEND_DIR / ".venv" / "bin" / "python"

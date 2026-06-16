@@ -4,7 +4,6 @@ import { useState, useEffect, Suspense } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth, AUTH_KEYS } from '../providers/auth';
-import { UpgradeModal } from '../workspace/UpgradeModal';
 
 const API = 'http://127.0.0.1:5003';
 
@@ -72,18 +71,12 @@ const i18n = {
     studyYearLabel:       'שנת לימוד',
     aiStyleLabel:         'סגנון AI מועדף',
     academicSuccess:      'פרטי הלימודים עודכנו בהצלחה',
-    planStatus:           'מצב חשבון',
-    planBasic:            'Basic',
-    planPro:              'Pro',
-    planSemester:         'Semester',
     uploadsLabel:         'העלאות החודש',
     questionsLabel:       'שאלות החודש',
     unlimited:            'ללא הגבלה',
     statChats:            'שיחות',
     statMessages:         'הודעות',
     statDocs:             'מסמכים',
-    subscriptionUntil:    'מנוי פעיל עד',
-    upgradeBtn:           'שדרג ל-Pro',
     myDocs:               'המסמכים שלי',
     docName:              'שם המסמך',
     docDate:              'תאריך העלאה',
@@ -131,18 +124,12 @@ const i18n = {
     studyYearLabel:       'Year of Study',
     aiStyleLabel:         'Preferred AI Style',
     academicSuccess:      'Academic details updated',
-    planStatus:           'Account Status',
-    planBasic:            'Basic',
-    planPro:              'Pro',
-    planSemester:         'Semester',
     uploadsLabel:         'Uploads this month',
     questionsLabel:       'Questions this month',
     unlimited:            'Unlimited',
     statChats:            'Chats',
     statMessages:         'Messages',
     statDocs:             'Documents',
-    subscriptionUntil:    'Subscription active until',
-    upgradeBtn:           'Upgrade to Pro',
     myDocs:               'My Documents',
     docName:              'Document Name',
     docDate:              'Upload Date',
@@ -318,8 +305,6 @@ export function ProfilePageInner() {
   const dir = he ? 'rtl' : 'ltr';
   const t   = i18n[lang];
 
-  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
-
   const [activeTab, setActiveTab] = useState<'profile' | 'documents'>(() => {
     if (searchParams.get('tab') === 'documents') return 'documents';
     if (pathname === '/workspace/documents') return 'documents';
@@ -366,12 +351,8 @@ export function ProfilePageInner() {
   const [sessionCount,  setSessionCount]  = useState(0);
   const [messageCount,  setMessageCount]  = useState(0);
   const [documentCount, setDocumentCount] = useState(0);
-  const [planType,      setPlanType]      = useState('basic');
   const [uploadsUsed,   setUploadsUsed]   = useState(0);
-  const [uploadLimit,   setUploadLimit]   = useState<number | null>(null);
   const [questionsUsed, setQuestionsUsed] = useState(0);
-  const [questionLimit, setQuestionLimit] = useState<number | null>(null);
-  const [subEndDate,    setSubEndDate]    = useState<string | null>(null);
 
   // ── Documents vault ────────────────────────────────────────────────────────
   const [documents,     setDocuments]     = useState<ProfileDoc[]>([]);
@@ -423,12 +404,8 @@ export function ProfilePageInner() {
 
         if (uRes.ok) {
           const u = await uRes.json();
-          setPlanType(u.plan_type         ?? 'basic');
           setUploadsUsed(u.uploads_this_month    ?? 0);
-          setUploadLimit(u.upload_limit   ?? null);
           setQuestionsUsed(u.questions_this_month ?? 0);
-          setQuestionLimit(u.question_limit ?? null);
-          setSubEndDate(u.subscription_end_date ?? null);
         }
       })
       .catch(() => setPersonalErr(i18n.he.serverErr))
@@ -539,6 +516,19 @@ export function ProfilePageInner() {
     try {
       const res = await authFetch(`${API}/documents/${fileId}`, { method: 'DELETE' });
       if (!res.ok) { setDocErr(i18n.he.docDeleteErr); return; }
+      // Purge stale localStorage reference so academic-writing/workspace stay in sync.
+      try {
+        const raw = localStorage.getItem('unote_academic_uploads');
+        if (raw) {
+          const parsed = JSON.parse(raw) as Array<{ fileId?: string }>;
+          const filtered = parsed.filter(f => f.fileId !== fileId);
+          if (filtered.length !== parsed.length) {
+            filtered.length > 0
+              ? localStorage.setItem('unote_academic_uploads', JSON.stringify(filtered))
+              : localStorage.removeItem('unote_academic_uploads');
+          }
+        }
+      } catch { /* non-critical */ }
       setDocuments(prev => prev.filter(d => d.file_id !== fileId));
       setDocumentCount(prev => Math.max(0, prev - 1));
     } catch { setDocErr(i18n.he.docDeleteErr); }
@@ -557,10 +547,6 @@ export function ProfilePageInner() {
       });
     } catch { return ''; }
   })();
-
-  const planLabel = planType === 'pro' ? t.planPro : planType === 'semester' ? t.planSemester : t.planBasic;
-  const planColor = planType === 'pro' ? '#1D4ED8' : planType === 'semester' ? '#7C3AED' : '#6B7280';
-  const planBg    = planType === 'pro' ? 'rgba(29,78,216,0.09)' : planType === 'semester' ? 'rgba(124,58,237,0.09)' : 'rgba(107,114,128,0.09)';
 
   const genderDisplayLabel = gender === 'אחר' ? t.genderOther
     : GENDER_OPTIONS.find(o => o.value === gender)?.[lang] ?? gender;
@@ -643,12 +629,6 @@ export function ProfilePageInner() {
                     <p className="text-slate-400 text-[11px] mt-1">{t.memberSince}: {formattedSince}</p>
                   )}
                 </div>
-                <span
-                  className="shrink-0 text-[11px] font-bold px-2.5 py-1 rounded-full"
-                  style={{ background: planBg, color: planColor, border: `1px solid ${planColor}28` }}
-                >
-                  {planLabel}
-                </span>
               </div>
             </div>
 
@@ -1004,28 +984,13 @@ export function ProfilePageInner() {
                   </div>
                 </div>
 
-                {/* Plan & stats card */}
+                {/* Stats card */}
                 <div className="bg-[#FDFCF8] border border-stone-200 rounded-2xl overflow-hidden" style={cardStyle}>
-                  <div className="flex items-center justify-between px-6 py-4" style={cardHdr}>
-                    <span className="text-sm font-bold text-[#2A3B22]">{t.planStatus}</span>
-                    <span
-                      className="text-[11px] font-bold px-2.5 py-1 rounded-full"
-                      style={{ background: planBg, color: planColor, border: `1px solid ${planColor}28` }}
-                    >
-                      {planLabel}
-                    </span>
-                  </div>
                   <div className="px-6 py-5 space-y-4">
 
                     {/* Progress bars */}
-                    <UsageBar label={t.uploadsLabel}   used={uploadsUsed}   limit={uploadLimit}   unlimited={t.unlimited} />
-                    <UsageBar label={t.questionsLabel} used={questionsUsed} limit={questionLimit} unlimited={t.unlimited} />
-
-                    {subEndDate && planType !== 'basic' && (
-                      <p className="text-xs text-slate-400">
-                        {t.subscriptionUntil}: <span dir="ltr">{formatDate(subEndDate, lang)}</span>
-                      </p>
-                    )}
+                    <UsageBar label={t.uploadsLabel}   used={uploadsUsed}   limit={null} unlimited={t.unlimited} />
+                    <UsageBar label={t.questionsLabel} used={questionsUsed} limit={null} unlimited={t.unlimited} />
 
                     {/* Divider */}
                     <div className="h-px" style={{ background: 'rgba(200,190,170,0.4)' }} />
@@ -1047,16 +1012,6 @@ export function ProfilePageInner() {
                         </div>
                       ))}
                     </div>
-
-                    {planType === 'basic' && (
-                      <button
-                        onClick={() => setShowUpgradeModal(true)}
-                        className="w-full py-2.5 rounded-xl text-white text-sm font-bold transition-all active:scale-[0.99]"
-                        style={{ background: 'linear-gradient(135deg,#517B3E 0%,#2A3B22 100%)' }}
-                      >
-                        {t.upgradeBtn} →
-                      </button>
-                    )}
                   </div>
                 </div>
 
@@ -1234,10 +1189,6 @@ export function ProfilePageInner() {
         </div>
       )}
 
-      {/* Upgrade-to-Pro modal */}
-      {showUpgradeModal && (
-        <UpgradeModal lang={lang} onClose={() => setShowUpgradeModal(false)} />
-      )}
     </div>
   );
 }

@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect, useCallback, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { X, MessagesSquare, PenTool, TrendingUp, GraduationCap, ChevronUp, Check } from 'lucide-react';
+import { X, MessagesSquare, PenTool, TrendingUp, GraduationCap, ChevronUp } from 'lucide-react';
 import { useLanguage } from './providers/language';
 import { useCourse }   from './providers/course';
 import { useAuth }     from './providers/auth';
@@ -184,12 +184,10 @@ export default function HomePage() {
   const regOtpRefs   = useRef<(HTMLInputElement | null)[]>([]);
   const solutionsRef = useRef<HTMLElement>(null);
   const blogRef      = useRef<HTMLElement>(null);
-  const pricingRef   = useRef<HTMLElement>(null);
 
   const [showTopBtn,        setShowTopBtn]        = useState(false);
   const [solutionsVisible,  setSolutionsVisible]  = useState(false);
   const [blogInView,        setBlogInView]        = useState(false);
-  const [pricingInView,     setPricingInView]     = useState(false);
   const [activeBlogId,      setActiveBlogId]      = useState<number | null>(null);
 
   const [loginModalClosing,    setLoginModalClosing]    = useState(false);
@@ -345,21 +343,6 @@ export default function HomePage() {
     return () => observer.disconnect();
   }, []);
 
-  /* ── Scroll-reveal for pricing section ── */
-  useEffect(() => {
-    const el = pricingRef.current;
-    if (!el) return;
-    if (el.getBoundingClientRect().top < window.innerHeight) {
-      setPricingInView(true);
-      return;
-    }
-    const observer = new IntersectionObserver(
-      ([entry]) => { if (entry.isIntersecting) setPricingInView(true); },
-      { threshold: 0.1 },
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
 
   /* ── Blog modal: lock body scroll + ESC to close ── */
   useEffect(() => {
@@ -694,15 +677,6 @@ export default function HomePage() {
             }}
             style={{ fontSize: '0.875rem', fontWeight: 400, color: '#2d3b25', cursor: 'pointer' }}
           >{t.navBlog}</a>
-          <a
-            href="#pricing"
-            onClick={(e) => {
-              e.preventDefault();
-              document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' });
-              setTimeout(() => setPricingInView(true), 300);
-            }}
-            style={{ fontSize: '0.875rem', fontWeight: 400, color: '#2d3b25', cursor: 'pointer' }}
-          >{t.navPricing}</a>
           <button
             onClick={openModal}
             style={{ fontSize: '0.875rem', fontWeight: 400, color: '#2d3b25', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
@@ -996,237 +970,6 @@ export default function HomePage() {
           </div>
         </div>
       </section>
-
-      {/* ─── Pricing ─── */}
-      <section ref={pricingRef} id="pricing" className="relative z-10 py-24 px-6">
-        <div style={{ maxWidth: '960px', margin: '0 auto' }}>
-          <h2
-            className={pricingInView ? 'animate-fade-scale-lift' : 'reveal-hidden'}
-            style={{
-              textAlign: 'center',
-              fontSize: 'clamp(1.6rem, 3.5vw, 2.2rem)',
-              fontWeight: 800,
-              color: '#2A3B22',
-              marginBottom: '56px',
-              fontFamily: 'Georgia, serif',
-              letterSpacing: '-0.01em',
-            }}
-          >
-            {t.pricingTitle}
-          </h2>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch">
-
-            {/* ── Basic (Free) ── */}
-            <div
-              dir={lang === 'he' ? 'rtl' : 'ltr'}
-              className={`flex flex-col ${pricingInView ? 'animate-fade-scale-lift delay-fade' : 'reveal-hidden'}`}
-              style={{
-                '--delay': '0.1s',
-                background: 'rgba(253,252,249,0.72)',
-                backdropFilter: 'blur(16px)',
-                WebkitBackdropFilter: 'blur(16px)',
-                borderRadius: '20px',
-                padding: '32px 28px',
-                border: '1px solid rgba(255,255,255,0.85)',
-                boxShadow: '0 4px 24px rgba(30,42,69,0.07)',
-              } as React.CSSProperties}
-            >
-              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#2A3B22', marginBottom: '8px' }}>
-                {t.planBasic}
-              </h3>
-              <p dir="ltr" style={{ fontSize: '2rem', fontWeight: 800, color: '#2A3B22', marginBottom: '24px', lineHeight: 1 }}>
-                {t.planBasicPrice}
-              </p>
-              <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 28px', display: 'flex', flexDirection: 'column', gap: '12px', flexGrow: 1 }}>
-                {t.planBasicFeatures.map((f, i) => (
-                  <li key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '0.9rem', color: '#4d5a3e', direction: lang === 'he' ? 'rtl' : 'ltr' }}>
-                    <Check size={15} color="#517B3E" strokeWidth={2.5} style={{ flexShrink: 0 }} />
-                    {f}
-                  </li>
-                ))}
-              </ul>
-              <button
-                onClick={openModal}
-                style={{
-                  marginTop: 'auto',
-                  padding: '11px 0',
-                  borderRadius: '10px',
-                  fontSize: '0.9375rem',
-                  fontWeight: 600,
-                  color: '#517B3E',
-                  background: 'rgba(81,123,62,0.10)',
-                  border: '1px solid rgba(81,123,62,0.30)',
-                  cursor: 'pointer',
-                  transition: 'background 0.2s',
-                  width: '100%',
-                }}
-                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(81,123,62,0.18)'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(81,123,62,0.10)'; }}
-              >
-                {t.ctaButton}
-              </button>
-            </div>
-
-            {/* ── Pro (Most Popular) ── */}
-            <div
-              dir={lang === 'he' ? 'rtl' : 'ltr'}
-              className={`flex flex-col ${pricingInView ? 'animate-fade-scale-lift delay-fade' : 'reveal-hidden'}`}
-              style={{
-                '--delay': '0.25s',
-                background: 'rgba(253,252,249,0.85)',
-                backdropFilter: 'blur(16px)',
-                WebkitBackdropFilter: 'blur(16px)',
-                borderRadius: '20px',
-                padding: '32px 28px',
-                border: '2px solid #517B3E',
-                boxShadow: '0 8px 32px rgba(81,123,62,0.18), 0 2px 8px rgba(81,123,62,0.10)',
-                position: 'relative',
-              } as React.CSSProperties}
-            >
-              {/* Badge — always centred, direction-neutral */}
-              <span style={{
-                position: 'absolute',
-                top: '-14px',
-                left: '50%',
-                transform: 'translateX(-50%)',
-                background: '#517B3E',
-                color: 'white',
-                fontSize: '0.75rem',
-                fontWeight: 700,
-                padding: '4px 14px',
-                borderRadius: '99px',
-                whiteSpace: 'nowrap',
-                letterSpacing: '0.02em',
-                direction: 'ltr',
-              }}>
-                {t.planProBadge}
-              </span>
-              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#2A3B22', marginBottom: '8px' }}>
-                {t.planPro}
-              </h3>
-              <p dir="ltr" style={{ fontSize: '2rem', fontWeight: 800, color: '#517B3E', marginBottom: '24px', lineHeight: 1 }}>
-                {t.planProPrice}
-              </p>
-              <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 28px', display: 'flex', flexDirection: 'column', gap: '12px', flexGrow: 1 }}>
-                {t.planProFeatures.map((f, i) => (
-                  <li key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '0.9rem', color: '#3d4d35', direction: lang === 'he' ? 'rtl' : 'ltr' }}>
-                    <Check size={15} color="#517B3E" strokeWidth={2.5} style={{ flexShrink: 0 }} />
-                    {f}
-                  </li>
-                ))}
-              </ul>
-              <button
-                onClick={openModal}
-                style={{
-                  marginTop: 'auto',
-                  padding: '11px 0',
-                  borderRadius: '10px',
-                  fontSize: '0.9375rem',
-                  fontWeight: 600,
-                  color: 'white',
-                  background: '#517B3E',
-                  border: 'none',
-                  cursor: 'pointer',
-                  transition: 'opacity 0.2s',
-                  width: '100%',
-                  boxShadow: '0 4px 14px rgba(81,123,62,0.35)',
-                }}
-                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.88'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '1'; }}
-              >
-                {t.ctaButton}
-              </button>
-            </div>
-
-            {/* ── Semester Pass ── */}
-            <div
-              dir={lang === 'he' ? 'rtl' : 'ltr'}
-              className={`flex flex-col ${pricingInView ? 'animate-fade-scale-lift delay-fade' : 'reveal-hidden'}`}
-              style={{
-                '--delay': '0.4s',
-                background: 'rgba(253,252,249,0.72)',
-                backdropFilter: 'blur(16px)',
-                WebkitBackdropFilter: 'blur(16px)',
-                borderRadius: '20px',
-                padding: '32px 28px',
-                border: '1px solid rgba(255,255,255,0.85)',
-                boxShadow: '0 4px 24px rgba(30,42,69,0.07)',
-              } as React.CSSProperties}
-            >
-              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#2A3B22', marginBottom: '8px' }}>
-                {t.planSemester}
-              </h3>
-              <p dir="ltr" style={{ fontSize: '2rem', fontWeight: 800, color: '#2A3B22', marginBottom: '4px', lineHeight: 1 }}>
-                {t.planSemesterPrice}
-              </p>
-              <p style={{ fontSize: '0.78rem', color: '#517B3E', fontWeight: 600, marginBottom: '24px' }}>
-                {t.planSemesterSave}
-              </p>
-              <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 28px', display: 'flex', flexDirection: 'column', gap: '12px', flexGrow: 1 }}>
-                {t.planProFeatures.map((f, i) => (
-                  <li key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '0.9rem', color: '#4d5a3e', direction: lang === 'he' ? 'rtl' : 'ltr' }}>
-                    <Check size={15} color="#517B3E" strokeWidth={2.5} style={{ flexShrink: 0 }} />
-                    {f}
-                  </li>
-                ))}
-              </ul>
-              <button
-                onClick={openModal}
-                style={{
-                  marginTop: 'auto',
-                  padding: '11px 0',
-                  borderRadius: '10px',
-                  fontSize: '0.9375rem',
-                  fontWeight: 600,
-                  color: '#517B3E',
-                  background: 'rgba(81,123,62,0.10)',
-                  border: '1px solid rgba(81,123,62,0.30)',
-                  cursor: 'pointer',
-                  transition: 'background 0.2s',
-                  width: '100%',
-                }}
-                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(81,123,62,0.18)'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(81,123,62,0.10)'; }}
-              >
-                {t.ctaButton}
-              </button>
-            </div>
-
-          </div>
-        </div>
-      </section>
-
-      {/* ─── Footer ─── */}
-      <footer
-        className="relative z-20 flex items-center justify-between px-8 py-3"
-        style={{ borderTop: '1px solid rgba(180,170,150,0.25)', backgroundColor: 'rgba(232,228,217,0.65)' }}
-      >
-        <div className="flex items-center gap-5">
-          <a href="#" className="flex items-center gap-1.5" style={{ fontSize: '0.75rem', color: '#777', textDecoration: 'none' }}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <circle cx="12" cy="12" r="10"/>
-              <line x1="2" y1="12" x2="22" y2="12"/>
-              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
-            </svg>
-            {t.footerPricing}
-          </a>
-        </div>
-        <div className="flex items-center gap-5">
-          <a href="#" className="flex items-center gap-1.5" style={{ fontSize: '0.75rem', color: '#777', textDecoration: 'none' }}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
-            </svg>
-            {t.footerGithub}
-          </a>
-          <a href="#" className="flex items-center gap-1.5" style={{ fontSize: '0.75rem', color: '#777', textDecoration: 'none' }}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-            </svg>
-            {t.footerContact}
-          </a>
-        </div>
-      </footer>
 
       {/* ─── Back to Top ─── */}
       <button

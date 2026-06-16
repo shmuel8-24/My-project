@@ -1981,6 +1981,19 @@ export default function AcademicWritingPage() {
     }
   }, [uploadedFiles]);
 
+  /* Purge session-restored files whose server record no longer exists.
+     Runs after every docs refresh so stale localStorage entries don't survive
+     server-side deletions (e.g. syllabus_AI.txt removed via My Documents). */
+  useEffect(() => {
+    if (docsLoading) return;
+    setUploadedFiles(prev => {
+      if (prev.length === 0) return prev;
+      const validIds = new Set(docs.map(d => d.file_id));
+      const next = prev.filter(f => !f.fileId || validIds.has(f.fileId));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [docs, docsLoading]);
+
   /* File upload */
   const handleDrop = useCallback(async (files: File[]) => {
     if (!files.length || uploading) return;
@@ -1990,6 +2003,7 @@ export default function AcademicWritingPage() {
       const fd = new FormData();
       for (const file of files) fd.append('files', file);
       if (selectedCourse) fd.append('course_name', selectedCourse.name);
+      fd.append('is_session_only', '1');
       const res  = await authFetch(`${API}/upload-pdf`, { method: 'POST', body: fd });
       const data = await res.json();
       if (!res.ok) {
@@ -2006,13 +2020,6 @@ export default function AcademicWritingPage() {
         setUploadedFiles(prev => [...prev, ...uploaded]);
         setHasDoc(true);
         setUploadError(null);
-        // Refresh the "מסמכים שהועלו" tab so the new file appears there immediately
-        authFetch(`${API}/documents`)
-          .then(r => r.ok ? r.json() : { documents: [] })
-          .then((d: { documents: DocInfo[] }) => {
-            if (Array.isArray(d.documents)) setDocs(d.documents);
-          })
-          .catch(() => {});
       }
     } catch (err) {
       console.error('[Academic Writing] upload error:', err);
@@ -2026,6 +2033,10 @@ export default function AcademicWritingPage() {
     const remaining = uploadedFiles.filter(f => f.fileId !== fileToRemove.fileId);
     setUploadedFiles(remaining);
     if (remaining.length === 0) setHasDoc(docs.length > 0);
+    // Session-only uploads are deleted from the backend when removed from the UI.
+    if (fileToRemove.fileId) {
+      authFetch(`${API}/documents/${fileToRemove.fileId}`, { method: 'DELETE' }).catch(() => {});
+    }
   }, [uploadedFiles, docs]);
 
   const handleLogout = useCallback(() => {
@@ -2120,9 +2131,6 @@ export default function AcademicWritingPage() {
         )}
       </main>
 
-      <footer className="py-3 text-center text-xs shrink-0 relative" style={{ color: '#7BA08A', zIndex: 1 }}>
-        U-Note · {he ? 'מופעל על ידי OpenAI ו-Flask' : 'Powered by OpenAI and Flask'}
-      </footer>
     </div>
   );
 }

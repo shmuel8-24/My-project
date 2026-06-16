@@ -1,7 +1,0 @@
-{
-  "name": "u-note",
-  "private": true,
-  "scripts": {
-    "dev:all": "python3 start.py"
-  }
-}
