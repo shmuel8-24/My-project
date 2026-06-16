@@ -341,6 +341,7 @@ interface DocItem {
   uploaded_at: string | null;
   file_size_bytes: number | null;
   course_name: string | null;
+  is_syllabus: boolean;
   chunks: number;
 }
 
@@ -370,9 +371,31 @@ function DocCard({ doc, he, downloading, deleting, onDownload, onDeleteRequest }
       className="rounded-xl p-5 flex flex-col gap-3 bg-white transition-shadow hover:shadow-md"
       style={{ border: '1px solid #E2EBE5', borderTop: '3px solid #8BAF84' }}
     >
-      <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
-        style={{ background: 'rgba(81,123,62,0.10)' }}>
-        <FileTypeIcon filename={doc.filename} />
+      <div className="flex items-start justify-between gap-2">
+        <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
+          style={{ background: 'rgba(81,123,62,0.10)' }}>
+          <FileTypeIcon filename={doc.filename} />
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0 max-w-[140px] flex-wrap justify-end">
+          {doc.is_syllabus && (
+            <span
+              className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+              style={{ background: 'rgba(91,108,57,0.12)', color: '#3B5323', border: '1px solid rgba(91,108,57,0.25)' }}
+              title={he ? 'מסמך סילבוס — שמור לצפייה בלבד, אינו בשימוש כהקשר AI' : 'Syllabus — stored for reference, not used as AI context'}
+            >
+              {he ? 'סילבוס' : 'Syllabus'}
+            </span>
+          )}
+          {doc.course_name && (
+            <span
+              className="text-[10px] font-semibold px-2 py-0.5 rounded-full truncate max-w-[100px]"
+              style={{ background: 'rgba(81,123,62,0.10)', color: '#517B3E', border: '1px solid rgba(81,123,62,0.20)' }}
+              title={doc.course_name}
+            >
+              {doc.course_name}
+            </span>
+          )}
+        </div>
       </div>
       <div className="min-w-0">
         <p className="text-sm font-bold text-[#1C3329] truncate" title={doc.filename}>{doc.filename}</p>
@@ -545,17 +568,16 @@ export default function MyDocumentsPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // ── Load documents for the active course ──────────────────────────────────
+  // ── Load ALL documents across all courses ─────────────────────────────────
+  // My Documents shows the user's full library so they can manage files globally.
+  // Each DocCard displays a course badge so the user can see which course each
+  // file belongs to.  Uploading still tags to the currently active course.
   const fetchDocuments = useCallback(() => {
-    if (!selectedCourse) {
-      Promise.resolve().then(() => { setDocuments([]); setDocsLoading(false); });
-      return;
-    }
     const token = getToken();
     const request = Promise.resolve()
       .then(() => { setDocsLoading(true); })
       .then(() => token
-        ? fetch(`${API}/api/profile/documents?course_name=${encodeURIComponent(selectedCourse.name)}`, {
+        ? fetch(`${API}/api/profile/documents`, {
             headers: { Authorization: `Bearer ${token}` },
           })
         : Promise.resolve(null));
@@ -564,7 +586,7 @@ export default function MyDocumentsPage() {
       .then((data: { documents: DocItem[] }) => setDocuments(data.documents ?? []))
       .catch(() => setDocuments([]))
       .finally(() => setDocsLoading(false));
-  }, [selectedCourse]);
+  }, []);
 
   useEffect(() => {
     if (!authUser || !courseHydrated) return;
@@ -867,9 +889,11 @@ export default function MyDocumentsPage() {
             <div className="flex flex-col gap-1">
               <h1 className="text-2xl font-bold text-[#1C3329]">{he ? 'המסמכים שלי' : 'My Documents'}</h1>
               <p className="text-sm text-[#527061]">
-                {selectedCourse
-                  ? `${selectedCourse.icon} ${selectedCourse.name}`
-                  : (he ? 'לא נבחר קורס פעיל' : 'No active course selected')}
+                {docsLoading
+                  ? (he ? 'טוען...' : 'Loading…')
+                  : documents.length > 0
+                    ? (he ? `${documents.length} מסמכים בכל הקורסים` : `${documents.length} document${documents.length === 1 ? '' : 's'} across all courses`)
+                    : (he ? 'הספרייה שלך ריקה' : 'Your library is empty')}
               </p>
             </div>
 
@@ -901,16 +925,8 @@ export default function MyDocumentsPage() {
             )}
           </div>
 
-          {/* Content */}
-          {!selectedCourse ? (
-            <EmptyState
-              icon={Folder}
-              title={he ? 'אין קורס פעיל' : 'No active course'}
-              description={he
-                ? 'אנא בחר קורס פעיל מהתפריט כדי לצפות במסמכים שלו.'
-                : 'Please select an active course from the menu to view its documents.'}
-            />
-          ) : docsLoading ? (
+          {/* Content — shows ALL documents across all courses */}
+          {docsLoading ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {[0, 1, 2, 3, 4, 5].map(i => (
                 <Skeleton key={i} className="h-28 rounded-xl" />
@@ -919,10 +935,10 @@ export default function MyDocumentsPage() {
           ) : documents.length === 0 ? (
             <EmptyState
               icon={FolderPlus}
-              title={he ? 'אין עדיין מסמכים' : 'No documents yet'}
+              title={he ? 'הספרייה ריקה' : 'Library is empty'}
               description={he
-                ? 'עדיין לא הועלו מסמכים לקורס זה. עבור למרחב הלימוד כדי להעלות חומרים.'
-                : 'No documents have been uploaded for this course yet. Go to StudyLab to upload materials.'}
+                ? 'טרם הועלו מסמכים. עבור למרחב הלימוד כדי להעלות חומרי לימוד לאחד הקורסים שלך.'
+                : 'No documents uploaded yet. Go to StudyLab to upload materials for one of your courses.'}
               action={{
                 label: he ? 'מעבר למרחב הלימוד' : 'Go to StudyLab',
                 onClick: () => router.push('/workspace'),

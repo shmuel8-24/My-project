@@ -128,7 +128,7 @@ function fmtBytes(b: number) {
 }
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
-interface DocInfo { file_id: string; name: string; chunks: number; }
+interface DocInfo { file_id: string; name?: string; file_name?: string; filename?: string; chunks: number; }
 interface SessionInfo { id: number; title: string; updated_at: string; }
 interface UploadedFile { name: string; size: number; fileId: string; }
 
@@ -561,6 +561,14 @@ function Wizard({
   initialPageCount?: number;
 }) {
   const router = useRouter();
+
+  // Hard filter: never surface syllabus files in the document-selection list.
+  const visibleDocs = docs.filter(d => {
+    if (d == null) return false;
+    const fileName = (d.name || d.file_name || d.filename || '').toLowerCase();
+    return !fileName.includes('syllabus') && !fileName.includes('מפתחי קורס');
+  });
+
   const [step,               setStep]               = useState<1 | 2 | 3>(initialStep ?? 1);
   const [sourceType,         setSourceType]         = useState<SourceType | null>(initialSourceType ?? null);
   const [customInstructions, setCustomInstructions] = useState(initialCustomInstructions ?? '');
@@ -754,7 +762,7 @@ function Wizard({
               <SourceTile id="documents"
                 emoji="📄"
                 title={t.docsSec}
-                subtitle={he ? `${docs.length} מסמכים זמינים` : `${docs.length} document${docs.length !== 1 ? 's' : ''} available`} />
+                subtitle={he ? `${visibleDocs.length} מסמכים זמינים` : `${visibleDocs.length} document${visibleDocs.length !== 1 ? 's' : ''} available`} />
               <SourceTile id="sessions"
                 emoji="💬"
                 title={t.sessionsSec}
@@ -863,8 +871,8 @@ function Wizard({
 
             {sourceType === 'documents' && (
               <SelectList
-                items={docs} loading={docsLoading} empty={t.noDocs}
-                keyFn={d => d.file_id} label={d => d.name} subLabel={d => `${d.chunks} chunks`}
+                items={visibleDocs} loading={docsLoading} empty={t.noDocs}
+                keyFn={d => d.file_id} label={d => d.name ?? d.file_name ?? d.filename ?? ''} subLabel={d => `${d.chunks} chunks`}
                 selected={selectedDocId} onSelect={key => { onSelectDoc(key || null); onSelectSession(null); }}
               />
             )}
@@ -1918,7 +1926,7 @@ export default function AcademicWritingPage() {
     return () => window.removeEventListener('keydown', k);
   }, []);
 
-  /* Fetch sessions + documents */
+  /* Fetch sessions (not course-scoped) */
   useEffect(() => {
     if (!authUser) return;
     authFetch(`${API}/sessions`)
@@ -1926,8 +1934,14 @@ export default function AcademicWritingPage() {
       .then((data: SessionInfo[]) => { setSessions(Array.isArray(data) ? data.slice(0, 20) : []); })
       .catch(() => { setSessions([]); })
       .finally(() => setSessionsLoading(false));
+  }, [authUser]);
 
-    authFetch(`${API}/documents`)
+  /* Fetch documents scoped to the active course — re-runs on course switch */
+  useEffect(() => {
+    if (!authUser || !selectedCourse) return;
+    setDocsLoading(true);
+    const url = `${API}/documents?course_name=${encodeURIComponent(selectedCourse.name)}`;
+    authFetch(url)
       .then(r => r.ok ? r.json() : { documents: [] })
       .then((data: { documents: DocInfo[] }) => {
         const arr = Array.isArray(data.documents) ? data.documents : [];
@@ -1938,7 +1952,7 @@ export default function AcademicWritingPage() {
       })
       .catch(() => { setDocs([]); })
       .finally(() => setDocsLoading(false));
-  }, [authUser]);
+  }, [authUser, selectedCourse]);
 
   /* Fetch fresh profile data so attribution headers never show stale localStorage values */
   useEffect(() => {
@@ -1989,7 +2003,7 @@ export default function AcademicWritingPage() {
     setUploadedFiles(prev => {
       if (prev.length === 0) return prev;
       const validIds = new Set(docs.map(d => d.file_id));
-      const next = prev.filter(f => !f.fileId || validIds.has(f.fileId));
+      const next = prev.filter(f => f.fileId && validIds.has(f.fileId));
       return next.length === prev.length ? prev : next;
     });
   }, [docs, docsLoading]);

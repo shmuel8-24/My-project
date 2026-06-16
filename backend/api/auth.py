@@ -599,6 +599,7 @@ def get_profile_documents(user_id: int):
                     "file_size_bytes": r.file_size_bytes,
                     "course_name":     r.course_name,
                     "is_past_exam":    bool(r.is_past_exam),
+                    "is_syllabus":     bool(r.is_syllabus),
                     "chunks":          chunk_map.get(r.file_id, 0),
                 }
                 for r in records

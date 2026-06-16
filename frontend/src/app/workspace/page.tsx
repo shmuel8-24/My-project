@@ -87,10 +87,15 @@ interface CitationSource {
 }
 
 interface DocumentInfo {
-  name: string;
+  name?: string;       // primary key from backend
+  file_name?: string;  // alternate key (future-proofing)
+  filename?: string;   // alternate key (future-proofing)
   chunks: number;
   file_id: string;
   upload_date?: string;
+  course_name?: string | null;
+  is_past_exam?: boolean;
+  is_syllabus?: boolean;
 }
 
 interface Message {
@@ -818,7 +823,9 @@ function PdfUploader({ onUpload, onRemove, t, onEphemeralFiles }: {
         const data = await res.json();
         if (!res.ok) {
           Object.values(previewMap).forEach(URL.revokeObjectURL);
-          setErrors([...rejectionErrors, data.error ?? t.uploadErr]); return;
+          const perFileErrs = (data.errors ?? []).map((e: { source: string; error: string }) => `${e.source}: ${e.error}`);
+          const topErr = data.error ?? t.uploadErr;
+          setErrors([...rejectionErrors, ...(perFileErrs.length ? perFileErrs : [topErr])]); return;
         }
         if (data.status === 'already_exists') {
           // File was already indexed — nothing new to process, but the doc
@@ -1038,7 +1045,7 @@ function PdfUploader({ onUpload, onRemove, t, onEphemeralFiles }: {
       </div>
 
       {/* How to use panel */}
-      <div className="flex-1 rounded-2xl p-5" style={{ background: '#DCE8D6', border: '1px solid #BCCAB5', boxShadow: '0 4px 16px rgba(20,42,16,0.10)' }}>
+      <div className="flex-1 rounded-2xl p-5 mb-6" style={{ background: '#DCE8D6', border: '1px solid #BCCAB5', boxShadow: '0 4px 16px rgba(20,42,16,0.10)' }}>
         <p className="text-sm font-semibold text-[#517B3E] mb-3">{t.howToUse}</p>
         <ul className="space-y-2.5">
           {t.tips.map((tip, i) => (
@@ -1068,6 +1075,13 @@ function UploadedDocsList({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [docToDelete, setDocToDelete] = useState<DocumentInfo | null>(null);
 
+  // Safety net: prop already filtered upstream, but guard here too against partial objects.
+  const visibleDocs = docs.filter(d => {
+    if (d == null) return false;
+    const fileName = (d.name || d.file_name || d.filename || '').toLowerCase();
+    return !d.is_syllabus && !fileName.includes('syllabus') && !fileName.includes('מפתחי קורס');
+  });
+
   const handleDelete = async (fileId: string) => {
     setDeletingId(fileId);
     await onDelete(fileId);
@@ -1095,12 +1109,12 @@ function UploadedDocsList({
             <IconDoc className="w-5 h-5 text-[#517B3E]" />
           </span>
           <div>
-            <p className="font-semibold text-[#2A3B22] text-sm leading-tight">{t.docsAvailable(docs.length)}</p>
+            <p className="font-semibold text-[#2A3B22] text-sm leading-tight">{t.docsAvailable(visibleDocs.length)}</p>
             <p className="text-xs text-[#7a9268]">{t.pdfOnly}</p>
           </div>
         </div>
 
-        {docs.length === 0 ? (
+        {visibleDocs.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 py-10 text-center">
             <div className="w-14 h-14 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(81,123,62,0.06)', border: '1px dashed rgba(81,123,62,0.30)' }}>
               <IconDoc className="w-7 h-7 text-[#9DC08B]" />
@@ -1112,15 +1126,15 @@ function UploadedDocsList({
           </div>
         ) : (
           <div className="flex flex-col gap-2 max-h-80 overflow-y-auto">
-            {docs.map(doc => (
+            {visibleDocs.map(doc => (
               <div key={doc.file_id}
                 className="flex items-center gap-3 rounded-xl px-4 py-3"
                 style={{ background: '#E5EFE0', border: '1px solid #BCCAB5' }}>
                 <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'rgba(81,123,62,0.10)', border: '1px solid rgba(81,123,62,0.2)' }}>
-                  {getFileIcon(doc.name)}
+                  {getFileIcon(doc.name ?? doc.file_name ?? doc.filename ?? '')}
                 </span>
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium text-[#2d3b25] text-xs truncate">{doc.name}</p>
+                  <p className="font-medium text-[#2d3b25] text-xs truncate">{doc.name ?? doc.file_name ?? doc.filename}</p>
                   <p className="text-xs text-[#7a9268]">{t.chunksLabel(doc.chunks)}</p>
                 </div>
                 <button
@@ -1171,7 +1185,7 @@ function UploadedDocsList({
 
             <div className="px-5 py-5">
               <p className="text-sm text-[#4a5e3a] leading-relaxed">
-                {t.deleteDocBody(docToDelete.name)}
+                {t.deleteDocBody(docToDelete.name ?? docToDelete.file_name ?? docToDelete.filename ?? '')}
               </p>
             </div>
 
@@ -1516,27 +1530,25 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
             <span className="text-xs text-[#7a9268]">{hasDoc ? t.docReady : t.waitingPdf}</span>
           </div>
         </div>
-        {hasDoc && (
-          <button
-            onClick={() => { setQuizOpen(true); void fetchQuiz(); }}
-            disabled={quizLoading}
-            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all active:scale-95 hover:shadow-[0_6px_20px_rgba(209,230,217,0.5)]"
-            style={{
-              background: 'rgba(81,123,62,0.1)',
-              border:     '1.5px solid rgba(81,123,62,0.3)',
-              color:      '#517B3E',
-              cursor:     quizLoading ? 'wait' : 'pointer',
-              opacity:    quizLoading ? 0.65 : 1,
-            }}
-          >
-            {quizLoading
-              ? <span className="w-3 h-3 rounded-full border-2 animate-spin shrink-0 block"
-                  style={{ borderColor: 'rgba(81,123,62,0.25)', borderTopColor: '#517B3E' }} />
-              : <IconBrain className="w-3.5 h-3.5 shrink-0" />
-            }
-            <span>{quizLoading ? t.quizLoading : t.quizMe}</span>
-          </button>
-        )}
+        <button
+          onClick={() => { if (hasDoc) { setQuizOpen(true); void fetchQuiz(); } }}
+          disabled={!hasDoc || quizLoading}
+          className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all active:scale-95 hover:shadow-[0_6px_20px_rgba(209,230,217,0.5)]"
+          style={{
+            background: 'rgba(81,123,62,0.1)',
+            border:     '1.5px solid rgba(81,123,62,0.3)',
+            color:      '#517B3E',
+            cursor:     !hasDoc ? 'not-allowed' : quizLoading ? 'wait' : 'pointer',
+            opacity:    !hasDoc ? 0.45 : quizLoading ? 0.65 : 1,
+          }}
+        >
+          {quizLoading
+            ? <span className="w-3 h-3 rounded-full border-2 animate-spin shrink-0 block"
+                style={{ borderColor: 'rgba(81,123,62,0.25)', borderTopColor: '#517B3E' }} />
+            : <IconBrain className="w-3.5 h-3.5 shrink-0" />
+          }
+          <span>{quizLoading ? t.quizLoading : t.quizMe}</span>
+        </button>
       </div>
 
       {/* Document filter chips — only when multiple docs are uploaded */}
@@ -1559,11 +1571,11 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
               key={doc.file_id}
               onClick={() => setSelectedFileId(prev => prev === doc.file_id ? null : doc.file_id)}
               className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold transition-all max-w-[140px] truncate"
-              title={doc.name}
+              title={doc.name ?? doc.file_name ?? doc.filename}
               style={selectedFileId === doc.file_id
                 ? { background: '#517B3E', color: 'white' }
                 : { border: '1px solid rgba(157,192,139,0.45)', color: '#7a9268' }}>
-              {doc.name.replace(/\.[^/.]+$/, '')}
+              {(doc.name ?? doc.file_name ?? doc.filename ?? '').replace(/\.[^/.]+$/, '')}
             </button>
           ))}
         </div>
@@ -2292,7 +2304,6 @@ function Home() {
   const [userCountry]                           = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_country')         ?? '') : '');
   const [userGender, setUserGender]             = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_gender')          ?? '') : '');
 
-  const [hasDoc, setHasDoc]                     = useState(false);
   const [ephemeralFiles, setEphemeralFiles]     = useState<File[]>([]);
 
   const handleEphemeralFiles = useCallback((files: File[] | null) => {
@@ -2303,14 +2314,30 @@ function Home() {
   const [leftPanelTab, setLeftPanelTab] = useState<'upload' | 'docs'>('upload');
   const [docList, setDocList]           = useState<DocumentInfo[]>([]);
 
-  const fetchDocs = useCallback(async (): Promise<DocumentInfo[]> => {
+  // Derived: strip syllabus files before any render or count.
+  // Computed here (not inside UploadedDocsList) so the tab counter stays in sync.
+  const visibleDocList = docList.filter(d => {
+    if (d == null) return false;
+    const fileName = (d.name || d.file_name || d.filename || '').toLowerCase();
+    return !d.is_syllabus && !fileName.includes('syllabus') && !fileName.includes('מפתחי קורס');
+  });
+
+  // Derived from the same filtered list that renders "N מסמכים זמינים" — guarantees
+  // the chat enable/disable state exactly matches the visible document count.
+  const hasDoc = visibleDocList.length > 0;
+
+  const fetchDocs = useCallback(async (courseName?: string | null): Promise<DocumentInfo[]> => {
     try {
-      const res = await authFetch(`${API}/documents`);
+      const url = courseName
+        ? `${API}/documents?course_name=${encodeURIComponent(courseName)}`
+        : `${API}/documents`;
+      const res = await authFetch(url, { cache: 'no-store' });
       if (!res.ok) return [];
       const data = await res.json() as { documents: DocumentInfo[] };
-      const docs = data.documents ?? [];
+      // Defensively strip syllabi — they're managed via course settings, not the workspace panel.
+      // The server-side filter handles this too, but this ensures old server versions can't leak them.
+      const docs = (data.documents ?? []).filter(d => !d.is_syllabus);
       setDocList(docs);
-      setHasDoc(docs.length > 0);
       return docs;
     } catch { return []; }
   }, []);
@@ -2389,7 +2416,7 @@ function Home() {
       if (!res.ok) return;
       const data = await res.json();
       setSessions(data.sessions ?? []);
-    } catch { /* backend not running yet */ }
+    } catch (e) { console.warn('WORKSPACE: sessions fetch failed (backend may not be ready yet):', e); }
   }, []);
 
   // Auth check — waits for the global AuthProvider to finish reading localStorage,
@@ -2404,7 +2431,7 @@ function Home() {
     authFetch(`${API}/sessions`)
       .then(r => r.ok ? r.json() : { sessions: [] })
       .then((data: { sessions?: ChatSession[] }) => setSessions(data.sessions ?? []))
-      .catch(() => {})
+      .catch((e) => console.error('PAGE LOAD ERROR (sessions):', e))
       .finally(() => setIsAuthenticated(true));
   }, [authLoading, authUser, router]);
 
@@ -2415,19 +2442,37 @@ function Home() {
     if (!selectedCourse) router.replace('/course-picker');
   }, [authLoading, authUser, courseHydrated, selectedCourse, router]);
 
-  // Fetch existing docs on auth — auto-switch to docs tab if user already has uploads.
+  // Fetch docs scoped to the active course — re-runs when course changes so switching
+  // courses immediately shows only that course's documents.
   useEffect(() => {
-    if (!isAuthenticated) return;
-    authFetch(`${API}/documents`)
+    if (!isAuthenticated || !selectedCourse) return;
+    const url = `${API}/documents?course_name=${encodeURIComponent(selectedCourse.name)}`;
+    authFetch(url, { cache: 'no-store' })
       .then(r => r.ok ? r.json() : { documents: [] })
       .then((data: { documents: DocumentInfo[] }) => {
-        const docs = data.documents ?? [];
+        // Strip syllabi client-side — they live in course settings, not the workspace panel.
+        const docs = (data.documents ?? []).filter((d: DocumentInfo) => !d.is_syllabus);
         setDocList(docs);
-        setHasDoc(docs.length > 0);
-        if (docs.length > 0) setLeftPanelTab('docs');
+        // Auto-switch panel tab: show docs if any exist for this course, else show upload prompt.
+        setLeftPanelTab(docs.length > 0 ? 'docs' : 'upload');
       })
-      .catch(() => {});
-  }, [isAuthenticated]);
+      .catch((e) => console.error('PAGE LOAD ERROR (documents):', e));
+  }, [isAuthenticated, selectedCourse]);
+
+  // Re-sync document list whenever the user returns to this tab — picks up backend
+  // changes (deletes, purges) made while the page was open without requiring a full reload.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    function onVisible() {
+      if (document.visibilityState === 'visible') fetchDocs(selectedCourse?.name);
+    }
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [isAuthenticated, fetchDocs, selectedCourse]);
 
   // Fetch profile fields for the popover widget.
   useEffect(() => {
@@ -2461,7 +2506,7 @@ function Home() {
   }, []);
 
   const handleNewChat = useCallback(() => {
-    setHasDoc(false); setPdfKey(`pdf-${Date.now()}`);
+    setPdfKey(`pdf-${Date.now()}`);
     setCurrentSessionId(null); setInitialMessages([]);
     setChatKey(`new-${Date.now()}`);
   }, []);
@@ -2494,13 +2539,12 @@ function Home() {
 
   const handleUpload = useCallback(() => {
     if (!hasDoc) startNewChat();
-    setHasDoc(true);
-    fetchDocs();
+    fetchDocs(selectedCourse?.name);
     setLeftPanelTab('docs');
-  }, [hasDoc, startNewChat, fetchDocs]);
+  }, [hasDoc, startNewChat, fetchDocs, selectedCourse]);
 
   const handleRemove = useCallback(() => {
-    setHasDoc(false); startNewChat();
+    startNewChat();
   }, [startNewChat]);
 
   const handleDeleteDoc = useCallback(async (fileId: string) => {
@@ -2518,12 +2562,12 @@ function Home() {
         }
       }
     } catch { /* non-critical */ }
-    const newDocs = await fetchDocs();
+    const newDocs = await fetchDocs(selectedCourse?.name);
     if (newDocs.length === 0) {
       startNewChat();
       setLeftPanelTab('upload');
     }
-  }, [fetchDocs, startNewChat]);
+  }, [fetchDocs, startNewChat, selectedCourse]);
 
   const handleLogout = () => { setSelectedCourse(null); authLogout(); };
 
@@ -2752,9 +2796,9 @@ function Home() {
         <div className="flex-1 flex flex-col max-w-7xl mx-auto w-full px-4 py-6 md:px-8 md:py-8">
         <main className="flex-1 flex flex-col md:flex-row gap-5 md:gap-7 min-h-0 matcha-workspace-main" style={{ background: 'transparent' }}>
           <style dangerouslySetInnerHTML={{ __html: MATCHA_LEAF_CSS }} />
-          <div className="w-full md:w-[38%] flex flex-col relative" style={{ zIndex: 1 }}>
+          <div className="w-full md:w-[38%] flex flex-col relative min-h-0" style={{ zIndex: 1 }}>
             {/* ── Left panel tab switcher ──────────────────────────────── */}
-            <div className="flex rounded-xl overflow-hidden mb-1" style={{ border: '1px solid #BCCAB5', background: '#DCE8D6' }}>
+            <div className="flex rounded-xl overflow-hidden mb-1 shrink-0" style={{ border: '1px solid #BCCAB5', background: '#DCE8D6' }}>
               <button
                 onClick={() => setLeftPanelTab('upload')}
                 className="flex-1 py-2.5 text-xs font-semibold transition-all duration-200"
@@ -2769,16 +2813,18 @@ function Home() {
                 style={leftPanelTab === 'docs'
                   ? { background: '#517B3E', color: '#fff' }
                   : { color: '#517B3E', background: 'transparent' }}>
-                {t.tabDocs}{docList.length > 0 ? ` (${docList.length})` : ''}
+                {t.tabDocs}{visibleDocList.length > 0 ? ` (${visibleDocList.length})` : ''}
               </button>
             </div>
 
-            {leftPanelTab === 'upload' && (
-              <PdfUploader key={pdfKey} onUpload={handleUpload} onRemove={handleRemove} t={t} onEphemeralFiles={handleEphemeralFiles} />
-            )}
-            {leftPanelTab === 'docs' && (
-              <UploadedDocsList docs={docList} onDelete={handleDeleteDoc} t={t} lang={lang} />
-            )}
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              {leftPanelTab === 'upload' && (
+                <PdfUploader key={pdfKey} onUpload={handleUpload} onRemove={handleRemove} t={t} onEphemeralFiles={handleEphemeralFiles} />
+              )}
+              {leftPanelTab === 'docs' && (
+                <UploadedDocsList docs={visibleDocList} onDelete={handleDeleteDoc} t={t} lang={lang} />
+              )}
+            </div>
           </div>
           <div className="flex-1 flex flex-col gap-3 min-h-0" style={{ position: 'relative', zIndex: 1 }}>
 

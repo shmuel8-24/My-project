@@ -432,10 +432,11 @@ def _reindex_syllabus_for_course(user_id: int, course_name: str, full_text: str)
         if doc_rec:
             doc_rec.file_size_bytes = sz
             doc_rec.course_name     = course_name
+            doc_rec.is_syllabus     = True
         else:
             db.add(UserDocument(user_id=user_id, file_id=file_id,
                                 filename=fname, file_size_bytes=sz,
-                                course_name=course_name))
+                                course_name=course_name, is_syllabus=True))
 
         course.full_syllabus_text = full_text
         course.syllabus_file_id   = file_id

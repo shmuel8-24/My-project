@@ -26,6 +26,11 @@ FRONTEND_DIR = ROOT / "frontend"
 env = os.environ.copy()
 env["PATH"] = f"/usr/local/bin:{env.get('PATH', '')}"
 
+# Enable Flask development mode so Werkzeug's file-watcher reloads the server
+# automatically whenever backend source files change — no manual restart needed.
+env["FLASK_ENV"]   = "development"
+env["FLASK_DEBUG"] = "1"
+
 
 def is_port_in_use(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:

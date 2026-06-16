@@ -52,7 +52,7 @@ i18n convention — the landing page's copy volume (long blog excerpts, multi-pa
 made an inline approach unwieldy. Don't propagate this dictionary pattern to other pages; it exists
 because of this one page's unusual amount of static prose.
 
-## Auth-related routes not in the root monorepo tree
+## Routes not in the root monorepo tree
 
 These pages exist under `src/app/` but aren't listed in the root CLAUDE.md's monorepo layout:
 
@@ -67,9 +67,14 @@ These pages exist under `src/app/` but aren't listed in the root CLAUDE.md's mon
   with autocomplete dropdowns), guarded by `if (!getToken()) router.replace('/?login=true')`,
   submits via `POST /api/user/onboarding`, then `router.push('/workspace')`.
 
+**Error boundaries** (all three are `'use client'`; all render RTL Hebrew matcha-styled fallback UI):
+- `error.tsx` — route-segment boundary; catches errors thrown inside page/layout components. Renders inside the normal `<html>/<body>` shell (root layout stays intact). Has a "נסה שוב" (`reset()`) button and a "דף הבית" button.
+- `global-error.tsx` — root-layout boundary; owns its own `<html>/<body>`. Catches errors inside providers/fonts/global CSS. Same button set.
+- `not-found.tsx` — rendered by Next.js when `notFound()` is called or a route has no match.
+
 ## Sidebar/header icon convention — `lucide-react`, never emoji
 
-All "full-nav sidebar" copies (the 9 pages listed in the root CLAUDE.md plus `admin/AdminShell.tsx`)
+All "full-nav sidebar" copies (the 10 pages listed in the root CLAUDE.md plus `admin/AdminShell.tsx`)
 use `lucide-react` icons for nav items and profile-menu entries — emoji were fully removed from
 sidebar nav, admin sections, profile menus, and matching page-header "identity" icons. Fixed
 mapping — keep any new full-nav page consistent with this:
@@ -82,6 +87,7 @@ mapping — keep any new full-nav page consistent with this:
 | Create Presentation | `Presentation` | `PresentationIcon` (kept consistently in every "presentation"-named file) |
 | Professor's Brain | `Brain` | — |
 | Mastery | `Target` | — |
+| My Documents | `Folder` | — |
 | Settings | `Settings` | `IconSettings` |
 | Admin → Platform | `Monitor` | — |
 | Admin → Course Assignments | `GraduationCap` | — |

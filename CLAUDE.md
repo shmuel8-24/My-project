@@ -45,7 +45,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     ├── src/
     │   ├── components/
     │   │   ├── CoursePill.tsx          # Global course selector pill
-    │   │   ├── Sidebar.tsx             # SidebarDocumentsLink nav item (→ /workspace/documents)
+    │   │   ├── Sidebar.tsx             # SidebarDocumentsLink nav item (→ /my-documents)
     │   │   ├── AIThinkingIndicator.tsx # Streaming phase indicator (thinking/searching/running)
     │   │   ├── SelectionPopover.tsx    # Text-selection popover (explain / summarize / quiz)
     │   │   ├── CodeBlock.tsx           # Syntax-highlighted code block renderer
@@ -61,9 +61,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     │       ├── page.tsx                        # Landing page + auth modal
     │       ├── layout.tsx                      # Root layout: LanguageProvider → CourseProvider → AuthProvider
     │       ├── globals.css                     # Tailwind v4 entry + keyframes + matcha design tokens
+    │       ├── error.tsx                       # Route-segment error boundary (matcha-themed, RTL)
+    │       ├── global-error.tsx                # Root-layout error boundary (owns <html>/<body>)
+    │       ├── not-found.tsx                   # 404 fallback page
     │       ├── locales/landing.ts              # He/en copy for landing page only (exception to inline i18n)
     │       ├── dashboard/page.tsx              # Course Hub Home
     │       ├── profile/page.tsx                # Profile page (also owns Documents tab logic)
+    │       ├── my-documents/page.tsx           # Standalone document management (~966 lines): list, upload, download, delete — primary nav target for all full-nav sidebars
     │       ├── settings/page.tsx               # Settings — full-nav sidebar + centered Preferences/Language card
     │       ├── academic-writing/page.tsx       # AI co-writing (~2125 lines, WritingPanel inline)
     │       ├── presentation/page.tsx           # RAG slide deck from own documents → SlideLayouts
@@ -75,7 +79,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     │       │   └── edit/[id]/page.tsx          # Edit Course wizard
     │       ├── workspace/
     │       │   ├── page.tsx                    # Main RAG workspace (~3087 lines; all inline)
-    │       │   ├── documents/page.tsx          # Route alias → Profile page on Documents tab
+    │       │   ├── documents/page.tsx          # Legacy route alias → Profile page on Documents tab (navigation now uses /my-documents)
     │       │   ├── UserProfileModal.tsx
     │       │   ├── UpgradeModal.tsx
     │       │   └── professor-simulator/page.tsx
@@ -384,14 +388,19 @@ URL param `[id]` is the localStorage Course ID (string like `custom_${Date.now()
 **`workspace/page.tsx` structure:**
 Very large (~3087 lines). Inline components in order: `CodeExecutionBlock` → `QuizModal` → `LogoutConfirmModal` → `Sidebar` → `Home`. Every logout entry point must call `setShowLogoutModal(true)` — never `handleLogout()` directly. No shared `<Sidebar>` shell exists in this codebase — each page owns its own sidebar.
 
+`hasDoc` in the `Home` component is a **derived constant** (`const hasDoc = visibleDocList.length > 0`), not React state. It is computed from `visibleDocList` — the same filename-filtered array that drives the "N מסמכים זמינים" count display — so the chat enable/disable state always matches what the user sees. Do not re-introduce a `useState(false)` for `hasDoc`; it must stay derived from `visibleDocList` to avoid the mismatch where the backend returns a syllabus-named file (filtered out locally) and the chat incorrectly enables itself.
+
 **Full-nav sidebar pattern (`mastery/page.tsx`, `academic-writing/page.tsx`, `presentation/page.tsx`, `presentation-generator/page.tsx`, `settings/page.tsx`, `workspace/page.tsx`, `workspace/professor-simulator/page.tsx`):**
-Each page has its own copy-pasted hamburger-triggered sidebar (`MasterySidebar` / local `Sidebar` — unrelated to `components/Sidebar.tsx`, which is a different, smaller component): backdrop (`z-40`) + slide-in `<aside>` panel (`z-50`, `translateClass` for RTL/LTR direction), nav links (Home/StudyLab/Academic Writing/Create Presentation/Professor's Brain/Mastery/Settings/Collaboration "Soon" — every full-nav sidebar includes a "🎬 Create Presentation" → `/presentation-generator` item), an active-course indicator via `useCourse()`, an admin-only "Admin CT" section gated on `isAdmin` (decoded from the JWT via `decodeJwtPayload`), and a bottom Logout button wired to `LogoutConfirmModal`. The header also carries a profile-avatar popover (`AvatarContent`, name/email, Logout). `mastery/page.tsx`'s `MasterySidebar` is the canonical reference — copy it verbatim (including `AvatarContent`/`IconShield`/`LogoutConfirmModal`/`decodeJwtPayload` helpers) when adding this shell to a new page rather than re-deriving it. Newer headers (`settings`, `admin/*`, and the post-rewrite `academic-writing`/`mastery`/`presentation-generator`) drop the centered page-title badge entirely — just hamburger+logo on the start side and CoursePill+language-toggle+avatar-popover on the end side; `presentation/page.tsx` still has the older centered title badge and hasn't been migrated.
+Each page has its own copy-pasted hamburger-triggered sidebar (`MasterySidebar` / local `Sidebar` — unrelated to `components/Sidebar.tsx`, which is a different, smaller component): backdrop (`z-40`) + slide-in `<aside>` panel (`z-50`, `translateClass` for RTL/LTR direction), nav links (Home/StudyLab/Academic Writing/Create Presentation/Professor's Brain/Mastery/My Documents/Settings/Collaboration "Soon" — every full-nav sidebar includes a "🎬 Create Presentation" → `/presentation-generator` item and a `Folder`-icon "My Documents" → `/my-documents` item), an active-course indicator via `useCourse()`, an admin-only "Admin CT" section gated on `isAdmin` (decoded from the JWT via `decodeJwtPayload`), and a bottom Logout button wired to `LogoutConfirmModal`. The header also carries a profile-avatar popover (`AvatarContent`, name/email, Logout). `mastery/page.tsx`'s `MasterySidebar` is the canonical reference — copy it verbatim (including `AvatarContent`/`IconShield`/`LogoutConfirmModal`/`decodeJwtPayload` helpers) when adding this shell to a new page rather than re-deriving it. Newer headers (`settings`, `admin/*`, and the post-rewrite `academic-writing`/`mastery`/`presentation-generator`) drop the centered page-title badge entirely — just hamburger+logo on the start side and CoursePill+language-toggle+avatar-popover on the end side; `presentation/page.tsx` still has the older centered title badge and hasn't been migrated.
 
 **Admin pages (`admin/page.tsx`, `admin/users/page.tsx`):**
 These two pages share one `AdminShell.tsx` component (not copy-pasted, unlike the full-nav pattern above — with only two admin pages a shared component was preferred over duplicating ~300 lines twice) providing the sidebar/header/footer chrome. There is no `admin/layout.tsx`; both pages wrap their content directly in `<AdminShell>...</AdminShell>`. `AdminShell`'s sidebar extends the standard nav with an always-visible "Admin CT" section (🖥️ Platform → `/dashboard`, 🛡️ Overview → `/admin`, 👥 User Management → `/admin/users`, 📚 Course Assignments "Soon") — not gated on `isAdmin` since `AdminShell` is only ever rendered on confirmed-admin routes (each page's own auth-guard effect still calls `router.replace('/?login=true')` for non-admins before rendering `AdminShell`). Page content sits on `AdminShell`'s `#97AB92` background inside `max-w-7xl`/`max-w-6xl mx-auto` containers.
 
+**`/my-documents` page:**
+The primary document management page (`my-documents/page.tsx`, ~966 lines). Has its own full-nav sidebar (`MyDocumentsSidebar`), full document list per active course, upload zone, download, and delete. All full-nav sidebars across the app link here via a `Folder`-icon nav item. The dashboard `CrystalCard` "המסמכים שלי" also routes here.
+
 **`/workspace/documents` route:**
-Thin alias at `workspace/documents/page.tsx` — renders `<ProfilePageInner>` which opens directly on the Documents tab (detected via `pathname === '/workspace/documents'`). All document fetch/list/delete logic lives in `profile/page.tsx`.
+Legacy thin alias at `workspace/documents/page.tsx` — renders `<ProfilePageInner>` which opens directly on the Documents tab. Retained for backwards compatibility; new navigation goes to `/my-documents` instead.
 
 **Onboarding flow:**
 After registration, users land on `/onboarding`. Onboarding data saved via `POST /api/user/onboarding` and mirrored into localStorage.

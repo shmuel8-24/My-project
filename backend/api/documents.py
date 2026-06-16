@@ -1053,17 +1053,22 @@ def list_documents(user_id: int):
     # then enrich with chunk counts from FAISS.  This keeps /documents and
     # /api/profile/documents in sync and prevents orphan FAISS chunks from
     # appearing as ghost files.
+    #
+    # Optional ?course_name= scopes the list to a single course so the workspace
+    # and academic-writing pages only show files relevant to the active course.
+    # Omitting the parameter (or sending all=true) returns all user documents.
+    course_name_filter = (request.args.get("course_name") or "").strip() or None
+
     db = SessionLocal()
     try:
-        records = (
-            db.query(UserDocument)
-            .filter(
-                UserDocument.user_id == user_id,
-                UserDocument.is_session_only == False,  # noqa: E712
-            )
-            .order_by(UserDocument.uploaded_at.desc())
-            .all()
+        query = db.query(UserDocument).filter(
+            UserDocument.user_id == user_id,
+            UserDocument.is_session_only == False,  # noqa: E712
+            UserDocument.is_syllabus == False,       # noqa: E712 — syllabi managed via course settings, not workspace
         )
+        if course_name_filter:
+            query = query.filter(UserDocument.course_name == course_name_filter)
+        records = query.order_by(UserDocument.uploaded_at.desc()).all()
     finally:
         db.close()
 
@@ -1090,6 +1095,7 @@ def list_documents(user_id: int):
             "upload_date":  r.uploaded_at.isoformat() if r.uploaded_at else None,
             "course_name":  r.course_name,
             "is_past_exam": bool(r.is_past_exam),
+            "is_syllabus":  bool(r.is_syllabus),
         }
         for r in records
     ]

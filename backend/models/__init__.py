@@ -98,6 +98,7 @@ class UserDocument(_Base):
     course_name     = Column(String(255), nullable=True, index=True)
     is_past_exam    = Column(Boolean, nullable=False, server_default="0")
     is_session_only = Column(Boolean, nullable=False, server_default="0")
+    is_syllabus     = Column(Boolean, nullable=False, server_default="0")
     __table_args__ = (UniqueConstraint("user_id", "file_id", name="uq_user_document"),)
 
 
@@ -233,6 +234,13 @@ with _db_engine.connect() as _conn:
         ("ALTER TABLE user_documents ADD COLUMN course_name VARCHAR(255)", "added course_name to user_documents"),
         ("ALTER TABLE user_documents ADD COLUMN is_past_exam BOOLEAN NOT NULL DEFAULT 0", "added is_past_exam to user_documents"),
         ("ALTER TABLE user_documents ADD COLUMN is_session_only BOOLEAN NOT NULL DEFAULT 0", "added is_session_only to user_documents"),
+        ("ALTER TABLE user_documents ADD COLUMN is_syllabus BOOLEAN NOT NULL DEFAULT 0", "added is_syllabus to user_documents"),
+        # Backfill: any UserDocument whose file_id matches a CustomCourse syllabus is a syllabus.
+        (
+            "UPDATE user_documents SET is_syllabus = 1 WHERE file_id IN "
+            "(SELECT syllabus_file_id FROM custom_courses WHERE syllabus_file_id IS NOT NULL)",
+            "backfilled is_syllabus for existing syllabus documents",
+        ),
     ]:
         try:
             _conn.execute(sql_text(_stmt))

@@ -17,6 +17,13 @@ def get_user_images(user_id: int) -> dict:
     return _images_map.setdefault(user_id, {})
 
 
+# Chunks whose source starts with "syllabus_" are always course syllabi
+# (named by _reindex_syllabus_for_course as f"syllabus_{safe_name}.txt").
+# This pattern-based guard catches old chunks that pre-date the file_type
+# metadata field, so exclude_syllabus=True works even on untagged legacy data.
+_SYLLABUS_SOURCE_PREFIX = "syllabus_"
+
+
 def tokenize_hebrew(text: str) -> list[str]:
     text = re.sub(r"[֑-ׇ]", "", text)
     return [t for t in re.findall(r"\w+", text.lower(), re.UNICODE) if len(t) > 1]
@@ -72,6 +79,7 @@ def hybrid_search(
     file_id: str | None = None,        # backward-compat single-file filter
     file_ids: list[str] | None = None, # multi-file filter (preferred)
     course_name: str | None = None,    # restrict to chunks tagged with this course
+    exclude_syllabus: bool = True,     # never surface syllabus chunks as RAG context
 ) -> tuple[list[str], list[dict]]:
     col       = get_user_collection(user_id)
     bm25_st   = get_user_bm25(user_id)
@@ -89,6 +97,11 @@ def hybrid_search(
     query_vector = embeddings_model.embed_query(query_text)
 
     _uid_filter = {"user_id": {"$eq": user_id}}
+    # Syllabus chunks carry file_type="syllabus"; regular document chunks have no
+    # file_type field (meta.get returns None, which passes the $nin check correctly).
+    _syllabus_filter: dict | None = (
+        {"file_type": {"$nin": ["syllabus"]}} if exclude_syllabus else None
+    )
     try:
         _filters: list[dict] = [_uid_filter]
         if len(_file_ids) == 1:
@@ -97,6 +110,8 @@ def hybrid_search(
             _filters.append({"file_id": {"$in": _file_ids}})
         if course_name:
             _filters.append({"course_name": {"$eq": course_name}})
+        if _syllabus_filter:
+            _filters.append(_syllabus_filter)
         where_filter: dict = _filters[0] if len(_filters) == 1 else {"$and": _filters}
         sem_result = col.query(
             query_embeddings=[query_vector],
@@ -106,9 +121,14 @@ def hybrid_search(
         )
     except Exception:
         try:
+            _fallback_filters: list[dict] = [_uid_filter]
+            if course_name:
+                _fallback_filters.append({"course_name": {"$eq": course_name}})
+            if _syllabus_filter:
+                _fallback_filters.append(_syllabus_filter)
             _fallback_filter = (
-                {"$and": [_uid_filter, {"course_name": {"$eq": course_name}}]}
-                if course_name else _uid_filter
+                {"$and": _fallback_filters} if len(_fallback_filters) > 1
+                else _fallback_filters[0]
             )
             sem_result = col.query(
                 query_embeddings=[query_vector],
@@ -140,12 +160,16 @@ def hybrid_search(
                 ) and (
                     not course_name
                     or bm25_st["metadatas"][i].get("course_name") == course_name
+                ) and (
+                    not exclude_syllabus
+                    or bm25_st["metadatas"][i].get("file_type") != "syllabus"
                 )
             ]
 
     print(f"▶ HYBRID u{user_id}: {len(sem_ids)} semantic | {len(bm25_ids)} bm25"
           + (f" | file_ids={_file_ids}" if _file_ids else "")
-          + (f" | course_name={course_name!r}" if course_name else ""))
+          + (f" | course_name={course_name!r}" if course_name else "")
+          + (" | excl_syllabus" if exclude_syllabus else ""))
 
     if not bm25_ids:
         chunks, metas = sem_chunks[:n_results], sem_metas[:n_results]
@@ -169,6 +193,14 @@ def hybrid_search(
         if course_name and meta.get("course_name") != course_name:
             print(f"[Security] DROPPED chunk with course_name={meta.get('course_name')!r} "
                   f"(expected {course_name!r}) — course isolation enforced")
+            continue
+        # Safety net 1 — drop chunks tagged file_type="syllabus" (current scheme).
+        if exclude_syllabus and meta.get("file_type") == "syllabus":
+            continue
+        # Safety net 2 — drop untagged legacy syllabus chunks by source name prefix.
+        # Covers chunks indexed before the file_type metadata field was introduced.
+        if exclude_syllabus and meta.get("source", "").startswith(_SYLLABUS_SOURCE_PREFIX):
+            print(f"[RAG] DROPPED untagged syllabus chunk source={meta.get('source')!r}")
             continue
         safe_chunks.append(chunk)
         safe_metas.append(meta)
