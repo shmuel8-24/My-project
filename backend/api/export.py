@@ -88,6 +88,7 @@ def generate_paper(user_id: int):
     except (TypeError, ValueError):
         page_count = 1
     page_count = max(1, min(15, page_count))
+    required_sections = page_count * 3
     # Per-chunk word RANGE used in the pacing instruction below (and as a fallback
     # for target_word_count if the frontend omits targetWordCount).
     chunk_word_min = 380
@@ -324,7 +325,19 @@ def generate_paper(user_id: int):
         f"Each individual chunk should be tightly focused on ONE specific point: a "
         f"single argument, a single author's position, or a single concrete example — "
         f"not a broad survey. Depth comes from accumulating many focused chunks, not "
-        f"from writing a long chunk."
+        f"from writing a long chunk.\n\n"
+        f"STRUCTURAL EXPANSION MANDATE — MANDATORY FOR ALL CHUNKS:\n"
+        f"The user requested a {page_count}-page document. "
+        f"You are STRICTLY FORBIDDEN from writing a brief summary.\n"
+        f"To achieve this exact length, you MUST structure your response into exactly "
+        f"{required_sections} distinct, highly detailed sections across the full document.\n"
+        f"For EVERY single section, you MUST include:\n"
+        f"1. An in-depth theoretical explanation.\n"
+        f"2. A concrete, detailed academic or real-world example.\n"
+        f"3. A critical, deep analysis of the sub-topic.\n"
+        f"Do NOT use concluding phrases like 'in summary' or 'to conclude' until you have "
+        f"fully fleshed out all {required_sections} sections. You must expand aggressively "
+        f"on every single point and avoid rushing to the end."
         + (
             f"\n\n=== CHUNK ROUTING: PART {current_chunk_index + 1} OF {max_chunks} ===\n"
             + (
@@ -592,10 +605,8 @@ def generate_paper(user_id: int):
                     {"role": "system", "content": system_prompt},
                     {"role": "user",   "content": user_message},
                 ],
-                temperature=0.4,
-                # 1500 tokens gives the model room to generate 380-520-word body chunks
-                # (~500-700 tokens) or a 200-300-word conclusion without being cut off.
-                max_tokens=1500,
+                temperature=0.75,
+                max_tokens=4000,
                 stream=True,
             )
 

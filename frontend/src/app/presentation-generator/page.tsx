@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { useDropzone } from 'react-dropzone';
 import { Settings as IconSettings, Home, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, Monitor, LogOut, Folder, CheckSquare, Square, FileText, BookOpen as DocIcon } from 'lucide-react';
 import { useAuth }     from '../providers/auth';
@@ -366,6 +366,10 @@ export default function PresentationGeneratorPage() {
   const { user: authUser, isLoading: authLoading } = useAuth();
   const { lang, toggleLanguage } = useLanguage();
   const he = lang === 'he';
+  const router      = useRouter();
+  const searchParams = useSearchParams();
+  const _urlStep    = parseInt(searchParams.get('step') ?? '', 10);
+  const step: 1 | 2 | 3 = (_urlStep === 1 || _urlStep === 2 || _urlStep === 3) ? _urlStep : 1;
 
   // ── Shell state ────────────────────────────────────────────────────────────
   const [sidebarOpen,        setSidebarOpen]        = useState(false);
@@ -393,7 +397,6 @@ export default function PresentationGeneratorPage() {
     pending, addFiles, removeFile,
     selectedFileIds, setSelectedFileIds,
     slideCount, setSlideCount,
-    presentationStyle, setPresentationStyle,
     isGenerating: loading,
     error, slides, sources,
     generate, reset,
@@ -475,13 +478,32 @@ export default function PresentationGeneratorPage() {
 
   const hasContent = pending.length > 0 || selectedFileIds.length > 0;
 
-  // Style options
-  const STYLES = [
-    { id: 'academic', heLabel: 'אקדמי',  enLabel: 'Academic' },
-    { id: 'business', heLabel: 'עסקי',   enLabel: 'Business' },
-    { id: 'creative', heLabel: 'יצירתי', enLabel: 'Creative' },
-  ];
   const SLIDE_COUNTS = [5, 10, 15];
+
+  const WIZARD_STEPS = [
+    { n: 1, he: 'בחר מקור',  en: 'Source' },
+    { n: 2, he: 'הגדרות',    en: 'Settings' },
+    { n: 3, he: 'אישור',     en: 'Confirm' },
+  ] as const;
+
+  const step1Ready = pending.length > 0 || selectedFileIds.length > 0;
+  const step2Ready = true; // topic optional; slideCount always has a default
+
+  const handleNext = () => router.push(`?step=${step + 1}`);
+  const handleBack = () => step > 1 ? router.back() : router.push('/dashboard');
+
+  // tile style presets (match Academic Writing's tileBase / tileActive)
+  const tileBase = {
+    background: 'rgba(255,255,255,0.55)',
+    border: '1px solid rgba(255,255,255,0.45)',
+    boxShadow: '0 4px 16px rgba(81,123,62,0.09)',
+    transition: 'all 0.18s ease',
+  } as const;
+  const tileActive = {
+    background: 'linear-gradient(135deg,#517B3E,#2A3B22)',
+    border: '1.5px solid rgba(81,123,62,0.5)',
+    boxShadow: '0 10px 30px rgba(81,123,62,0.32)',
+  } as const;
 
   // ── Click-outside profile popover ─────────────────────────────────────────
   useEffect(() => {
@@ -666,109 +688,131 @@ export default function PresentationGeneratorPage() {
 
       {/* ── Main ── */}
       <main className="flex-1 overflow-y-auto relative" style={{ zIndex: 1 }}>
-        <div className="max-w-5xl mx-auto px-4 py-8 flex flex-col gap-6">
+        <div className={`${step === 3 ? 'max-w-lg' : 'max-w-3xl'} mx-auto px-4 py-8 flex flex-col gap-5`}>
 
           {!slides && (
             <>
-              {/* Intro */}
-              <div className="flex flex-col items-center text-center gap-2 py-2">
-                <PresentationIcon className="w-10 h-10" style={{ color: '#517B3E' }} />
-                <h2 className="text-xl font-bold" style={{ color: '#1C3329' }}>
-                  {he ? 'יצירת מצגות AI' : 'AI Presentation Builder'}
-                </h2>
-                <p className="text-sm max-w-lg" style={{ color: '#527061' }}>
-                  {he
-                    ? 'בחר מסמכים קיימים או העלה קבצים חדשים — הבינה המלאכותית תבנה מצגת מקצועית'
-                    : 'Select existing documents or upload new files — AI builds a professional deck for you'}
-                </p>
+              {/* ── Stepper ── */}
+              <div className="flex items-center justify-center">
+                {WIZARD_STEPS.map((s, i) => {
+                  const done    = step > s.n;
+                  const current = step === s.n;
+                  return (
+                    <div key={s.n} className="flex items-center">
+                      <div className="flex flex-col items-center gap-1">
+                        <div
+                          className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all"
+                          style={{
+                            background: done ? '#517B3E' : current ? '#fff' : 'rgba(255,255,255,0.25)',
+                            color:      done ? '#fff'    : current ? '#517B3E' : 'rgba(28,51,41,0.5)',
+                            border:     current ? '2px solid #517B3E' : done ? 'none' : '2px solid rgba(28,51,41,0.2)',
+                            boxShadow:  current ? '0 0 0 4px rgba(81,123,62,0.18)' : 'none',
+                          }}
+                        >
+                          {done ? (
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                            </svg>
+                          ) : s.n}
+                        </div>
+                        <span className="text-[11px] font-semibold whitespace-nowrap" style={{ color: current ? '#1C3329' : 'rgba(28,51,41,0.55)' }}>
+                          {he ? s.he : s.en}
+                        </span>
+                      </div>
+                      {i < WIZARD_STEPS.length - 1 && (
+                        <div className="h-px w-16 mx-2 mb-4" style={{ background: step > s.n ? '#9DC08B' : 'rgba(157,192,139,0.3)' }} />
+                      )}
+                    </div>
+                  );
+                })}
               </div>
 
-              {/* ── Card 1: Source Documents ── */}
-              <div
-                className="rounded-2xl overflow-hidden"
-                style={{
-                  background: 'rgba(255,255,255,0.88)',
-                  backdropFilter: 'blur(16px)',
-                  border: '1px solid rgba(157,192,139,0.35)',
-                  boxShadow: '0 4px 24px rgba(60,90,40,0.07)',
-                }}
-              >
-                {/* Card header */}
-                <div className="px-5 pt-4 pb-3" style={{ borderBottom: '1px solid rgba(157,192,139,0.25)' }}>
-                  <p className="text-xs font-bold uppercase tracking-widest" style={{ color: '#527061' }}>
-                    {he ? 'מקורות מידע' : 'Source Documents'}
-                  </p>
-                </div>
+              {/* ── Step 1: Source ── */}
+              {step === 1 && (
+                <>
+                  <div>
+                    <h2 className="text-xl font-bold" style={{ color: '#1C3329' }}>
+                      {he ? 'בחר מקור תוכן' : 'Select Content Source'}
+                    </h2>
+                    <p className="text-sm mt-1" style={{ color: 'rgba(28,51,41,0.7)' }}>
+                      {he ? 'ממה הבינה המלאכותית תבנה את המצגת?' : 'What material will the AI use to build your deck?'}
+                    </p>
+                  </div>
 
-                {/* Tabs */}
-                <div className="flex" style={{ borderBottom: '1px solid rgba(157,192,139,0.25)' }}>
-                  {(['upload', 'existing'] as SourceTab[]).map(tab => {
-                    const isActive = sourceTab === tab;
-                    const label = tab === 'upload'
-                      ? (he ? '⬆ העלאת קובץ חדש' : '⬆ Upload New')
-                      : (he ? '📁 מסמכים קיימים' : '📁 Existing Docs');
-                    return (
-                      <button
-                        key={tab}
-                        onClick={() => handleTabSwitch(tab)}
-                        disabled={loading}
-                        className="flex-1 py-3 text-sm font-semibold transition-all"
-                        style={{
-                          color:           isActive ? '#517B3E' : '#7a9268',
-                          borderBottom:    isActive ? '2px solid #517B3E' : '2px solid transparent',
-                          background:      isActive ? 'rgba(81,123,62,0.04)' : 'transparent',
-                        }}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
+                  {/* Source type tiles */}
+                  <div className="grid grid-cols-2 gap-6">
+                    {([
+                      { id: 'upload'   as SourceTab, emoji: '📤', heTitle: 'העלאת קובץ חדש', enTitle: 'Upload New Files',      heSub: 'PDF · PPTX · DOCX · תמונות · אודיו · וידאו',                                    enSub: 'PDF · PPTX · DOCX · Images · Audio · Video' },
+                      { id: 'existing' as SourceTab, emoji: '📄', heTitle: 'מסמכים קיימים',  enTitle: 'Existing Documents',     heSub: `${existingDocs.length} מסמכים זמינים`,                                            enSub: `${existingDocs.length} document${existingDocs.length !== 1 ? 's' : ''} available` },
+                    ]).map(tile => {
+                      const active = sourceTab === tile.id;
+                      return (
+                        <button
+                          key={tile.id}
+                          onClick={() => handleTabSwitch(tile.id)}
+                          disabled={loading}
+                          className="flex flex-col items-center justify-center gap-4 px-6 rounded-2xl text-center transition-all active:scale-[0.97] disabled:opacity-50"
+                          style={{ minHeight: 160, ...(active ? tileActive : tileBase) }}
+                        >
+                          <span className="text-5xl leading-none">{tile.emoji}</span>
+                          <div>
+                            <p className="text-base font-bold" style={{ color: active ? '#fff' : '#2C4A3B' }}>
+                              {he ? tile.heTitle : tile.enTitle}
+                            </p>
+                            <p className="text-xs mt-0.5" style={{ color: active ? 'rgba(255,255,255,0.75)' : '#7a9268' }}>
+                              {he ? tile.heSub : tile.enSub}
+                            </p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
 
-                <div className="p-5">
-                  {/* Upload tab */}
+                  {/* Sub-content: Upload */}
                   {sourceTab === 'upload' && (
                     <>
                       <div
                         {...getRootProps()}
-                        className="rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-2 py-10 cursor-pointer transition-all text-center"
+                        className="flex flex-col items-center justify-center gap-3 cursor-pointer transition-all text-center rounded-2xl"
                         style={{
-                          borderColor:     isDragActive ? '#517B3E' : 'rgba(157,192,139,0.5)',
-                          backgroundColor: isDragActive ? 'rgba(81,123,62,0.07)' : 'rgba(255,255,255,0.4)',
-                          opacity:         loading ? 0.6 : 1,
+                          background: isDragActive ? 'rgba(81,123,62,0.06)' : '#ffffff',
+                          border: `2px dashed ${isDragActive ? '#517B3E' : '#6ee7b7'}`,
+                          padding: '3rem',
+                          opacity: loading ? 0.6 : 1,
                         }}
                       >
                         <input {...getInputProps()} />
                         {isDragActive ? (
-                          <p className="text-sm font-bold" style={{ color: '#517B3E' }}>{he ? 'שחרר כאן!' : 'Drop here!'}</p>
+                          <p className="text-base font-bold" style={{ color: '#517B3E' }}>{he ? 'שחרר כאן!' : 'Drop here!'}</p>
                         ) : (
                           <>
-                            <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="#9DC08B" strokeWidth={1.5}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
-                            </svg>
-                            <p className="text-sm font-medium" style={{ color: '#4a5e3a' }}>
-                              {he ? 'גרור קבצים לכאן או לחץ לבחירה' : 'Drag files here or click to browse'}
-                            </p>
-                            <p className="text-xs" style={{ color: '#9aaf8a' }}>
-                              {he ? 'PDF · PPTX · DOCX · תמונות · אודיו · וידאו' : 'PDF · PPTX · DOCX · Images · Audio · Video'}
-                            </p>
+                            <div className="w-14 h-14 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(81,123,62,0.07)' }}>
+                              <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="#517B3E" strokeWidth={1.5}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+                              </svg>
+                            </div>
+                            <div>
+                              <p className="text-sm font-semibold" style={{ color: '#2A3B22' }}>
+                                {he ? 'גרור קבצים לכאן או לחץ לבחירה' : 'Drag files here or click to browse'}
+                              </p>
+                              <p className="text-xs mt-1" style={{ color: '#7a9268' }}>
+                                {he ? 'PDF · PPTX · DOCX · תמונות · אודיו · וידאו' : 'PDF · PPTX · DOCX · Images · Audio · Video'}
+                              </p>
+                            </div>
                           </>
                         )}
                       </div>
-
                       {pending.length > 0 && (
-                        <div className="mt-4 flex flex-col gap-2">
+                        <div className="flex flex-col gap-2">
                           {pending.map(p => (
-                            <div key={p.id}
-                              className="flex items-center gap-2.5 px-3 py-2 rounded-lg"
-                              style={{ background: 'rgba(255,255,255,0.6)', border: '1px solid rgba(157,192,139,0.3)' }}>
+                            <div key={p.id} className="flex items-center gap-2.5 px-3 py-2 rounded-xl"
+                              style={{ background: 'rgba(255,255,255,0.85)', border: '1px solid rgba(157,192,139,0.35)' }}>
                               <FileTypeIcon name={p.file.name} />
                               <div className="flex-1 min-w-0">
                                 <p className="text-sm font-medium truncate" style={{ color: '#2A3B22' }}>{p.file.name}</p>
                                 <p className="text-[10px]" style={{ color: '#7a9268' }}>{formatBytes(p.file.size)}</p>
                               </div>
                               <button onClick={() => removeFile(p.id)} disabled={loading}
-                                aria-label={he ? 'הסר קובץ' : 'Remove file'}
                                 className="w-6 h-6 rounded-full flex items-center justify-center hover:bg-red-100/60 transition-colors shrink-0 disabled:opacity-40">
                                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="#7a9268" strokeWidth={2}>
                                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
@@ -776,7 +820,7 @@ export default function PresentationGeneratorPage() {
                               </button>
                             </div>
                           ))}
-                          <p className="text-[11px] text-end" style={{ color: '#7a9268' }}>
+                          <p className="text-[11px] text-end" style={{ color: 'rgba(28,51,41,0.6)' }}>
                             {pending.length} {he ? 'קבצים' : 'files'} · {formatBytes(totalSize)}
                           </p>
                         </div>
@@ -784,9 +828,9 @@ export default function PresentationGeneratorPage() {
                     </>
                   )}
 
-                  {/* Existing docs tab */}
+                  {/* Sub-content: Existing docs */}
                   {sourceTab === 'existing' && (
-                    <>
+                    <div className="rounded-2xl p-5" style={{ background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(12px)', border: '1px solid rgba(157,192,139,0.25)' }}>
                       {docsLoading ? (
                         <div className="py-10 flex justify-center"><Spinner large /></div>
                       ) : existingDocs.length === 0 ? (
@@ -798,7 +842,6 @@ export default function PresentationGeneratorPage() {
                         </div>
                       ) : (
                         <>
-                          {/* Select all / clear */}
                           <div className="flex items-center justify-between mb-3">
                             <p className="text-xs" style={{ color: '#527061' }}>
                               {selectedFileIds.length > 0
@@ -806,176 +849,197 @@ export default function PresentationGeneratorPage() {
                                 : (he ? 'בחר מסמכים' : 'Select documents')}
                             </p>
                             <div className="flex gap-2">
-                              <button onClick={selectAll} disabled={loading}
-                                className="text-xs px-2.5 py-1 rounded-lg transition-colors font-medium"
-                                style={{ background: 'rgba(81,123,62,0.1)', color: '#517B3E' }}>
+                              <button onClick={selectAll} disabled={loading} className="text-xs px-2.5 py-1 rounded-lg font-medium" style={{ background: 'rgba(81,123,62,0.1)', color: '#517B3E' }}>
                                 {he ? 'בחר הכל' : 'Select all'}
                               </button>
                               {selectedFileIds.length > 0 && (
-                                <button onClick={clearAll} disabled={loading}
-                                  className="text-xs px-2.5 py-1 rounded-lg transition-colors font-medium"
-                                  style={{ background: 'rgba(220,38,38,0.08)', color: '#b91c1c' }}>
+                                <button onClick={clearAll} disabled={loading} className="text-xs px-2.5 py-1 rounded-lg font-medium" style={{ background: 'rgba(220,38,38,0.08)', color: '#b91c1c' }}>
                                   {he ? 'נקה' : 'Clear'}
                                 </button>
                               )}
                             </div>
                           </div>
-
                           <div className="flex flex-col gap-2 max-h-64 overflow-y-auto">
                             {existingDocs.map(doc => {
                               const selected = selectedFileIds.includes(doc.file_id);
                               const displayName = doc.name ?? '';
                               return (
-                                <button
-                                  key={doc.file_id}
-                                  onClick={() => toggleDocSelection(doc.file_id)}
-                                  disabled={loading}
+                                <button key={doc.file_id} onClick={() => toggleDocSelection(doc.file_id)} disabled={loading}
                                   className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-start transition-all"
-                                  style={{
-                                    background: selected ? 'rgba(81,123,62,0.1)' : 'rgba(255,255,255,0.5)',
-                                    border: `1px solid ${selected ? 'rgba(81,123,62,0.4)' : 'rgba(157,192,139,0.3)'}`,
-                                  }}
-                                >
-                                  {selected
-                                    ? <CheckSquare className="w-4 h-4 shrink-0" style={{ color: '#517B3E' }} />
-                                    : <Square className="w-4 h-4 shrink-0" style={{ color: '#9DC08B' }} />
-                                  }
+                                  style={{ background: selected ? 'rgba(81,123,62,0.1)' : 'rgba(255,255,255,0.5)', border: `1px solid ${selected ? 'rgba(81,123,62,0.4)' : 'rgba(157,192,139,0.3)'}` }}>
+                                  {selected ? <CheckSquare className="w-4 h-4 shrink-0" style={{ color: '#517B3E' }} /> : <Square className="w-4 h-4 shrink-0" style={{ color: '#9DC08B' }} />}
                                   <FileTypeIcon name={displayName} />
-                                  <span className="text-sm font-medium truncate flex-1" style={{ color: '#2A3B22' }}>
-                                    {displayName || '—'}
-                                  </span>
-                                  {doc.chunk_count !== undefined && (
-                                    <span className="text-[10px] shrink-0" style={{ color: '#7a9268' }}>
-                                      {doc.chunk_count} {he ? 'קטעים' : 'chunks'}
-                                    </span>
-                                  )}
+                                  <span className="text-sm font-medium truncate flex-1" style={{ color: '#2A3B22' }}>{displayName || '—'}</span>
+                                  {doc.chunk_count !== undefined && <span className="text-[10px] shrink-0" style={{ color: '#7a9268' }}>{doc.chunk_count} {he ? 'קטעים' : 'chunks'}</span>}
                                 </button>
                               );
                             })}
                           </div>
                         </>
                       )}
-                    </>
+                    </div>
                   )}
-                </div>
-              </div>
+                </>
+              )}
 
-              {/* ── Card 2: Presentation Settings ── */}
-              <div
-                className="rounded-2xl overflow-hidden"
-                style={{
-                  background: 'rgba(255,255,255,0.88)',
-                  backdropFilter: 'blur(16px)',
-                  border: '1px solid rgba(157,192,139,0.35)',
-                  boxShadow: '0 4px 24px rgba(60,90,40,0.07)',
-                }}
-              >
-                <div className="px-5 pt-4 pb-3" style={{ borderBottom: '1px solid rgba(157,192,139,0.25)' }}>
-                  <p className="text-xs font-bold uppercase tracking-widest" style={{ color: '#527061' }}>
-                    {he ? 'הגדרות מצגת' : 'Presentation Settings'}
-                  </p>
-                </div>
-
-                <div className="p-5 flex flex-col gap-5">
-                  {/* Topic */}
+              {/* ── Step 2: Settings ── */}
+              {step === 2 && (
+                <>
                   <div>
-                    <label className="block text-xs font-bold mb-2" style={{ color: '#2A3B22' }}>
-                      {he ? 'נושא המצגת (אופציונלי)' : 'Presentation topic (optional)'}
-                    </label>
-                    <input
-                      type="text"
-                      value={topic}
-                      onChange={e => setTopic(e.target.value)}
-                      disabled={loading}
-                      placeholder=""
-                      className="w-full px-4 py-3 rounded-xl text-sm outline-none transition-all disabled:opacity-60"
-                      style={{ border: '1px solid rgba(157,192,139,0.4)', background: 'rgba(255,255,255,0.80)', color: '#2A3B22' }}
-                      onFocus={e => { e.currentTarget.style.borderColor = '#517B3E'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(81,123,62,0.12)'; }}
-                      onBlur={e => { e.currentTarget.style.borderColor = 'rgba(157,192,139,0.4)'; e.currentTarget.style.boxShadow = 'none'; }}
-                    />
+                    <h2 className="text-xl font-bold" style={{ color: '#1C3329' }}>
+                      {he ? 'הגדרות מצגת' : 'Presentation Settings'}
+                    </h2>
+                    <p className="text-sm mt-1" style={{ color: 'rgba(28,51,41,0.7)' }}>
+                      {he ? 'התאם את המצגת לצרכים שלך' : 'Customize your presentation'}
+                    </p>
                   </div>
 
-                  {/* Style */}
-                  <div>
-                    <label className="block text-xs font-bold mb-2" style={{ color: '#2A3B22' }}>
-                      {he ? 'סגנון עיצוב וטון' : 'Style & Tone'}
-                    </label>
-                    <div className="flex gap-2">
-                      {STYLES.map(s => {
-                        const active = presentationStyle === s.id;
-                        return (
-                          <button
-                            key={s.id}
-                            onClick={() => setPresentationStyle(s.id)}
-                            disabled={loading}
-                            className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all"
-                            style={{
-                              background: active ? '#517B3E' : 'rgba(255,255,255,0.6)',
-                              color:      active ? '#fff' : '#527061',
-                              border:     `1px solid ${active ? '#517B3E' : 'rgba(157,192,139,0.4)'}`,
-                              boxShadow:  active ? '0 2px 8px rgba(81,123,62,0.25)' : 'none',
-                            }}
-                          >
-                            {he ? s.heLabel : s.enLabel}
-                          </button>
-                        );
-                      })}
+                  {/* Topic */}
+                  <div className="flex flex-col gap-2">
+                    <p className="text-[11px] font-bold uppercase tracking-widest px-1" style={{ color: 'rgba(28,51,41,0.6)' }}>
+                      {he ? 'נושא המצגת' : 'Presentation Topic'}
+                    </p>
+                    <div className="rounded-2xl p-5" style={{ background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(12px)', border: '1px solid rgba(157,192,139,0.2)', boxShadow: '0 2px 12px rgba(60,90,40,0.05)' }}>
+                      <input
+                        type="text"
+                        value={topic}
+                        onChange={e => setTopic(e.target.value)}
+                        disabled={loading}
+                        placeholder={he ? 'לדוגמה: מנגנוני הסקה בלמידת מכונה...' : 'e.g. Machine learning inference mechanisms...'}
+                        className="w-full px-4 py-3 rounded-xl text-sm outline-none transition-all disabled:opacity-60"
+                        style={{ border: '1px solid rgba(157,192,139,0.4)', background: 'rgba(255,255,255,0.8)', color: '#2A3B22' }}
+                        onFocus={e => { e.currentTarget.style.borderColor = '#517B3E'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(81,123,62,0.12)'; }}
+                        onBlur={e => { e.currentTarget.style.borderColor = 'rgba(157,192,139,0.4)'; e.currentTarget.style.boxShadow = 'none'; }}
+                      />
+                      <p className="text-xs mt-2" style={{ color: '#7a9268' }}>
+                        {he ? 'אם לא תגדיר נושא, ה-AI יסיק אותו מהמסמכים' : 'Leave empty to let the AI infer the topic from your documents'}
+                      </p>
                     </div>
                   </div>
 
-                  {/* Slide count */}
-                  <div>
-                    <label className="block text-xs font-bold mb-2" style={{ color: '#2A3B22' }}>
+                  {/* Length */}
+                  <div className="flex flex-col gap-2">
+                    <p className="text-[11px] font-bold uppercase tracking-widest px-1" style={{ color: 'rgba(28,51,41,0.6)' }}>
                       {he ? 'אורך המצגת' : 'Presentation Length'}
-                    </label>
-                    <div className="flex gap-2">
+                    </p>
+                    <div className="grid grid-cols-3 gap-4">
                       {SLIDE_COUNTS.map(n => {
                         const active = slideCount === n;
                         return (
-                          <button
-                            key={n}
-                            onClick={() => setSlideCount(n)}
-                            disabled={loading}
-                            className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all"
-                            style={{
-                              background: active ? '#517B3E' : 'rgba(255,255,255,0.6)',
-                              color:      active ? '#fff' : '#527061',
-                              border:     `1px solid ${active ? '#517B3E' : 'rgba(157,192,139,0.4)'}`,
-                              boxShadow:  active ? '0 2px 8px rgba(81,123,62,0.25)' : 'none',
-                            }}
-                          >
-                            {n} {he ? 'שקופיות' : 'slides'}
+                          <button key={n} onClick={() => setSlideCount(n)} disabled={loading}
+                            className="flex flex-col items-center justify-center gap-3 rounded-2xl text-center transition-all active:scale-[0.97] disabled:opacity-50"
+                            style={{ minHeight: 120, ...(active ? tileActive : tileBase) }}>
+                            <span className="text-3xl font-black" style={{ color: active ? '#fff' : '#2C4A3B' }}>{n}</span>
+                            <span className="text-xs font-semibold" style={{ color: active ? 'rgba(255,255,255,0.85)' : '#7a9268' }}>
+                              {he ? 'שקופיות' : 'slides'}
+                            </span>
                           </button>
                         );
                       })}
                     </div>
                   </div>
-                </div>
-              </div>
-
-              {/* ── Generate button ── */}
-              <button
-                onClick={generate}
-                disabled={!hasContent || loading}
-                className="w-full px-6 py-4 rounded-2xl text-base font-bold text-white transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
-                style={{
-                  background: hasContent ? 'linear-gradient(135deg, #517B3E 0%, #2A3B22 100%)' : '#9DC08B',
-                  boxShadow:  hasContent ? '0 4px 16px rgba(81,123,62,0.35)' : 'none',
-                }}
-              >
-                {loading ? <Spinner /> : <PresentationIcon className="w-5 h-5" />}
-                {loading
-                  ? (he ? 'הבינה המלאכותית בונה את המצגת...' : 'AI is building your deck...')
-                  : (he ? 'צור מצגת' : 'Create Presentation')}
-              </button>
-
-              {loading && (
-                <p className="text-xs text-center" style={{ color: '#527061' }}>
-                  {he
-                    ? 'מחלץ טקסט, מנתח תמונות, מתמלל מדיה ובונה מצגת — זה עשוי לקחת עד דקה'
-                    : 'Extracting text, analyzing images, transcribing media and building your deck — this may take up to a minute'}
-                </p>
+                </>
               )}
+
+              {/* ── Step 3: Confirm ── */}
+              {step === 3 && (
+                <>
+                  <div>
+                    <h2 className="text-xl font-bold" style={{ color: '#1C3329' }}>
+                      {he ? 'אישור והתחלה' : 'Confirm & Generate'}
+                    </h2>
+                    <p className="text-sm mt-1" style={{ color: 'rgba(28,51,41,0.7)' }}>
+                      {he ? 'כל ההגדרות מוכנות — לחץ ליצירת המצגת' : 'Everything is set — click to generate your presentation'}
+                    </p>
+                  </div>
+
+                  {/* Summary cards */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.92)', border: '1px solid rgba(157,192,139,0.2)', boxShadow: '0 2px 12px rgba(60,90,40,0.05)' }}>
+                      <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: '#7a9268' }}>{he ? 'מקור' : 'Source'}</p>
+                      <p className="text-sm font-semibold" style={{ color: '#2A3B22' }}>
+                        {sourceTab === 'upload'
+                          ? (pending.length > 0 ? `${pending.length} ${he ? 'קבצים' : 'files'}` : (he ? 'לא הועלו קבצים' : 'No files uploaded'))
+                          : (selectedFileIds.length > 0 ? `${selectedFileIds.length} ${he ? 'מסמכים' : 'documents'}` : (he ? 'לא נבחרו מסמכים' : 'No documents selected'))}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.92)', border: '1px solid rgba(157,192,139,0.2)', boxShadow: '0 2px 12px rgba(60,90,40,0.05)' }}>
+                      <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: '#7a9268' }}>{he ? 'נושא' : 'Topic'}</p>
+                      <p className="text-sm font-semibold truncate" style={{ color: '#2A3B22' }}>
+                        {topic.trim() || (he ? 'יוסיק מהמסמכים' : 'Inferred from documents')}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.92)', border: '1px solid rgba(157,192,139,0.2)', boxShadow: '0 2px 12px rgba(60,90,40,0.05)' }}>
+                      <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: '#7a9268' }}>{he ? 'אורך' : 'Length'}</p>
+                      <p className="text-sm font-semibold" style={{ color: '#2A3B22' }}>{slideCount} {he ? 'שקופיות' : 'slides'}</p>
+                    </div>
+
+                    <div className="rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.92)', border: '1px solid rgba(157,192,139,0.2)', boxShadow: '0 2px 12px rgba(60,90,40,0.05)' }}>
+                      <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: '#7a9268' }}>{he ? 'סגנון' : 'Style'}</p>
+                      <p className="text-sm font-semibold" style={{ color: '#2A3B22' }}>{he ? 'אקדמי' : 'Academic'}</p>
+                    </div>
+                  </div>
+
+                  {loading && (
+                    <p className="text-xs text-center" style={{ color: 'rgba(28,51,41,0.6)' }}>
+                      {he
+                        ? 'מחלץ טקסט, מנתח תמונות, מתמלל מדיה ובונה מצגת — זה עשוי לקחת עד דקה'
+                        : 'Extracting text, analyzing images, transcribing media and building your deck — this may take up to a minute'}
+                    </p>
+                  )}
+                </>
+              )}
+
+              {/* ── Navigation row — dir="ltr" keeps Back on left / Next on right
+                    regardless of RTL page direction, matching browser convention ── */}
+              <div dir="ltr" className="flex items-center justify-between w-full mt-2">
+                <button
+                  onClick={handleBack}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all"
+                  style={{ color: 'rgba(28,51,41,0.65)', background: 'rgba(255,255,255,0.2)' }}
+                  onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.35)'}
+                  onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.2)'}
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d='M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18' />
+                  </svg>
+                  {step === 1 ? (he ? 'ביטול' : 'Cancel') : (he ? 'הקודם' : 'Back')}
+                </button>
+
+                {step < 3 ? (
+                  <button
+                    onClick={handleNext}
+                    disabled={step === 1 ? !step1Ready : !step2Ready}
+                    className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold transition-all active:scale-[0.98] disabled:cursor-not-allowed"
+                    style={(step === 1 ? step1Ready : step2Ready)
+                      ? { background: 'linear-gradient(135deg,#517B3E,#2A3B22)', color: '#fff', boxShadow: '0 4px 16px rgba(81,123,62,0.35)' }
+                      : { background: 'rgba(255,255,255,0.3)', color: 'rgba(28,51,41,0.4)' }}
+                  >
+                    {he ? 'הבא' : 'Next'}
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d='M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3' />
+                    </svg>
+                  </button>
+                ) : (
+                  <button
+                    onClick={generate}
+                    disabled={!hasContent || loading}
+                    className="flex items-center gap-2 px-6 py-3 rounded-2xl text-base font-bold transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{
+                      background: hasContent ? 'linear-gradient(135deg,#517B3E,#2A3B22)' : 'rgba(255,255,255,0.3)',
+                      color:      hasContent ? '#fff' : 'rgba(28,51,41,0.4)',
+                      boxShadow:  hasContent ? '0 4px 16px rgba(81,123,62,0.35)' : 'none',
+                    }}
+                  >
+                    {loading ? <Spinner /> : <PresentationIcon className="w-5 h-5" />}
+                    {loading
+                      ? (he ? 'בונה מצגת...' : 'Building deck...')
+                      : (he ? 'צור מצגת AI' : 'Generate AI Presentation')}
+                  </button>
+                )}
+              </div>
 
               {error && (
                 <div className="rounded-xl px-4 py-3 text-sm font-medium" style={{ background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.25)', color: '#b91c1c' }}>
@@ -1014,7 +1078,7 @@ export default function PresentationGeneratorPage() {
               )}
 
               <button
-                onClick={reset}
+                onClick={() => { reset(); router.push('?step=1'); }}
                 className="self-center px-6 py-2.5 rounded-xl text-sm font-bold transition-all hover:opacity-90 active:scale-[0.98]"
                 style={{ background: '#EEF5F0', color: '#1C3329', border: '1px solid #D3E0D8' }}
               >

@@ -608,16 +608,16 @@ function Wizard({
     }
   }, [uploading]);
 
-  const step1Ready =
+  const step1Ready = writingType !== null;
+
+  const step2Ready =
     (sourceType === 'upload'    && (uploadedFiles.length > 0 || hasDoc)) ||
     (sourceType === 'documents' && selectedDocId !== null) ||
     (sourceType === 'sessions'  && selectedSessionId !== null);
 
-  const step2Ready = writingType !== null;
-
   const STEPS = [
-    { n: 1, he: 'בחר מקור',   en: 'Source' },
-    { n: 2, he: 'סוג כתיבה',  en: 'Type' },
+    { n: 1, he: 'סוג כתיבה',  en: 'Type' },
+    { n: 2, he: 'בחר מקור',   en: 'Source' },
     { n: 3, he: 'אישור',       en: 'Confirm' },
   ] as const;
 
@@ -747,8 +747,8 @@ function Wizard({
       {/* Step card — always transparent; each step manages its own card surfaces */}
       <div className="w-full flex flex-col gap-5">
 
-        {/* ── Step 1: Source ── */}
-        {step === 1 && (
+        {/* ── Step 2: Source ── */}
+        {step === 2 && (
           <>
             <div>
               <h2 className="text-xl font-bold" style={{ color: '#1C3329' }}>{t.leftTitle}</h2>
@@ -887,8 +887,8 @@ function Wizard({
           </>
         )}
 
-        {/* ── Step 2: Writing type ── */}
-        {step === 2 && (
+        {/* ── Step 1: Writing type ── */}
+        {step === 1 && (
           <>
             <div>
               <h2 className="text-xl font-bold" style={{ color: '#1C3329' }}>{t.writingTypeSec}</h2>
@@ -1072,14 +1072,15 @@ function Wizard({
         )}
       </div>
 
-      {/* Navigation row */}
-      <div className="flex items-center justify-between w-full">
+      {/* Navigation row — dir="ltr" forces Back on left and Next on right
+          regardless of the RTL page direction, matching browser history convention */}
+      <div dir="ltr" className="flex items-center justify-between w-full">
         <button
           onClick={() => step > 1 ? router.back() : router.push('/dashboard')}
           className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-800 hover:bg-gray-100/50"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d={he ? 'M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3' : 'M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18'} />
+            <path strokeLinecap="round" strokeLinejoin="round" d='M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18' />
           </svg>
           {step === 1 ? (he ? 'ביטול' : 'Cancel') : (he ? 'הקודם' : 'Back')}
         </button>
@@ -1094,7 +1095,7 @@ function Wizard({
               : { background: 'rgba(157,192,139,0.35)' }}>
             {he ? 'הבא' : 'Next'}
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d={he ? 'M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18' : 'M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3'} />
+              <path strokeLinecap="round" strokeLinejoin="round" d='M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3' />
             </svg>
           </button>
         )}
@@ -1446,9 +1447,15 @@ function WritingPanel({
         body: JSON.stringify({ text, filename: `u-note-${safeTitle()}.pdf` }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? t.exportErr);
-      const blob = await res.blob(); const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = `u-note-${safeTitle()}.pdf`; a.click();
-      URL.revokeObjectURL(url);
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `u-note-${safeTitle()}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => window.URL.revokeObjectURL(url), 100);
     } catch (err) { console.error(err); }
     finally { setDownloading(false); }
   };
@@ -1463,9 +1470,15 @@ function WritingPanel({
         body: JSON.stringify({ text, filename: `u-note-${safeTitle()}.docx` }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? t.wordErr);
-      const blob = await res.blob(); const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = `u-note-${safeTitle()}.docx`; a.click();
-      URL.revokeObjectURL(url);
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `u-note-${safeTitle()}.docx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => window.URL.revokeObjectURL(url), 100);
     } catch (err) { console.error(err); }
     finally { setDownloadingWord(false); }
   };
@@ -1487,9 +1500,6 @@ function WritingPanel({
             onClick={onBack}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all shrink-0 text-[#527061] hover:text-[#1C3329] hover:bg-black/05"
           >
-            <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d={he ? 'M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3' : 'M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18'} />
-            </svg>
             <span className="hidden sm:inline">{t.backToConfig}</span>
           </button>
           <span className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'linear-gradient(135deg, #9DC08B, #517B3E)' }}>
@@ -1746,19 +1756,13 @@ function WritingPanel({
                     onClick={() => { setIsFinished(false); setCurrentDraft(null); setWaitingForFeedback(false); }}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:bg-gray-100/50"
                     style={{ border: '1px solid rgba(157,192,139,0.45)', color: '#527061' }}>
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d={he ? 'M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3' : 'M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18'} />
-                    </svg>
-                    {he ? 'חזור לעריכה' : 'Back to editing'}
+{he ? 'חזור לעריכה' : 'Back to editing'}
                   </button>
                   <button
                     onClick={onBack}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95"
                     style={{ background: 'rgba(81,123,62,0.10)', border: '1px solid rgba(81,123,62,0.35)', color: '#517B3E' }}>
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d={he ? 'M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3' : 'M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18'} />
-                    </svg>
-                    {he ? 'חזור לשלב הקודם' : 'Back to setup'}
+{he ? 'חזור לשלב הקודם' : 'Back to setup'}
                   </button>
                 </div>
               </div>

@@ -713,11 +713,10 @@ export default function ProfessorSimulatorPage() {
 
   // ── Shared card style ─────────────────────────────────────────────────────────
   const card = {
-    background:    'rgba(255,255,255,0.82)',
-    backdropFilter: 'blur(16px)',
-    border:        '1px solid rgba(157,192,139,0.35)',
-    boxShadow:     '0 4px 24px rgba(60,90,40,0.07)',
-    borderRadius:  '1rem',
+    background:   '#ffffff',
+    border:       '1px solid rgba(157,192,139,0.2)',
+    boxShadow:    '0 2px 16px rgba(60,90,40,0.06)',
+    borderRadius: '1.25rem',
   } as const;
 
   const inputStyle = {
@@ -888,434 +887,314 @@ export default function ProfessorSimulatorPage() {
         />
       )}
 
-      {/* ── Main two-column layout ── */}
-      <main className="flex-1 flex flex-col md:flex-row gap-5 max-w-7xl mx-auto w-full p-5 md:p-6 min-h-0 overflow-y-auto">
+      {/* ── Main single-column dashboard ── */}
+      <main className="flex-1 overflow-y-auto relative" style={{ zIndex: 1 }}>
 
-        {/* ════════════ LEFT COLUMN — Config + Upload ════════════ */}
-        <div className="w-full md:w-[38%] flex flex-col gap-4 shrink-0">
+        <div className="max-w-5xl mx-auto w-full px-4 py-6 flex flex-col gap-6">
 
-          {/* ── Professor config card ── */}
-          <div style={{ ...card, borderRadius: '1.25rem' }} className="overflow-hidden">
-            <div
-              className="px-6 py-4 flex flex-col gap-2.5"
-              style={{ borderBottom: '1px solid rgba(157,192,139,0.28)', background: 'linear-gradient(135deg,rgba(81,123,62,0.06),transparent)' }}
-            >
-              <p className="font-bold text-[#2A3B22] text-sm">פרטי המרצה</p>
-
-              {/* Read-only course context badge — derived from active course, never editable */}
+          {/* ════ TOP CARD: Lecturer Settings ════ */}
+          <div className="rounded-2xl p-6 md:p-8"
+            style={{ background: '#ffffff', border: '1px solid rgba(157,192,139,0.2)', boxShadow: '0 2px 16px rgba(60,90,40,0.06)' }}>
+            <div className="flex flex-wrap items-center gap-3 mb-5">
+              <p className="font-bold text-[#2A3B22] text-base">הגדרות מרצה וסגנון</p>
               {topics && (
-                <div
-                  className="inline-flex items-center gap-1.5 self-start rounded-full px-3 py-1.5 text-xs font-medium"
-                  style={{ background: 'rgba(81,123,62,0.10)', color: '#2A3B22' }}
-                >
-                  <span className="text-[#7a9268] font-semibold">קורס:</span>
-                  <span className="truncate max-w-[180px]">{topics}</span>
+                <div className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium"
+                  style={{ background: 'rgba(81,123,62,0.08)', color: '#2A3B22' }}>
+                  <span style={{ color: '#7a9268' }}>קורס:</span>
+                  <span className="font-bold truncate max-w-[200px]">{topics}</span>
                 </div>
               )}
             </div>
-
-            <div className="px-6 py-5 flex flex-col gap-5">
-
-              {/* Who writes the exam — derived from the active course's own metadata */}
-              <div>
-                <p className="text-[10px] font-semibold text-[#7a9268] uppercase tracking-wider mb-2">
-                  מי כותב את המבחן
-                </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Who writes the exam */}
+              <div className="flex flex-col gap-2">
+                <p className="text-[11px] font-bold uppercase tracking-widest" style={{ color: '#7a9268' }}>מי כותב את המבחן</p>
                 {hasTaOption ? (
-                  <div
-                    className="flex rounded-xl overflow-hidden border"
-                    style={{ borderColor: 'rgba(157,192,139,0.4)' }}
-                  >
+                  <div className="flex rounded-xl overflow-hidden" style={{ border: '1px solid rgba(157,192,139,0.35)' }}>
                     {([
                       { key: 'lecturer', label: lecturerName },
                       { key: 'ta',       label: taName },
                     ] as const).map((opt, i) => {
                       const active = examWriter === opt.key;
                       return (
-                        <button
-                          key={opt.key}
-                          type="button"
-                          onClick={() => setExamWriter(opt.key)}
+                        <button key={opt.key} type="button" onClick={() => setExamWriter(opt.key)}
                           className="flex-1 px-3.5 py-2.5 text-sm transition-all truncate"
                           style={{
-                            background:  active ? 'rgba(81,123,62,0.14)' : 'rgba(255,255,255,0.55)',
-                            color:       active ? '#2A3B22' : '#7a9268',
-                            fontWeight:  active ? 700 : 500,
-                            borderInlineStart: i === 1 ? '1px solid rgba(157,192,139,0.4)' : undefined,
-                          }}
-                        >
+                            background: active ? 'rgba(81,123,62,0.12)' : 'rgba(255,255,255,0.6)',
+                            color: active ? '#2A3B22' : '#7a9268',
+                            fontWeight: active ? 700 : 500,
+                            borderInlineStart: i === 1 ? '1px solid rgba(157,192,139,0.35)' : undefined,
+                          }}>
                           {opt.label}
                         </button>
                       );
                     })}
                   </div>
                 ) : lecturerName ? (
-                  <div
-                    className="rounded-xl px-4 py-3 text-sm font-semibold truncate"
-                    style={{ background: 'rgba(81,123,62,0.08)', border: '1px solid rgba(81,123,62,0.22)', color: '#2A3B22' }}
-                  >
-                    מרצה כותב/ת: {lecturerName}
+                  <div className="rounded-xl px-4 py-2.5 text-sm font-semibold truncate"
+                    style={{ background: 'rgba(81,123,62,0.07)', border: '1px solid rgba(81,123,62,0.18)', color: '#2A3B22' }}>
+                    {lecturerName}
                   </div>
                 ) : (
-                  <p className="text-xs text-[#7a9268]">לא הוגדר מרצה לקורס זה — ניתן להוסיף בעריכת הקורס</p>
+                  <p className="text-xs" style={{ color: '#9aaf8a' }}>לא הוגדר מרצה — ניתן להוסיף בעריכת הקורס</p>
                 )}
               </div>
-
-              {/* Exam style — segmented chip selector */}
-              <div>
-                <p className="text-[10px] font-semibold text-[#7a9268] uppercase tracking-wider mb-2">
-                  סגנון בחינה
-                </p>
+              {/* Exam style chips */}
+              <div className="flex flex-col gap-2">
+                <p className="text-[11px] font-bold uppercase tracking-widest" style={{ color: '#7a9268' }}>סגנון בחינה</p>
                 <div className="flex flex-wrap gap-2">
                   {STYLE_OPTIONS.map(o => {
                     const active = examStyle === o.value;
                     return (
-                      <button
-                        key={o.value}
-                        type="button"
-                        onClick={() => setExamStyle(active ? '' : o.value)}
-                        className="px-3.5 py-2 rounded-full text-xs transition-all border"
+                      <button key={o.value} type="button" onClick={() => setExamStyle(active ? '' : o.value)}
+                        className="px-3 py-1.5 rounded-full text-xs transition-all border"
                         style={{
-                          background:  active ? 'rgba(81,123,62,0.14)' : 'rgba(255,255,255,0.55)',
-                          borderColor: active ? '#517B3E' : 'rgba(157,192,139,0.35)',
-                          color:       active ? '#2A3B22' : '#7a9268',
-                          fontWeight:  active ? 600 : 500,
-                        }}
-                      >
+                          background: active ? 'rgba(81,123,62,0.12)' : 'rgba(255,255,255,0.7)',
+                          borderColor: active ? '#517B3E' : 'rgba(157,192,139,0.4)',
+                          color: active ? '#2A3B22' : '#7a9268',
+                          fontWeight: active ? 600 : 500,
+                        }}>
                         {o.label}
                       </button>
                     );
                   })}
                 </div>
               </div>
-
-              {/* Sample exam — required upload that gates the simulation */}
-              <div>
-                <p className="text-[10px] font-semibold text-[#7a9268] uppercase tracking-wider mb-2">
-                  מבחן לדוגמא (חובה)
-                </p>
-
-                {sampleExam ? (
-                  <div
-                    className="rounded-xl px-4 py-3 flex items-center justify-between gap-3 text-sm"
-                    style={{ background: 'rgba(81,123,62,0.08)', border: '1px solid rgba(81,123,62,0.22)' }}
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: '#517B3E' }} strokeWidth={2.2} />
-                      <span className="truncate font-medium text-[#2A3B22]">{sampleExam.name}</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => { setSampleExam(null); setSampleExamErr(null); }}
-                      className="flex items-center gap-1 text-xs font-semibold shrink-0 px-2 py-1 rounded-lg transition-colors hover:bg-[rgba(81,123,62,0.10)]"
-                      style={{ color: '#7a9268' }}
-                    >
-                      <IconX className="w-3.5 h-3.5" strokeWidth={2.2} />
-                      <span>החלף</span>
-                    </button>
-                  </div>
-                ) : (
-                  <div
-                    {...getSampleExamRootProps()}
-                    className="cursor-pointer rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-1.5 py-6 text-center transition-all"
-                    style={{
-                      borderColor:     isSampleExamDragActive ? '#517B3E' : 'rgba(157,192,139,0.55)',
-                      backgroundColor: isSampleExamDragActive ? 'rgba(81,123,62,0.07)' : 'rgba(255,255,255,0.45)',
-                    }}
-                  >
-                    <input {...getSampleExamInputProps()} />
-                    {sampleExamUploading ? (
-                      <>
-                        <Spinner size="sm" />
-                        <p className="text-sm text-[#517B3E] font-medium">מעלה קובץ...</p>
-                      </>
-                    ) : isSampleExamDragActive ? (
-                      <p className="text-sm font-bold text-[#517B3E]">שחרר כאן!</p>
-                    ) : (
-                      <>
-                        <svg className="w-7 h-7 text-[#9DC08B]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
-                        </svg>
-                        <p className="text-sm font-bold text-[#2A3B22]">העלאת קובץ מבחן</p>
-                        <p className="text-xs text-[#9aaf8a]">גרור את המבחן לכאן · PDF</p>
-                      </>
-                    )}
-                  </div>
-                )}
-
-                {sampleExamErr && (
-                  <p className="text-xs text-red-500 mt-1.5">{sampleExamErr}</p>
-                )}
-
-                {!sampleExam && (
-                  <p className="text-xs mt-1.5" style={{ color: '#a3855f' }}>
-                    יש להעלות מבחן לדוגמא כדי להתחיל את הסימולציה
-                  </p>
-                )}
-              </div>
-
             </div>
           </div>
 
-          {/* ── File upload card ── */}
-          <div style={card} className="overflow-hidden">
-            <div
-              className="flex items-center justify-between px-5 py-3.5"
-              style={{ borderBottom: '1px solid rgba(157,192,139,0.28)' }}
-            >
+          {/* ════ MIDDLE: Data Sources — 2-column grid ════ */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+            {/* ── Sample exam (required) ── */}
+            <div className="flex flex-col gap-2">
               <div className="flex items-center gap-2">
-                <svg className="w-4 h-4 text-[#517B3E]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
-                </svg>
-                <p className="font-bold text-[#2A3B22] text-sm">חומר מבחן</p>
+                <p className="text-[11px] font-bold uppercase tracking-widest" style={{ color: 'rgba(28,51,41,0.6)' }}>מבחן לדוגמא</p>
+                <span className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold"
+                  style={{ background: sampleExam ? 'rgba(81,123,62,0.15)' : 'rgba(163,133,95,0.15)', color: sampleExam ? '#517B3E' : '#a3855f' }}>
+                  {sampleExam ? '✓ הועלה' : 'חובה'}
+                </span>
               </div>
-              <span
-                className="text-xs font-semibold px-2.5 py-1 rounded-md"
-                style={{ background: 'rgba(255,255,255,0.55)', color: '#517B3E', border: '1px solid rgba(81,123,62,0.2)' }}
-              >
-                {files.length} קבצים
-              </span>
+              {sampleExam ? (
+                <div className="rounded-2xl px-4 py-3 flex items-center justify-between gap-3 text-sm"
+                  style={{ background: '#fff', border: '1px solid rgba(81,123,62,0.22)', boxShadow: '0 1px 6px rgba(60,90,40,0.06)' }}>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: '#517B3E' }} strokeWidth={2.2} />
+                    <span className="truncate font-medium text-[#2A3B22]">{sampleExam.name}</span>
+                  </div>
+                  <button type="button" onClick={() => { setSampleExam(null); setSampleExamErr(null); }}
+                    className="flex items-center gap-1 text-xs font-semibold shrink-0 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors"
+                    style={{ color: '#7a9268' }}>
+                    <IconX className="w-3.5 h-3.5" strokeWidth={2.2} />
+                    <span>החלף</span>
+                  </button>
+                </div>
+              ) : (
+                <div {...getSampleExamRootProps()}
+                  className="cursor-pointer rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-2.5 py-12 text-center transition-all"
+                  style={{
+                    borderColor: isSampleExamDragActive ? '#517B3E' : '#6ee7b7',
+                    backgroundColor: isSampleExamDragActive ? 'rgba(81,123,62,0.07)' : '#ffffff',
+                  }}>
+                  <input {...getSampleExamInputProps()} />
+                  {sampleExamUploading ? (
+                    <><Spinner size="sm" /><p className="text-sm font-medium" style={{ color: '#517B3E' }}>מעלה...</p></>
+                  ) : isSampleExamDragActive ? (
+                    <p className="text-sm font-bold" style={{ color: '#517B3E' }}>שחרר כאן!</p>
+                  ) : (
+                    <>
+                      <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(81,123,62,0.08)' }}>
+                        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="#517B3E" strokeWidth={1.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+                        </svg>
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold" style={{ color: '#2A3B22' }}>העלאת מבחן לדוגמא</p>
+                        <p className="text-xs mt-0.5" style={{ color: '#7a9268' }}>גרור לכאן · PDF</p>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+              {sampleExamErr && <p className="text-xs text-red-500 px-1">{sampleExamErr}</p>}
             </div>
 
-            <div className="px-5 py-4 space-y-3">
-
-              {/* File list */}
+            {/* ── Study materials ── */}
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <p className="text-[11px] font-bold uppercase tracking-widest" style={{ color: 'rgba(28,51,41,0.6)' }}>חומר לימוד</p>
+                {files.length > 0 && (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold"
+                    style={{ background: 'rgba(81,123,62,0.15)', color: '#517B3E' }}>
+                    {files.length} קבצים
+                  </span>
+                )}
+              </div>
               {files.length > 0 && (
-                <div className="space-y-2">
+                <div className="flex flex-col gap-1.5">
                   {files.map(f => (
-                    <div
-                      key={f.file_id}
-                      className="flex items-center gap-2.5 rounded-xl px-3.5 py-2.5"
-                      style={{ background: 'rgba(81,123,62,0.06)', border: '1px solid rgba(81,123,62,0.18)' }}
-                    >
-                      <svg className="w-4 h-4 text-[#517B3E] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <div key={f.file_id} className="flex items-center gap-2.5 rounded-xl px-3.5 py-2.5"
+                      style={{ background: '#fff', border: '1px solid rgba(157,192,139,0.25)', boxShadow: '0 1px 4px rgba(60,90,40,0.04)' }}>
+                      <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="#517B3E" strokeWidth={1.5}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
                       </svg>
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium text-[#2d3b25] truncate">{f.name}</p>
-                        <p className="text-[10px] text-[#7a9268]">{formatBytes(f.size)}</p>
+                        <p className="text-xs font-medium truncate" style={{ color: '#2d3b25' }}>{f.name}</p>
+                        <p className="text-[10px]" style={{ color: '#7a9268' }}>{formatBytes(f.size)}</p>
                       </div>
-                      <button
-                        onClick={() => setFiles(prev => prev.filter(x => x.file_id !== f.file_id))}
-                        className="w-6 h-6 rounded-full flex items-center justify-center hover:bg-red-100/60 transition-colors shrink-0"
-                      >
-                        <span className="text-[#7a9268] hover:text-red-500"><TrashIcon /></span>
+                      <button onClick={() => setFiles(prev => prev.filter(x => x.file_id !== f.file_id))}
+                        className="w-6 h-6 rounded-full flex items-center justify-center hover:bg-red-100/60 transition-colors shrink-0">
+                        <span style={{ color: '#7a9268' }}><TrashIcon /></span>
                       </button>
                     </div>
                   ))}
                 </div>
               )}
-
-              {/* Drop zone */}
-              <div
-                {...getRootProps()}
-                className="rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-4 p-10 cursor-pointer text-center bg-white/40 hover:bg-[rgba(81,123,62,0.06)] transition-colors duration-200"
+              <div {...getRootProps()}
+                className="rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-2.5 py-12 cursor-pointer text-center transition-all"
                 style={{
-                  borderColor:     isDragActive ? '#517B3E' : 'rgba(157,192,139,0.5)',
-                  backgroundColor: isDragActive ? 'rgba(81,123,62,0.07)' : undefined,
-                  opacity:         uploading ? 0.6 : 1,
-                }}
-              >
+                  borderColor: isDragActive ? '#517B3E' : '#6ee7b7',
+                  backgroundColor: isDragActive ? 'rgba(81,123,62,0.07)' : '#ffffff',
+                  opacity: uploading ? 0.6 : 1,
+                }}>
                 <input {...getInputProps()} />
                 {uploading ? (
-                  <><Spinner /><p className="text-sm text-[#517B3E] font-medium">מעלה...</p></>
+                  <><Spinner /><p className="text-sm font-medium" style={{ color: '#517B3E' }}>מעלה...</p></>
                 ) : isDragActive ? (
-                  <p className="text-sm font-bold text-[#517B3E]">שחרר כאן!</p>
+                  <p className="text-sm font-bold" style={{ color: '#517B3E' }}>שחרר כאן!</p>
                 ) : (
                   <>
-                    <div className="p-4 rounded-full" style={{ background: 'rgba(157,192,139,0.18)' }}>
-                      <svg className="w-7 h-7 text-[#517B3E]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(81,123,62,0.08)' }}>
+                      <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="#517B3E" strokeWidth={1.5}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
                       </svg>
                     </div>
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium text-[#4a5e3a]">גרור קבצים לכאן</p>
-                      <p className="text-xs text-[#9aaf8a]">PDF · PPTX · עד 50 MB</p>
+                    <div>
+                      <p className="text-sm font-semibold" style={{ color: '#2A3B22' }}>גרור קבצים לכאן</p>
+                      <p className="text-xs mt-0.5" style={{ color: '#7a9268' }}>PDF · PPTX · עד 50 MB</p>
                     </div>
                   </>
                 )}
               </div>
-
-              {uploadErr && (
-                <p className="text-xs text-red-500 flex items-center gap-1.5">
-                  <span>⚠️</span>{uploadErr}
-                </p>
-              )}
+              {uploadErr && <p className="text-xs px-1 flex items-center gap-1.5" style={{ color: '#dc2626' }}><span>⚠️</span>{uploadErr}</p>}
             </div>
+
           </div>
 
-        </div>
+          {/* ════ BOTTOM: Action area OR Chat ════ */}
+          {(messages.length === 0 && !sending) ? (
 
-        {/* ════════════ RIGHT COLUMN — Chat ════════════ */}
-        <div className="flex-1 flex flex-col gap-0 min-h-[520px]">
-          <div
-            className="flex-1 flex flex-col overflow-hidden"
-            style={{ ...card, display: 'flex', flexDirection: 'column' }}
-          >
-            {/* Chat header */}
-            <div
-              className="flex items-center gap-3 px-5 py-3.5 shrink-0"
-              style={{ borderBottom: '1px solid rgba(157,192,139,0.28)' }}
-            >
-              <span className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 text-white"
-                style={{ background: 'linear-gradient(135deg,#9DC08B,#517B3E)' }}>
-                <GraduationCap className="w-5 h-5" />
-              </span>
+            /* ── Action area (pre-chat setup) ── */
+            <div className="rounded-2xl p-8 flex flex-col items-center text-center gap-5"
+              style={{ background: '#ffffff', border: '1px solid rgba(157,192,139,0.2)', boxShadow: '0 2px 16px rgba(60,90,40,0.06)' }}>
+              <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
+                style={{ background: 'rgba(81,123,62,0.08)', border: '1px solid rgba(81,123,62,0.12)' }}>
+                <Brain className="w-8 h-8" style={{ color: '#517B3E' }} />
+              </div>
               <div>
-                <p className="font-semibold text-[#2A3B22] text-sm">
-                  {profName.trim() ? `מבחן — ${profName.trim()}` : 'סימולטור מבחן'}
-                </p>
-                <p className="text-[10px] text-[#7a9268]">
-                  {examStyle || 'ללא סגנון נבחר'}{topics ? ` · ${topics}` : ''}
+                <h2 className="font-bold text-[#2A3B22] text-xl">הראש של המרצה</h2>
+                <p className="text-sm mt-1.5 max-w-xs mx-auto" style={{ color: '#7a9268' }}>
+                  הגדר מרצה, בחר סגנון בחינה, העלה חומרים — ולחץ להתחיל
                 </p>
               </div>
+              <div dir="ltr" className="flex flex-row justify-center gap-4 flex-wrap">
+                <button onClick={startSimulation} disabled={sending || !sampleExam}
+                  className="flex items-center gap-2 px-6 py-3 rounded-xl text-white text-sm font-bold transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed"
+                  style={sampleExam
+                    ? { background: 'linear-gradient(135deg,#517B3E,#2A3B22)', boxShadow: '0 4px 14px rgba(81,123,62,0.30)' }
+                    : { background: 'rgba(157,192,139,0.35)', color: 'rgba(255,255,255,0.75)' }}>
+                  <Brain className="w-4 h-4" />
+                  <span>צור סימולציה</span>
+                </button>
+                <button onClick={predictExam} disabled={sending || !sampleExam}
+                  className="flex items-center gap-2 px-6 py-3 rounded-xl border text-sm font-bold transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed"
+                  style={{ background: 'rgba(255,255,255,0.9)', borderColor: sampleExam ? '#9DC08B' : 'rgba(157,192,139,0.25)', color: sampleExam ? '#2A3B22' : '#9aaf8a' }}>
+                  <Sparkles className="w-4 h-4" />
+                  <span>חזה את המבחן שלי</span>
+                </button>
+              </div>
+              {!sampleExam && (
+                <p className="text-xs" style={{ color: '#a3855f' }}>
+                  יש להעלות מבחן לדוגמא כדי להתחיל את הסימולציה
+                </p>
+              )}
             </div>
 
-            {/* Messages area */}
-            <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-5 py-4 space-y-4 min-h-0">
+          ) : (
 
-              {messages.length === 0 && !sending && (
-                <div className="flex flex-col items-center justify-center h-full gap-5 py-10 text-center">
-                  <div
-                    className="w-20 h-20 rounded-3xl flex items-center justify-center"
-                    style={{ background: 'rgba(81,123,62,0.08)', border: '1px solid rgba(81,123,62,0.15)' }}
-                  >
-                    <Brain className="w-9 h-9" style={{ color: '#517B3E' }} />
-                  </div>
-                  <div>
-                    <p className="font-semibold text-[#2A3B22] text-base">מוכן לסימולציה</p>
-                    <p className="text-sm text-[#7a9268] mt-1">
-                      הגדר את פרטי המרצה ולחץ &quot;צור סימולציה&quot; כדי להתחיל
-                    </p>
-                  </div>
-                  <div className="flex flex-col items-center gap-2">
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={startSimulation}
-                        disabled={sending || !sampleExam}
-                        className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-bold transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
-                        style={!sending && sampleExam ? { background: 'linear-gradient(135deg,#517B3E,#2A3B22)' } : undefined}
-                      >
-                        <span>צור סימולציה</span>
-                      </button>
-                      <button
-                        onClick={predictExam}
-                        disabled={sending || !sampleExam}
-                        className="flex items-center gap-2 px-5 py-2.5 rounded-xl border text-sm font-bold transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
-                        style={{ background: 'rgba(255,255,255,0.7)', borderColor: '#9DC08B', color: '#2A3B22' }}
-                      >
-                        <Sparkles className="w-4 h-4" />
-                        <span>חזה את המבחן שלי</span>
-                      </button>
+            /* ── Chat interface ── */
+            <div className="rounded-2xl flex flex-col overflow-hidden"
+              style={{ ...card, minHeight: '480px', maxHeight: '65vh' }}>
+
+              {/* Chat header */}
+              <div className="flex items-center gap-3 px-5 py-4 shrink-0" style={{ borderBottom: '1px solid rgba(157,192,139,0.2)' }}>
+                <span className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 text-white"
+                  style={{ background: 'linear-gradient(135deg,#9DC08B,#517B3E)' }}>
+                  <GraduationCap className="w-5 h-5" />
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-[#2A3B22] text-sm truncate">
+                    {profName.trim() ? `סימולטור — ${profName.trim()}` : 'סימולטור מבחן AI'}
+                  </p>
+                  <p className="text-[11px] text-[#7a9268] truncate">
+                    {[examStyle, topics].filter(Boolean).join(' · ') || 'בחר סגנון בחינה ולחץ להתחיל'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Messages area */}
+              <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-5 py-4 space-y-4 min-h-0">
+                {messages.map(msg => (
+                  <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-start' : 'justify-end'}`}>
+                    <div className="max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed"
+                      style={msg.role === 'assistant' ? {
+                        background: 'linear-gradient(135deg,rgba(81,123,62,0.10),rgba(81,123,62,0.06))',
+                        border:     '1px solid rgba(81,123,62,0.22)',
+                        color:      '#1a2e14',
+                      } : {
+                        background: '#fff',
+                        border:     '1px solid rgba(157,192,139,0.35)',
+                        color:      '#2d3b25',
+                      }}>
+                      {msg.role === 'assistant' ? (
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}
+                          components={{
+                            strong: ({ children }) => <strong className="font-bold text-[#2A3B22]">{children}</strong>,
+                            p:      ({ children }) => <p className="mb-2 last:mb-0 leading-7">{children}</p>,
+                            ul:     ({ children }) => <ul className="list-disc pe-4 space-y-1 mb-2">{children}</ul>,
+                            ol:     ({ children }) => <ol className="list-decimal pe-4 space-y-1 mb-2">{children}</ol>,
+                            li:     ({ children }) => <li className="leading-6">{children}</li>,
+                            h2:     ({ children }) => <h2 className="font-bold text-base text-[#2A3B22] mt-3 mb-1">{children}</h2>,
+                            h3:     ({ children }) => <h3 className="font-semibold text-sm text-[#2A3B22] mt-2 mb-1">{children}</h3>,
+                          }}>
+                          {msg.content}
+                        </ReactMarkdown>
+                      ) : (
+                        <p>{msg.content}</p>
+                      )}
                     </div>
-                    {!sampleExam && (
-                      <p className="text-xs" style={{ color: '#a3855f' }}>
-                        יש להעלות מבחן לדוגמא כדי להתחיל את הסימולציה
-                      </p>
-                    )}
                   </div>
-                </div>
-              )}
-
-              {messages.map(msg => (
-                <div
-                  key={msg.id}
-                  className={`flex ${msg.role === 'user' ? 'justify-start' : 'justify-end'}`}
-                >
-                  <div
-                    className="max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed"
-                    style={msg.role === 'assistant' ? {
-                      background: 'linear-gradient(135deg,rgba(81,123,62,0.10),rgba(81,123,62,0.06))',
-                      border:     '1px solid rgba(81,123,62,0.22)',
-                      color:      '#1a2e14',
-                    } : {
-                      background: '#fff',
-                      border:     '1px solid rgba(157,192,139,0.35)',
-                      color:      '#2d3b25',
-                    }}
-                  >
-                    {msg.role === 'assistant' ? (
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        components={{
-                          strong: ({ children }) => <strong className="font-bold text-[#2A3B22]">{children}</strong>,
-                          p:      ({ children }) => <p className="mb-2 last:mb-0 leading-7">{children}</p>,
-                          ul:     ({ children }) => <ul className="list-disc pe-4 space-y-1 mb-2">{children}</ul>,
-                          ol:     ({ children }) => <ol className="list-decimal pe-4 space-y-1 mb-2">{children}</ol>,
-                          li:     ({ children }) => <li className="leading-6">{children}</li>,
-                          h2:     ({ children }) => <h2 className="font-bold text-base text-[#2A3B22] mt-3 mb-1">{children}</h2>,
-                          h3:     ({ children }) => <h3 className="font-semibold text-sm text-[#2A3B22] mt-2 mb-1">{children}</h3>,
-                        }}
-                      >
-                        {msg.content}
-                      </ReactMarkdown>
-                    ) : (
-                      <p>{msg.content}</p>
-                    )}
+                ))}
+                {sending && (
+                  <div className="flex justify-end">
+                    <div className="flex items-center gap-2 px-4 py-3 rounded-2xl text-sm"
+                      style={{ background: 'rgba(81,123,62,0.08)', border: '1px solid rgba(81,123,62,0.18)', color: '#517B3E' }}>
+                      <Spinner size="sm" />
+                      <span>מייצר שאלה...</span>
+                    </div>
                   </div>
-                </div>
-              ))}
-
-              {sending && (
-                <div className="flex justify-end">
-                  <div
-                    className="flex items-center gap-2 px-4 py-3 rounded-2xl text-sm"
-                    style={{ background: 'rgba(81,123,62,0.08)', border: '1px solid rgba(81,123,62,0.18)', color: '#517B3E' }}
-                  >
-                    <Spinner size="sm" />
-                    <span>מייצר שאלה...</span>
+                )}
+                {chatErr && (
+                  <div className="flex items-center gap-2 rounded-xl px-4 py-3 text-xs"
+                    style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#dc2626' }}>
+                    <span>⚠️</span>{chatErr}
                   </div>
-                </div>
-              )}
+                )}
+                <div ref={bottomRef} />
+              </div>
 
-              {chatErr && (
-                <div className="flex items-center gap-2 rounded-xl px-4 py-3 text-xs"
-                  style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#dc2626' }}>
-                  <span>⚠️</span>{chatErr}
-                </div>
-              )}
-
-              <div ref={bottomRef} />
-            </div>
-
-            {/* ── Input bar ── */}
-            <div
-              className="shrink-0 px-4 py-3"
-              style={{ borderTop: '1px solid rgba(157,192,139,0.28)' }}
-            >
-              {/* Generate button (shown when chat is empty) */}
-              {messages.length === 0 && !sending && (
-                <div className="flex flex-col gap-1.5">
-                  <button
-                    onClick={startSimulation}
-                    disabled={sending || !sampleExam}
-                    className="w-full py-3 rounded-xl text-white text-sm font-bold flex items-center justify-center gap-2 transition-all hover:opacity-90 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
-                    style={sampleExam ? { background: 'linear-gradient(135deg,#517B3E,#2A3B22)' } : undefined}
-                  >
-                    {sending
-                      ? <><Spinner size="sm" /><span>מייצר...</span></>
-                      : <span>צור סימולציית מבחן</span>
-                    }
-                  </button>
-                  <button
-                    onClick={predictExam}
-                    disabled={sending || !sampleExam}
-                    className="w-full py-3 rounded-xl border text-sm font-bold flex items-center justify-center gap-2 transition-all hover:opacity-90 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
-                    style={{ background: 'rgba(255,255,255,0.7)', borderColor: '#9DC08B', color: '#2A3B22' }}
-                  >
-                    <Sparkles className="w-4 h-4" />
-                    <span>חזה את המבחן שלי</span>
-                  </button>
-                  {!sampleExam && (
-                    <p className="text-xs text-center" style={{ color: '#a3855f' }}>
-                      יש להעלות מבחן לדוגמא כדי להתחיל את הסימולציה
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* Follow-up input (shown when conversation started) */}
-              {messages.length > 0 && (
+              {/* Input bar */}
+              <div className="shrink-0 px-4 py-3" style={{ borderTop: '1px solid rgba(157,192,139,0.2)' }}>
                 <div className="flex gap-2">
                   <textarea
                     value={input}
@@ -1329,27 +1208,26 @@ export default function ProfessorSimulatorPage() {
                     style={{ ...inputStyle, maxHeight: '80px' }}
                     onFocus={focusGreen} onBlur={blurGreen}
                   />
-                  <button
-                    onClick={() => send(input)}
-                    disabled={!input.trim() || sending}
+                  <button onClick={() => send(input)} disabled={!input.trim() || sending}
                     className="px-4 rounded-xl text-white font-bold transition-all active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed self-end"
-                    style={{ background: '#517B3E', paddingTop: '0.6rem', paddingBottom: '0.6rem' }}
-                  >
+                    style={{ background: '#517B3E', paddingTop: '0.6rem', paddingBottom: '0.6rem' }}>
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
                     </svg>
                   </button>
                 </div>
-              )}
-
-              <p className="text-center text-[10px] text-[#9aaf8a] mt-2">
-                {files.length > 0
-                  ? `🧠 הסימולציה מבוססת על ${files.length} קבצ${files.length === 1 ? '' : 'ים'} שהעלית`
-                  : 'ניתן לייצר שאלות גם ללא קבצים — הוסף מסמכים לשאלות מדויקות יותר'}
-              </p>
+                <p className="text-center text-[10px] text-[#9aaf8a] mt-2">
+                  {files.length > 0
+                    ? `🧠 הסימולציה מבוססת על ${files.length} קבצ${files.length === 1 ? '' : 'ים'} שהעלית`
+                    : 'ניתן לייצר שאלות גם ללא קבצים — הוסף מסמכים לשאלות מדויקות יותר'}
+                </p>
+              </div>
             </div>
-          </div>
+
+          )}
+
         </div>
+
 
       </main>
 

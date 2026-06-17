@@ -32,7 +32,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="he" dir="rtl" className={`${heebo.variable} h-full`} suppressHydrationWarning>
+    <html lang="en" dir="ltr" className={`${heebo.variable} h-full`} suppressHydrationWarning>
       <body className="font-sans antialiased min-h-full flex flex-col" style={{ backgroundColor: '#97AB92' }}>
         {/* ── Ambient mesh background orbs ──────────────────────────── */}
         <div

@@ -15,15 +15,15 @@ const LanguageContext = createContext<LanguageContextValue>({
 });
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
-  // Always initialize to the server default ('he') so the first client render
-  // matches the server HTML (layout.tsx: <html lang="he" dir="rtl">).
+  // Always initialize to the server default ('en') so the first client render
+  // matches the server HTML (layout.tsx: <html lang="en" dir="ltr">).
   // localStorage is only read after mount to avoid hydration mismatches.
-  const [lang, setLang] = useState<Lang>('he');
+  const [lang, setLang] = useState<Lang>('en');
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     const stored = localStorage.getItem('levy_ai_lang');
-    if (stored === 'en') setLang('en');
+    if (stored === 'he') setLang('he');
     setMounted(true);
   }, []);
 

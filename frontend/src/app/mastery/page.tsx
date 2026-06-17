@@ -292,7 +292,7 @@ function MasteryQuizModal({
                   boxShadow: selected !== null ? '0 2px 10px rgba(81,123,62,0.30)' : 'none',
                 }}
               >
-                {isLast ? (he ? 'סיים' : 'Finish') : (he ? 'הבא →' : 'Next →')}
+                {isLast ? (he ? 'סיים' : 'Finish') : (he ? 'הבא' : 'Next')}
               </button>
             </div>
           </>

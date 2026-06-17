@@ -66,8 +66,6 @@ interface PresentationContextValue {
   setSelectedFileIds:   (ids: string[]) => void;
   slideCount:           number;
   setSlideCount:        (n: number) => void;
-  presentationStyle:    string;
-  setPresentationStyle: (s: string) => void;
   isGenerating:         boolean;
   error:                string | null;
   slides:               DeckSlide[] | null;
@@ -91,7 +89,6 @@ export function PresentationProvider({ children }: { children: ReactNode }) {
   const [pending,            setPending]            = useState<PendingFile[]>([]);
   const [selectedFileIds,    setSelectedFileIds]    = useState<string[]>([]);
   const [slideCount,         setSlideCount]         = useState(10);
-  const [presentationStyle,  setPresentationStyle]  = useState('academic');
   const [isGenerating,       setIsGenerating]       = useState(false);
   const [error,              setError]              = useState<string | null>(null);
   const [slides,             setSlides]             = useState<DeckSlide[] | null>(null);
@@ -139,7 +136,7 @@ export function PresentationProvider({ children }: { children: ReactNode }) {
       if (topic.trim()) form.append('topic', topic.trim());
       if (selectedCourse) form.append('course_name', selectedCourse.name);
       form.append('slide_count', String(slideCount));
-      if (presentationStyle) form.append('style', presentationStyle);
+      form.append('style', 'academic');
       if (selectedFileIds.length > 0) form.append('file_ids', selectedFileIds.join(','));
       pending.forEach(p => form.append('files', p.file));
 
@@ -160,7 +157,7 @@ export function PresentationProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsGenerating(false);
     }
-  }, [pending, selectedFileIds, topic, slideCount, presentationStyle, isGenerating, he, selectedCourse, persistToCourseLibrary]);
+  }, [pending, selectedFileIds, topic, slideCount, isGenerating, he, selectedCourse, persistToCourseLibrary]);
 
   const reset = useCallback(() => {
     setSlides(null);
@@ -188,9 +185,8 @@ export function PresentationProvider({ children }: { children: ReactNode }) {
     pending, addFiles, removeFile,
     selectedFileIds, setSelectedFileIds,
     slideCount, setSlideCount,
-    presentationStyle, setPresentationStyle,
     isGenerating, error, slides, sources, generate, reset,
-  }), [topic, pending, addFiles, removeFile, selectedFileIds, slideCount, presentationStyle, isGenerating, error, slides, sources, generate, reset]);
+  }), [topic, pending, addFiles, removeFile, selectedFileIds, slideCount, isGenerating, error, slides, sources, generate, reset]);
 
   return (
     <PresentationContext.Provider value={value}>
