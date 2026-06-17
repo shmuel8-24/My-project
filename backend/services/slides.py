@@ -1,3 +1,4 @@
+import copy
 import json
 
 from services.security import _sanitize
@@ -741,6 +742,7 @@ def _validate_deck_slides(slides_obj: dict) -> list[dict]:
 
 def generate_deck_via_agent(
     client, topic: str, context: str, rag_context: str = "",
+    slide_count: int = 20, style: str = "",
 ) -> tuple[list[dict], str | None]:
     """Agent step: force the LLM to call build_presentation with the final deck.
 
@@ -770,10 +772,38 @@ def generate_deck_via_agent(
     """
     safe_topic   = _sanitize(topic)
     safe_context = _sanitize(context)
+    slide_count  = max(5, min(20, int(slide_count)))
 
-    user_message_parts = [
+    # Build a patched tool schema for the requested slide count so OpenAI's
+    # parameter validation matches the override instruction.
+    if slide_count != 20:
+        build_tool = copy.deepcopy(BUILD_PRESENTATION_TOOL)
+        slides_prop = build_tool["function"]["parameters"]["properties"]["slides"]
+        slides_prop["minItems"] = slide_count
+        slides_prop["maxItems"] = slide_count
+        slides_prop["description"] = (
+            f"Ordered list of exactly {slide_count} slide objects."
+        )
+        build_tool["function"]["description"] = (
+            "Construct the final presentation deck from the aggregated source "
+            f"material. Call this once, with the complete ordered list of "
+            f"exactly {slide_count} slides."
+        )
+    else:
+        build_tool = BUILD_PRESENTATION_TOOL
+
+    user_message_parts = []
+    if style:
+        _style_hints = {
+            "academic":  "Write in a formal, citation-rich academic style with emphasis on evidence, methodology, and scholarly tone.",
+            "business":  "Write in a concise, executive business style: data-driven, action-oriented, ROI-focused language.",
+            "creative":  "Write in an engaging, visually rich creative style: vivid language, storytelling arc, compelling hooks.",
+        }
+        hint = _style_hints.get(style, f"Presentation style: {style}.")
+        user_message_parts.append(f"STYLE DIRECTIVE: {hint}")
+    user_message_parts += [
         f"Presentation topic: {safe_topic}",
-        f"Aggregated source material (gathered from uploaded files):\n---\n{safe_context}\n---",
+        f"Aggregated source material:\n---\n{safe_context}\n---",
     ]
     if rag_context.strip():
         safe_rag_context = _sanitize(rag_context)
@@ -781,7 +811,12 @@ def generate_deck_via_agent(
             "Additional context retrieved from the user's existing course "
             f"document knowledge base (vector database):\n---\n{safe_rag_context}\n---"
         )
-    user_message_parts.append("Call build_presentation now with the complete deck (exactly 20 slides).")
+    user_message_parts.append(
+        f"CRITICAL OVERRIDE — SLIDE COUNT: You MUST generate EXACTLY {slide_count} slides "
+        f"(not 20). Adjust slide 1 (title), slide 2 (agenda bullets), and slide "
+        f"{slide_count} (closing bullets) to the actual count. "
+        f"Call build_presentation now with the complete deck (exactly {slide_count} slides)."
+    )
     user_message = "\n\n".join(user_message_parts)
 
     try:
@@ -791,7 +826,7 @@ def generate_deck_via_agent(
                 {"role": "system", "content": _DECK_SYSTEM_PROMPT},
                 {"role": "user",   "content": user_message},
             ],
-            tools=[BUILD_PRESENTATION_TOOL],
+            tools=[build_tool],
             tool_choice={"type": "function", "function": {"name": "build_presentation"}},
             temperature=0.7,
             max_tokens=10000,

@@ -8,7 +8,7 @@ from werkzeug.utils import secure_filename
 from api.middleware import token_required
 from extensions import TOP_K, client, limiter
 from services.pdf import extract_pptx_text
-from services.rag import hybrid_search
+from services.rag import get_chunks_for_files, hybrid_search
 from services.security import strip_html
 from services.slides import BUILD_PRESENTATION_TOOL, generate_deck_via_agent
 
@@ -203,13 +203,37 @@ def generate_presentation(user_id: int):
     topic = strip_html((request.form.get("topic") or "").strip())
     course_name = strip_html((request.form.get("course_name") or "").strip()) or None
     uploaded_files = request.files.getlist("files")
+    presentation_style = strip_html((request.form.get("style") or "").strip())
+    try:
+        slide_count = max(5, min(20, int(request.form.get("slide_count", 20))))
+    except (TypeError, ValueError):
+        slide_count = 20
 
-    if not uploaded_files:
+    # Parse optional existing-document file IDs (comma-separated string).
+    raw_file_ids = (request.form.get("file_ids") or "").strip()
+    selected_file_ids = [fid.strip() for fid in raw_file_ids.split(",") if fid.strip()] if raw_file_ids else []
+
+    if not uploaded_files and not selected_file_ids:
         return jsonify({"error": "no files uploaded"}), 400
 
     sources: list[dict] = []
     context_parts: list[str] = []
 
+    # ── Existing indexed documents (via FAISS chunk retrieval) ────────────────
+    if selected_file_ids:
+        ex_chunks, ex_metas = get_chunks_for_files(user_id, selected_file_ids)
+        seen_sources: set[str] = set()
+        for chunk, meta in zip(ex_chunks, ex_metas):
+            src = meta.get("source", "?")
+            context_parts.append(f"[{src}]\n{chunk}")
+            if src not in seen_sources:
+                seen_sources.add(src)
+                sources.append({"filename": src, "type": "document", "chars": len(chunk)})
+        if ex_chunks:
+            print(f"[PresentationAgent] u{user_id}: loaded {len(ex_chunks)} chunks "
+                  f"from {len(seen_sources)} existing document(s)")
+
+    # ── Newly-uploaded files (via the 4-tool agent) ───────────────────────────
     for f in uploaded_files:
         filename = secure_filename(f.filename or "untitled")
         ext = _ext(filename)
@@ -265,7 +289,10 @@ def generate_presentation(user_id: int):
               f"from knowledge base as supplementary context"
               + (f" (course={course_name!r})" if course_name else ""))
 
-    valid, error = generate_deck_via_agent(client, deck_topic, context, rag_context)
+    valid, error = generate_deck_via_agent(
+        client, deck_topic, context, rag_context,
+        slide_count=slide_count, style=presentation_style,
+    )
     if error:
         print(f"[PresentationAgent] u{user_id}: slide generation error: {error}")
         return jsonify({"error": error}), 500

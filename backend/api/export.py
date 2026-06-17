@@ -5,7 +5,7 @@ import markdown
 from markdown.extensions.codehilite import CodeHiliteExtension
 from flask import Blueprint, Response, jsonify, request, send_file, stream_with_context
 
-from api.middleware import token_required
+from api.middleware import _build_student_crm, token_required
 from extensions import client, limiter
 from models import CustomCourse, SessionLocal, SyllabusTopicMastery, TopicMastery, User, UserDocument
 from services.mastery import UNLOCK_THRESHOLD, extract_syllabus_topics
@@ -41,6 +41,11 @@ def generate_paper(user_id: int):
     # (the "כתוב בשמך" / personal-style toggle) vs. a neutral student-academic tone.
     personal_style   = bool(data.get("personalStyle"))   if data else False
     is_final_section = bool(data.get("isFinalSection")) if data else False
+    writing_type     = strip_html((data.get("writingType") or "").strip() if data else "")
+    # Emails are always single-shot: force is_final_section so the backend generates
+    # the complete email structure in one pass regardless of what the frontend sent.
+    if writing_type == "email":
+        is_final_section = True
     # File IDs to restrict RAG retrieval to the exact documents selected by the user.
     # An empty list means "search all user documents" (sessions source type or no selection).
     raw_file_ids = data.get("fileIds") if data else None
@@ -56,19 +61,25 @@ def generate_paper(user_id: int):
     if not topic:
         return jsonify({"error": "topic is required"}), 400
 
-    # Accept a pre-computed name from the frontend (already fresh from /api/profile);
-    # fall back to the DB if the payload doesn't include one.
+    # Accept pre-computed name/institution from the frontend (already fresh from /api/profile);
+    # fall back to the DB if the payload doesn't include them.
     payload_student_name = (data.get("studentName") or "").strip() if data else ""
-    if payload_student_name:
+    payload_institution  = (data.get("institution")  or "").strip() if data else ""
+    if payload_student_name and payload_institution:
         student_name = payload_student_name
+        student_institution = payload_institution
     else:
         _db_user = SessionLocal()
         try:
             _user = _db_user.query(User).filter(User.id == user_id).first()
-            student_name = " ".join(filter(None, [
-                (_user.first_name or "").strip() if _user else "",
-                (_user.last_name  or "").strip() if _user else "",
-            ])).strip()
+            if not payload_student_name:
+                student_name = " ".join(filter(None, [
+                    (_user.first_name or "").strip() if _user else "",
+                    (_user.last_name  or "").strip() if _user else "",
+                ])).strip()
+            else:
+                student_name = payload_student_name
+            student_institution = payload_institution or ((_user.institution or "").strip() if _user else "")
         finally:
             _db_user.close()
 
@@ -79,8 +90,8 @@ def generate_paper(user_id: int):
     page_count = max(1, min(15, page_count))
     # Per-chunk word RANGE used in the pacing instruction below (and as a fallback
     # for target_word_count if the frontend omits targetWordCount).
-    chunk_word_min = 250
-    chunk_word_max = 300
+    chunk_word_min = 380
+    chunk_word_max = 520
     # Absolute word-count target for the WHOLE document. The frontend computes this
     # as pageCount * WORDS_PER_PAGE (single source of truth — see academic-writing/
     # page.tsx) and sends it explicitly so both sides agree; max_chunks-derived
@@ -117,6 +128,7 @@ def generate_paper(user_id: int):
     chunks, metadatas = hybrid_search(
         user_id, _rag_query, min(20, doc_count),
         file_ids=req_file_ids or None,
+        course_name=course_name or None,
     )
     if not chunks:
         return jsonify({"error": "no relevant chunks found for this topic"}), 400
@@ -138,8 +150,92 @@ def generate_paper(user_id: int):
     safe_instructions = _sanitize(instructions)
     safe_context      = _sanitize(context)
     safe_course       = _sanitize(course_name) if course_name else ""
-    safe_student_name = _sanitize(student_name) if student_name else ""
+    safe_student_name   = _sanitize(student_name)       if student_name       else ""
+    safe_institution    = _sanitize(student_institution) if student_institution else ""
     safe_previous_content = _sanitize(previous_content) if previous_content else ""
+
+    # ── Writing-type format override ────────────────────────────────────────────
+    # Injected at the END of the system prompt (maximum recency weight) so it
+    # supersedes the generic research-paper structure rules above for every type
+    # except "research", which matches the existing default.
+    _WRITING_TYPE_BLOCKS: dict[str, str] = {
+        "email": (
+            "\n\n=== CRITICAL FORMAT OVERRIDE — ACADEMIC EMAIL (אימייל אקדמי) ===\n"
+            "This document is a FORMAL ACADEMIC EMAIL — not a research paper, not an essay.\n"
+            "OVERRIDE: IGNORE every '## מבוא', '## תקציר', '## סיכום', '## מקורות', "
+            "and '## גוף' instruction above. DO NOT write any Markdown section headings at all.\n"
+            "OVERRIDE: IGNORE the '## סיכום' final-chunk instruction above — do not write "
+            "a conclusion section; write the email sign-off instead (see format below).\n\n"
+            "MANDATORY EMAIL STRUCTURE — output EXACTLY in this order:\n"
+            "1. **נושא:** [A concise, informative subject line in Hebrew — one sentence max]\n"
+            "2. A blank line\n"
+            "3. Formal salutation on its own line, e.g. 'לכבוד פרופ׳ [שם],' or "
+            "'שלום [שם],'\n"
+            "4. A blank line\n"
+            "5. Email body: 2–4 SHORT, polite paragraphs. "
+            "Be direct and concise — each paragraph under 3–4 sentences. "
+            "NO bullet points, NO subheadings, NO citations, NO source references.\n"
+            "6. A blank line\n"
+            "7. Professional sign-off on its own line: 'בכבוד רב,' or 'תודה רבה,'\n"
+            "8. The student's name on the very next line (transliterated into Hebrew if needed)\n\n"
+            "Generate the COMPLETE email in this single response. "
+            "Length: 120–200 words total. Formal, respectful, grammatically perfect Hebrew."
+        ),
+        "summary": (
+            "\n\n=== CRITICAL FORMAT OVERRIDE — SUMMARY (סיכום) ===\n"
+            "This document is a CONCISE STUDY SUMMARY — not a flowing research paper.\n"
+            "MANDATORY FORMAT RULES (override the prose-first rules above):\n"
+            "1. Use `# Title` for the document title and `## Section` headings for each "
+            "major topic — keep sections short and punchy.\n"
+            "2. Within EVERY section, use bullet points (`- `) for the vast majority of "
+            "content. Flowing prose paragraphs are PROHIBITED — extract the core "
+            "information into bullets. A prose paragraph is only allowed if no bullet "
+            "form is possible for that specific idea.\n"
+            "3. Bold (`**term**`) ALL key terms, important concepts, proper names, dates, "
+            "and critical values on first use within each section.\n"
+            "4. Each bullet: ONE complete idea, maximum 1–2 lines. No filler, no "
+            "repetition, no elaboration beyond what is needed to understand the point.\n"
+            "5. Quantitative data (numbers, percentages, thresholds, equations) MUST "
+            "appear explicitly in bullets — never bury them in prose.\n"
+            "6. NO abstract (תקציר). NO methodology section. NO flowing academic preamble.\n"
+            "7. The final section MUST be `## נקודות מפתח` containing the 3–5 most "
+            "important takeaways as bullets.\n"
+            "Think of this as a high-quality study sheet: a student must be able to scan "
+            "it in 2 minutes and absorb all essential information."
+        ),
+        "essay": (
+            "\n\n=== CRITICAL FORMAT OVERRIDE — ESSAY (חיבור) ===\n"
+            "This document is a structured academic ESSAY — NOT a formal research paper.\n"
+            "KEY DISTINCTIONS (these override the research-paper defaults above):\n"
+            "1. NO abstract (תקציר). NO methodology section. NO bibliography (מקורות) section.\n"
+            "2. STRUCTURE: `# Title` → `## פתיחה` (opening paragraph that states the "
+            "central thesis clearly) → 2–4 body sections with ARGUMENT-SPECIFIC `## ` "
+            "headings (e.g., '## הטיעון המרכזי', '## ניגוד הגישות') → `## סיכום` "
+            "(closing paragraph that returns to and reinforces the thesis). "
+            "DO NOT use generic headings like '## גוף הדיון'.\n"
+            "3. VOICE: personal, analytical, argumentative academic voice. "
+            "Make a clear claim in the opening and defend it throughout. "
+            "NOT a neutral encyclopedic survey — take a position and justify it.\n"
+            "4. FLOW: each body paragraph develops ONE specific aspect of the central "
+            "argument. Prioritize logical progression and coherent argumentation over "
+            "breadth of coverage.\n"
+            "5. Use `##` for structural sections ONLY. Do NOT use `###` sub-headings — "
+            "keep the essay as flowing, well-argued prose organized by argument, not "
+            "technically subdivided.\n"
+            "Write as a thoughtful student making and defending a point, not as an "
+            "encyclopedia entry or a formal lab report."
+        ),
+        "research": (
+            "\n\n=== DOCUMENT FORMAT: FORMAL RESEARCH PAPER (עבודת מחקר) ===\n"
+            "Follow the standard academic research paper structure throughout all chunks:\n"
+            "`# Title` → `## תקציר` (brief abstract, first chunk only) → `## מבוא` → "
+            "body sections with specific analytical `## ` headings → "
+            "`## סיכום` (final chunk only) → `## מקורות` (final chunk only, if sources cited).\n"
+            "Maintain formal, third-person, objective academic tone. "
+            "Cite specific authors and sources inline in parentheses wherever mentioned."
+        ),
+    }
+    _writing_type_block = _WRITING_TYPE_BLOCKS.get(writing_type, "")
 
     # NOTE: SECURITY_SYSTEM_INSTRUCTION is intentionally NOT prepended here.
     # That prefix labels the AI a "student assistant" and carries a
@@ -207,7 +303,15 @@ def generate_paper(user_id: int):
         "context (e.g., writing about Quantum Physics when the source is about Civil Law), "
         "that is a catastrophic, unacceptable failure. "
         "The topic in the user request is a focusing lens — it never overrides the subject "
-        "matter of the source documents.\n\n"
+        "matter of the source documents.\n"
+        "METADATA FIDELITY — ZERO TOLERANCE FOR HALLUCINATION: Never invent, guess, or "
+        "embellish course names, course codes, academic program names, department names, or "
+        "institutional affiliations that do not appear verbatim in the data supplied in this "
+        "prompt. The only valid course name is the one provided under 'Course/Subject context' "
+        "in the user message; the only valid institution is the one provided under "
+        "'Writing as student'. If neither field is provided for a given piece of metadata, "
+        "omit any reference to it entirely — never substitute a plausible-sounding placeholder "
+        "or a common Israeli university name as a default.\n\n"
         f"DOCUMENT LENGTH MODEL: The user requested a document length of {page_count} "
         f"page(s), which equals approximately {target_word_count} words in TOTAL across "
         f"the ENTIRE document. This total is NOT produced by a single response — it is "
@@ -279,7 +383,9 @@ def generate_paper(user_id: int):
         )
         + (
             f"\n\nAUTHORSHIP — GHOST-WRITING MODE: The author of this paper is "
-            f"{safe_student_name}. "
+            f"{safe_student_name}"
+            + (f", a student at {safe_institution}" if safe_institution else "")
+            + f". "
             f"CRITICAL NAME TRANSLITERATION RULE: If you are writing in Hebrew, you MUST "
             f"transliterate the student's name '{safe_student_name}' into Hebrew script whenever "
             f"you reference it inside the body of the document. "
@@ -291,12 +397,12 @@ def generate_paper(user_id: int):
             f"— take full authorship on their behalf, in the first person where appropriate, "
             f"as if {safe_student_name} sat down and wrote every word themselves.\n"
             f"CRITICAL — DO NOT write any attribution header yourself (no 'מאת:', 'קורס:', "
-            f"'שם:', 'מוגש על ידי:', 'תאריך:', or similar lines): the author/course/date header "
-            f"is rendered separately, deterministically, by the application UI and the export "
-            f"pipeline — using the verified name on file — precisely so it is always accurate "
-            f"and never duplicated. Writing one yourself would create a duplicate, conflicting "
-            f"header. Begin your first section directly with the document title (`# Title`), "
-            f"nothing before it.\n"
+            f"'שם:', 'מוגש על ידי:', 'תאריך:', 'מוסד לימודים:', or similar lines): the "
+            f"author/institution/course/date header is rendered separately, deterministically, "
+            f"by the application UI and the export pipeline — using the verified data on file "
+            f"— precisely so it is always accurate and never duplicated. Writing one yourself "
+            f"would create a duplicate, conflicting header. Begin your first section directly "
+            f"with the document title (`# Title`), nothing before it.\n"
             + (
                 f"PERSONAL VOICE REQUIREMENT (personal-style mode is ON): Write in a natural, "
                 f"cohesive, and deeply personal academic voice — exactly as {safe_student_name} "
@@ -350,32 +456,72 @@ def generate_paper(user_id: int):
                 "statement."
                 if not is_final_section else ""
             )
+            + (
+                "\n6. TECHNICAL DEPTH — MANDATORY: Never produce high-level encyclopedic "
+                "summaries that any educated reader could write without the source material. "
+                "For technical, scientific, or quantitative topics, each section MUST include "
+                "at least one of the following: (a) a specific technical comparison with "
+                "explicit trade-offs between two or more approaches, architectures, or "
+                "methods (e.g., comparing computational cost, latency, memory footprint, "
+                "or accuracy of competing solutions); (b) named architectural components, "
+                "algorithms, data structures, or mechanisms drawn directly from the source "
+                "text; (c) quantitative benchmarks, concrete metrics, or numerical "
+                "thresholds cited verbatim from the source (e.g., precision/recall figures, "
+                "time complexity, cost ratios). Answering 'what is X' without also addressing "
+                "'how does X compare to Y under condition Z' is descriptive, not analytical — "
+                "every technical concept must be interrogated, not just introduced.\n"
+                "7. RIGOROUS COMPARISONS: When the topic or source material involves "
+                "comparing two or more approaches, systems, methods, or schools of thought, "
+                "structure the comparison along at least THREE explicit dimensions (e.g., "
+                "scalability, resource cost, theoretical assumption, practical limitation, "
+                "accuracy under distribution shift, deployment constraints, interpretability). "
+                "A comparison that only lists advantages of one side is advocacy, not "
+                "analysis. Always state the conditions or constraints under which one "
+                "approach outperforms the other — a technically sound comparison always "
+                "includes the counter-case.\n"
+                "8. PRECISE PROFESSIONAL TERMINOLOGY: Write at the level of an advanced "
+                "university student in the relevant discipline. For STEM and technical "
+                "topics, use the exact professional terminology that appears in the source "
+                "material — do not paraphrase technical terms into lay language. For "
+                "humanities and social science topics, use the discipline's theoretical "
+                "vocabulary precisely. Never substitute vague generalizations ('this method "
+                "is better') for specific, qualified claims ('this method achieves lower "
+                "inference latency at the cost of higher fine-tuning compute, as shown "
+                "in the source')."
+            )
         )
         + (
             # ── PER-CHUNK PACING INSTRUCTION — applies to EVERY chunk ──
             # Body chunks keep developing new material at length; the conclusion
             # (and ONLY the conclusion) is reserved for the final chunk.
-            f"\n\nCRITICAL PACING INSTRUCTION: This is the FINAL chunk of this "
-            f"document. Write a deep, comprehensive conclusion of approximately "
-            f"{chunk_word_min}-{chunk_word_max} words: use '## סיכום', summarize and "
-            f"synthesize all key arguments developed across the document, and "
-            f"formally close the paper. Maintain the same high academic standard as "
-            f"the rest of the document — do not pad with repetition, but do not cut "
-            f"the conclusion artificially short either."
+            f"\n\nCRITICAL PACING INSTRUCTION — FINAL CHUNK: Write a comprehensive "
+            f"conclusion of approximately 200-300 words. Open with '## סיכום', "
+            f"synthesize the key arguments developed across the document, and formally "
+            f"close the paper. Maintain the same academic standard — no padding, no "
+            f"repetition, but no artificially short closing either."
             if is_final_section else
-            f"\n\nCRITICAL PACING INSTRUCTION: Your task is to help build a long, "
-            f"comprehensive academic paper. Write a deep, highly detailed section of "
-            f"approximately {chunk_word_min}-{chunk_word_max} words. Dive deeply into "
-            f"the source material. Expand on theories, quote examples from the text, "
-            f"and maintain a high academic standard. DO NOT summarize or conclude. "
-            f"Keep the narrative flowing — the overall ~{target_word_count}-word "
-            f"target for this {page_count}-page document is reached across multiple "
-            f"chunks like this one."
+            f"\n\nCRITICAL LENGTH DIRECTIVE — MANDATORY:\n"
+            f"This is a BODY chunk for a {page_count}-page paper (~{target_word_count} "
+            f"words total). You MUST write a MINIMUM of {chunk_word_min} words in this "
+            f"response, up to a maximum of {chunk_word_max} words.\n"
+            f"YOU ARE STRICTLY FORBIDDEN FROM STOPPING BEFORE {chunk_word_min} WORDS "
+            f"ARE WRITTEN. If you reach {chunk_word_max} words mid-sentence, finish the "
+            f"sentence and stop — but never stop before reaching {chunk_word_min} words.\n"
+            f"HOW TO REACH THE MINIMUM: Expand on every point — dedicate 3-5 sentences "
+            f"to each named author, concept, or finding from the source material. After "
+            f"making a claim, elaborate on its implications, compare it to a contrasting "
+            f"approach from the source, and give a concrete example. Do NOT summarize "
+            f"or conclude — end this chunk mid-flow so the next chunk continues naturally."
         )
+        + _writing_type_block
     )
     style_guidelines = safe_instructions if safe_instructions else "Standard professional formal tone"
     course_line = f"Course/Subject context: {safe_course}\n" if safe_course else ""
-    student_line = f"Writing as student: {safe_student_name}\n" if safe_student_name else ""
+    student_line = (
+        f"Writing as student: {safe_student_name}"
+        + (f" ({safe_institution})" if safe_institution else "")
+        + "\n"
+    ) if safe_student_name else ""
     # Length-progress awareness: without this, a model asked for "~10-15 more lines"
     # on a short (e.g. 1-page / ~350-word) paper has no idea it has already said
     # everything there is to say at that length — so it keeps inventing "new"
@@ -447,9 +593,9 @@ def generate_paper(user_id: int):
                     {"role": "user",   "content": user_message},
                 ],
                 temperature=0.4,
-                # Generous ceiling so a ~250-300-word chunk (plus, on the final
-                # chunk, '## סיכום'/'## מקורות' headings) is never cut off mid-sentence.
-                max_tokens=800,
+                # 1500 tokens gives the model room to generate 380-520-word body chunks
+                # (~500-700 tokens) or a 200-300-word conclusion without being cut off.
+                max_tokens=1500,
                 stream=True,
             )
 

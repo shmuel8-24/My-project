@@ -121,15 +121,22 @@ function CourseOptionCard({ course, he, onSelect }: { course: Course; he: boolea
   );
 }
 
-/* ── Quick Action Crystal Card ───────────────────────────────────────────── */
+/* ── Quick Action Card — clean white with matcha hover ───────────────────── */
 function CrystalCard({ title, subtitle, onClick }: { title: string; subtitle: string; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="flex flex-col gap-1 p-6 rounded-2xl w-full text-right bg-gradient-to-br from-sky-100 to-sky-50 border border-sky-300 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:bg-sky-200 hover:border-sky-400 hover:shadow-lg hover:shadow-sky-300/40 active:scale-95"
+      className="flex flex-col gap-1.5 p-6 rounded-2xl w-full text-right bg-white border border-[#C8DFC0] hover:bg-[#F4FAF0] hover:border-[#90C083] hover:-translate-y-0.5 active:scale-[0.99] transition-all duration-200"
+      style={{ boxShadow: '0 2px 10px rgba(20,42,16,0.09), 0 1px 3px rgba(20,42,16,0.05)' }}
+      onMouseEnter={e => {
+        (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 8px 24px rgba(20,42,16,0.14), 0 2px 6px rgba(20,42,16,0.07)';
+      }}
+      onMouseLeave={e => {
+        (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 2px 10px rgba(20,42,16,0.09), 0 1px 3px rgba(20,42,16,0.05)';
+      }}
     >
-      <p className="text-sky-950 text-xl font-bold">{title}</p>
-      <p className="text-sky-700 text-sm">{subtitle}</p>
+      <p className="font-bold text-xl text-[#1C3329]">{title}</p>
+      <p className="text-sm text-[#527061]">{subtitle}</p>
     </button>
   );
 }
@@ -502,7 +509,7 @@ export default function DashboardPage() {
 
           {selectedCourse ? (
             <>
-              {/* Crystal action cards */}
+              {/* Action cards */}
               <div>
                 <div style={{ display:'flex', alignItems:'center', gap:8, padding:'0 4px', marginBottom:16 }}>
                   <div style={{ width:4, height:16, borderRadius:9999, background:'linear-gradient(180deg,#4ADE80,#2C4A3B)', flexShrink:0 }} />
@@ -510,7 +517,7 @@ export default function DashboardPage() {
                     {he ? 'פעולות לקורס זה' : 'Actions for this course'}
                   </p>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <CrystalCard title={he ? 'מרחב לימוד'      : 'StudyLab'}         subtitle={he ? 'שאל על החומר'                    : 'Ask about material'}           onClick={() => router.push('/workspace')} />
                   <CrystalCard title={he ? 'הראש של המרצה'   : "Prof's Brain"}     subtitle={he ? 'סימולציית מבחן'                  : 'Exam simulation'}              onClick={() => router.push('/workspace/professor-simulator')} />
                   <CrystalCard title={he ? 'שליטה בחומר'     : 'Mastery'}          subtitle={he ? 'חידונים ומעקב'                   : 'Quizzes & tracking'}           onClick={() => router.push(`/mastery?course=${selectedCourse.id}`)} />

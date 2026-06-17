@@ -8,6 +8,21 @@ The monorepo-level `../CLAUDE.md` is the authoritative architecture reference (p
 tokens, API surface, conventions, etc.) — read it first. The notes below cover things that have
 since changed or aren't yet captured there.
 
+## Commands (run from `frontend/`)
+
+```bash
+npm run dev      # dev server (Turbopack, hot reload) — http://localhost:3000
+npm run build    # production build
+npm run lint     # ESLint — must pass before committing
+npx tsc --noEmit # type-check without emitting
+npm run clean    # rm -rf .next (use when Turbopack cache misbehaves after big refactors)
+```
+
+There is no test suite configured (no `*.test.*`/`*.spec.*` files, no test script in `package.json`).
+
+To lint or type-check a single file: `npx eslint src/app/academic-writing/page.tsx` or rely on
+`tsc --noEmit` (project-wide; TS has no single-file mode that respects `tsconfig.json` path aliases).
+
 ## `middleware.ts` — hybrid auth guard (newer than documented upstream)
 
 The root CLAUDE.md describes `middleware.ts` as a pass-through. It no longer is — it now actively
@@ -32,8 +47,97 @@ browser client exists; this looks like in-progress migration scaffolding at the 
 
 ## Scale note
 
-`workspace/page.tsx`: ~3087 lines. `academic-writing/page.tsx`: ~2125 lines. Both follow the
+`workspace/page.tsx`: ~3087 lines. `academic-writing/page.tsx`: ~2200+ lines. Both follow the
 same single-file, inline-everything pattern — the root CLAUDE.md has the up-to-date counts.
+
+## Academic Writing wizard — URL-based navigation (critical)
+
+`academic-writing/page.tsx` uses **URL query params as the source of truth for wizard step and
+phase** — not local state. This is what keeps the browser Back button active throughout the flow.
+
+- `Wizard` component derives `step: 1 | 2 | 3` from `useSearchParams().get('step')`. The
+  `const [step, setStep]` pattern does NOT exist — there is no `setStep`.
+- "Next" button calls `router.push('?step=N')` — writes a browser history entry.
+- "Back" button calls `router.back()` — pops the history stack.
+- `AcademicWritingPage` derives `phase: 'config' | 'writing'` from
+  `searchParams.get('step') === 'writing' ? 'writing' : 'config'`. The `setPhase` call does NOT
+  exist — `phase` is a `const`, not state.
+- Clicking "Start Writing" (the `onStart` callback) calls `router.push('?step=writing')`.
+- `onBack` in `WritingPanel` calls `router.back()`.
+- Auth-guard `router.replace()` calls in `useEffect` are intentionally NOT `router.push()` — do
+  not change those.
+
+History sequence: `/academic-writing` → `?step=2` → `?step=3` → `?step=writing` → Back re-enables
+the browser ← arrow at every transition.
+
+## Academic Writing wizard — layout and card design
+
+**Outer container width** is step-conditional (`step <= 2 ? 'max-w-3xl' : 'max-w-lg'`): wide for
+steps 1 and 2 so the horizontal card grids have room; narrow for step 3 (Confirm).
+
+**Outer card background** is also step-conditional (`step === 3 ? card : {}`): the frosted glass
+card style only applies on step 3. Steps 1 and 2 render transparently — option tiles float
+directly on the page background. Do NOT revert this to a uniform card style.
+
+**Step 1 — source selection**: `SourceTile` is a vertical card (emoji on top, title + subtitle
+centered below, `minHeight: 160px`). The three tiles sit in a `grid grid-cols-3 gap-6`. Expanded
+sub-content (dropzone / document list / session list) renders as a full-width sibling below the
+grid, NOT nested inside the grid cells.
+
+**Step 2 — writing type**: Three cards in `grid grid-cols-3 gap-6`, `minHeight: 180px`. Only three
+types exist: `essay` (חיבור), `research` (עבודת מחקר), `summary` (סיכום). The `email` option was
+permanently removed — do not add it back. `WritingTypeId` derives from `WRITING_TYPES as const` so
+the TypeScript type automatically reflects the three valid IDs.
+
+## Academic Writing — generation constants
+
+Both sides must agree on these values (frontend sends `targetWordCount` explicitly so the backend
+uses the same target):
+
+| Constant | Location | Value | Purpose |
+|---|---|---|---|
+| `WORDS_PER_PAGE` | `academic-writing/page.tsx` | **400** | Word target per page |
+| `CHUNKS_PER_PAGE` | `academic-writing/page.tsx` | **2** | Max chunks per page (safety net) |
+| `chunk_word_min` | `backend/api/export.py` | **380** | Minimum words per body chunk |
+| `chunk_word_max` | `backend/api/export.py` | **520** | Maximum words per body chunk |
+| `max_tokens` (generate-paper) | `backend/api/export.py` | **1500** | LLM token ceiling per chunk |
+
+`isFinalSection` is the PRIMARY stopping condition (`wordsSoFar >= targetWords`); chunk count is a
+fallback safety net. The conclusion chunk targets ~200–300 words (not `chunk_word_min/max`) — the
+pacing instruction is hardcoded separately for the final chunk.
+
+## Academic Writing — writing type format injection
+
+The frontend sends `writingType: 'essay' | 'research' | 'summary' | null` as a top-level field in
+every `/generate-paper` POST body. The backend (`export.py`) extracts it and appends a
+`_WRITING_TYPE_BLOCKS[writing_type]` string at the **very end** of the system prompt (maximum
+recency weight). Each block contains strong structural override instructions specific to the type:
+
+- `essay`: No abstract/methodology/bibliography; thesis-driven `## פתיחה`/body/`## סיכום`; personal argumentative voice.
+- `research`: Standard academic paper structure (תקציר → מבוא → body → סיכום → מקורות).
+- `summary`: Bullet-point-first, bold key terms, `## נקודות מפתח` closing; flowing prose prohibited.
+
+The `_WRITING_TYPE_BLOCKS` dict also has an `email` key (dead code, harmless) retained for safety.
+
+## Student CRM — global LLM profile injection
+
+`backend/api/middleware.py` exports `_build_student_crm(user) -> str` which builds a student
+profile string from `institution`, `country`, `degree_type`, `primary_major`, `secondary_major`,
+`study_year`, `ai_style`, and `crm_profile` (a freeform AI-tutor-notes field). This string is
+injected into the system prompt of every LLM call in `documents.py` (`/ask`), `export.py`
+(`/generate-paper`), and `professor.py`. The injection block is a no-op when the string is empty
+(user hasn't completed onboarding).
+
+## Course isolation — `courseName` in all API payloads
+
+All RAG endpoints pass `course_name` to `hybrid_search`. The frontend sends `courseName` (camelCase)
+in every API payload where a course is active:
+
+- `/ask` (workspace): `if (selectedCourse?.name) payload.course_name = selectedCourse.name;`
+- `/generate-paper` (academic-writing): `courseName: selectedCourse?.name ?? null`
+- `/professor-simulator/ask`: `course_name: selectedCourse?.name ?? ''`
+
+Do not make RAG calls without forwarding the active course — it causes cross-course context leakage.
 
 ## Empty scaffold directories — ignore
 
@@ -106,19 +210,3 @@ commands (insert image / equation / code block) and KaTeX + Prism rendering in t
 Used exclusively by `academic-writing/page.tsx`. **Must always be loaded via
 `dynamic(() => import(...), { ssr: false })`** — `@uiw/react-md-editor` touches `window` at module
 evaluation time and will break SSR otherwise.
-
-## Commands (run from `frontend/`)
-
-```bash
-npm run dev      # dev server (Turbopack, hot reload) — http://localhost:3000
-npm run build    # production build
-npm run lint     # ESLint — must pass before committing
-npx tsc --noEmit # type-check without emitting
-npm run clean    # rm -rf .next (use when Turbopack cache misbehaves after big refactors)
-```
-
-There is no test suite configured (no `*.test.*`/`*.spec.*` files, no test script in `package.json`).
-
-To lint or type-check a single file, pass its path directly, e.g.
-`npx eslint src/app/academic-writing/page.tsx` or rely on `tsc --noEmit` (project-wide; TS has no
-single-file mode that respects `tsconfig.json` path aliases).

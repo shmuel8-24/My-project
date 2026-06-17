@@ -1230,6 +1230,7 @@ interface ChatInterfaceProps {
 }
 
 function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, onSessionsUpdated, lang, t, ephemeralFiles }: ChatInterfaceProps) {
+  const { selectedCourse } = useCourse();
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [localSessionId, setLocalSessionId] = useState<number | null>(sessionId);
   const [input, setInput] = useState('');
@@ -1289,7 +1290,11 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
         const res = await authFetch(`${API}/documents`);
         if (!res.ok) return;
         const data = await res.json() as { documents: DocumentInfo[] };
-        Promise.resolve().then(() => setAvailableDocs(data.documents ?? []));
+        const filtered = (data.documents ?? []).filter((d: DocumentInfo) => {
+          const fn = (d.name || d.file_name || d.filename || '').toLowerCase();
+          return !d.is_syllabus && !fn.includes('syllabus') && !fn.includes('מפתחי קורס');
+        });
+        Promise.resolve().then(() => setAvailableDocs(filtered));
       } catch { /* ignore — filter bar just won't appear */ }
     })();
   }, [hasDoc]);
@@ -1318,6 +1323,7 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
       } else {
         const payload: Record<string, unknown> = { message: q, session_id: localSessionId };
         if (selectedFileId) payload.file_id = selectedFileId;
+        if (selectedCourse?.name) payload.course_name = selectedCourse.name;
         response = await authFetch(`${API}/ask`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

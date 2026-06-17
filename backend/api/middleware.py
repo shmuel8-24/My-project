@@ -88,6 +88,28 @@ def _get_user_refreshed(db, user_id: int):
     return user
 
 
+def _build_student_crm(user) -> str:
+    """Compose a concise student context block from onboarding fields + AI notes.
+
+    Injected into every LLM system prompt so agents can adapt their teaching
+    style, analogies, and difficulty level to this specific student — without
+    accessing cross-course document content.
+    """
+    if not user:
+        return ""
+    parts: list[str] = []
+    if user.institution:      parts.append(f"Institution: {user.institution}")
+    if user.country:          parts.append(f"Country: {user.country}")
+    if user.degree_type:      parts.append(f"Degree: {user.degree_type}")
+    if user.primary_major:    parts.append(f"Major: {user.primary_major}")
+    if user.secondary_major:  parts.append(f"Minor: {user.secondary_major}")
+    if user.study_year:       parts.append(f"Year of study: {user.study_year}")
+    if user.ai_style:         parts.append(f"Preferred learning style: {user.ai_style}")
+    crm_notes = getattr(user, "crm_profile", None)
+    if crm_notes:             parts.append(f"AI tutor notes: {crm_notes}")
+    return "\n".join(parts)
+
+
 def _save_ai_message(session_id: int, content: str) -> None:
     try:
         db = SessionLocal()

@@ -10,6 +10,7 @@ from flask import Blueprint, Response, jsonify, request, send_file, stream_with_
 from werkzeug.utils import secure_filename
 
 from api.middleware import (
+    _build_student_crm,
     _get_user_refreshed,
     _save_ai_message,
     token_required,
@@ -620,8 +621,9 @@ def ask(user_id: int):
         print(f"[PII] Sanitized/masked user prompt for u{user_id}")
     question = _q_safe
 
-    session_id_in  = data.get("session_id") if data else None
-    file_id_filter = data.get("file_id")    if data else None
+    session_id_in  = data.get("session_id")   if data else None
+    file_id_filter = data.get("file_id")      if data else None
+    course_name    = (data.get("course_name") or "").strip() or None   if data else None
 
     print("\n" + "━" * 62)
     print(f"▶ /ask  u{user_id}")
@@ -649,11 +651,13 @@ def ask(user_id: int):
     if doc_count == 0 and not user_images:
         return jsonify({"error": "no documents in the knowledge base — upload a file first"}), 400
 
+    _crm_profile: str = ""
     db = SessionLocal()
     try:
         _ask_user = _get_user_refreshed(db, user_id)
         if _ask_user:
             _ask_user.questions_this_month += 1
+            _crm_profile = _build_student_crm(_ask_user)
 
         if session_id_in:
             chat_session = db.query(ChatSession).filter(
@@ -761,7 +765,9 @@ def ask(user_id: int):
                 return
 
             chunks, metadatas = hybrid_search(
-                user_id, search_query, min(TOP_K, doc_count), file_id=file_id_filter
+                user_id, search_query, min(TOP_K, doc_count),
+                file_id=file_id_filter,
+                course_name=course_name,
             )
 
             if not chunks and not tavily_client and not user_images:
@@ -842,6 +848,14 @@ def ask(user_id: int):
                     "and relate relevant visual content to the question."
                 )
 
+            _crm_block = (
+                f"\n\nSTUDENT PROFILE — adapt your teaching to this specific student:\n"
+                f"{_crm_profile}\n"
+                "Use analogies and examples from their field. Calibrate depth to their year "
+                "of study. NEVER surface material from other courses or outside this course's "
+                "documents."
+            ) if _crm_profile else ""
+
             system_prompt = (
                 SECURITY_SYSTEM_INSTRUCTION
                 + "You are a scientist, engineer, and knowledgeable assistant for U-Note, "
@@ -867,6 +881,7 @@ def ask(user_id: int):
                 + web_search_instruction
                 + code_interpreter_instruction
                 + image_instruction
+                + _crm_block
             )
 
             text_content = (

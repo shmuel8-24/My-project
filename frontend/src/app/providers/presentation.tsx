@@ -57,17 +57,23 @@ export interface SourceResult {
 }
 
 interface PresentationContextValue {
-  topic:         string;
-  setTopic:      (topic: string) => void;
-  pending:       PendingFile[];
-  addFiles:      (files: File[]) => void;
-  removeFile:    (id: string) => void;
-  isGenerating:  boolean;
-  error:         string | null;
-  slides:        DeckSlide[] | null;
-  sources:       SourceResult[];
-  generate:      () => Promise<void>;
-  reset:         () => void;
+  topic:                string;
+  setTopic:             (topic: string) => void;
+  pending:              PendingFile[];
+  addFiles:             (files: File[]) => void;
+  removeFile:           (id: string) => void;
+  selectedFileIds:      string[];
+  setSelectedFileIds:   (ids: string[]) => void;
+  slideCount:           number;
+  setSlideCount:        (n: number) => void;
+  presentationStyle:    string;
+  setPresentationStyle: (s: string) => void;
+  isGenerating:         boolean;
+  error:                string | null;
+  slides:               DeckSlide[] | null;
+  sources:              SourceResult[];
+  generate:             () => Promise<void>;
+  reset:                () => void;
 }
 
 const PresentationContext = createContext<PresentationContextValue | null>(null);
@@ -81,12 +87,15 @@ export function PresentationProvider({ children }: { children: ReactNode }) {
   const { lang } = useLanguage();
   const he = lang === 'he';
 
-  const [topic,        setTopic]        = useState('');
-  const [pending,      setPending]      = useState<PendingFile[]>([]);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [error,        setError]        = useState<string | null>(null);
-  const [slides,       setSlides]       = useState<DeckSlide[] | null>(null);
-  const [sources,      setSources]      = useState<SourceResult[]>([]);
+  const [topic,              setTopic]              = useState('');
+  const [pending,            setPending]            = useState<PendingFile[]>([]);
+  const [selectedFileIds,    setSelectedFileIds]    = useState<string[]>([]);
+  const [slideCount,         setSlideCount]         = useState(10);
+  const [presentationStyle,  setPresentationStyle]  = useState('academic');
+  const [isGenerating,       setIsGenerating]       = useState(false);
+  const [error,              setError]              = useState<string | null>(null);
+  const [slides,             setSlides]             = useState<DeckSlide[] | null>(null);
+  const [sources,            setSources]            = useState<SourceResult[]>([]);
 
   const addFiles = useCallback((files: File[]) => {
     setError(null);
@@ -118,16 +127,20 @@ export function PresentationProvider({ children }: { children: ReactNode }) {
   }, [selectedCourse]);
 
   const generate = useCallback(async () => {
-    if (pending.length === 0 || isGenerating) return;
+    const hasContent = pending.length > 0 || selectedFileIds.length > 0;
+    if (!hasContent || isGenerating) return;
     setIsGenerating(true);
     setError(null);
 
-    persistToCourseLibrary(pending.map(p => p.file));
+    if (pending.length > 0) persistToCourseLibrary(pending.map(p => p.file));
 
     try {
       const form = new FormData();
       if (topic.trim()) form.append('topic', topic.trim());
       if (selectedCourse) form.append('course_name', selectedCourse.name);
+      form.append('slide_count', String(slideCount));
+      if (presentationStyle) form.append('style', presentationStyle);
+      if (selectedFileIds.length > 0) form.append('file_ids', selectedFileIds.join(','));
       pending.forEach(p => form.append('files', p.file));
 
       const res = await authFetch(`${API}/api/generate-presentation`, {
@@ -147,12 +160,13 @@ export function PresentationProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsGenerating(false);
     }
-  }, [pending, topic, isGenerating, he, selectedCourse, persistToCourseLibrary]);
+  }, [pending, selectedFileIds, topic, slideCount, presentationStyle, isGenerating, he, selectedCourse, persistToCourseLibrary]);
 
   const reset = useCallback(() => {
     setSlides(null);
     setSources([]);
     setPending([]);
+    setSelectedFileIds([]);
     setTopic('');
     setError(null);
   }, []);
@@ -170,9 +184,13 @@ export function PresentationProvider({ children }: { children: ReactNode }) {
   }
 
   const value = useMemo<PresentationContextValue>(() => ({
-    topic, setTopic, pending, addFiles, removeFile,
+    topic, setTopic,
+    pending, addFiles, removeFile,
+    selectedFileIds, setSelectedFileIds,
+    slideCount, setSlideCount,
+    presentationStyle, setPresentationStyle,
     isGenerating, error, slides, sources, generate, reset,
-  }), [topic, pending, addFiles, removeFile, isGenerating, error, slides, sources, generate, reset]);
+  }), [topic, pending, addFiles, removeFile, selectedFileIds, slideCount, presentationStyle, isGenerating, error, slides, sources, generate, reset]);
 
   return (
     <PresentationContext.Provider value={value}>

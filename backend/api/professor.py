@@ -13,7 +13,7 @@ import os
 import openai
 from flask import Blueprint, jsonify, request
 
-from api.middleware import _current_month_key, token_required
+from api.middleware import _build_student_crm, _current_month_key, token_required
 from extensions import TOP_K, client, limiter
 from models import SessionLocal, User, UserDocument
 from services.rag import get_chunks_for_files, get_past_exam_file_ids, get_user_collection, hybrid_search
@@ -156,8 +156,9 @@ def professor_ask(user_id: int):
             "status": "error",
         }), 503
 
-    # ── 2. Track simulation usage (no limit enforced — platform is free) ────────
+    # ── 2. Track simulation usage + capture student CRM ─────────────────────
     _db_plan = SessionLocal()
+    _crm_profile: str = ""
     try:
         _u = _db_plan.query(User).filter(User.id == user_id).first()
         if not _u:
@@ -167,6 +168,7 @@ def professor_ask(user_id: int):
             _u.prof_sim_month_key   = _month
             _u.prof_sims_this_month = 0
         _u.prof_sims_this_month += 1
+        _crm_profile = _build_student_crm(_u)
         _db_plan.commit()
     finally:
         _db_plan.close()
@@ -252,7 +254,9 @@ def professor_ask(user_id: int):
                         all_chunks.extend(fc)
                         all_metas.extend(fm)
                 else:
-                    all_chunks, all_metas = hybrid_search(user_id, question, TOP_K)
+                    all_chunks, all_metas = hybrid_search(
+                        user_id, question, TOP_K, course_name=course_name
+                    )
 
             # Pull the full text of the lecturer's past exams (not query-driven
             # top-k) so the agent can recognize recurring patterns/question
@@ -290,6 +294,18 @@ def professor_ask(user_id: int):
             has_past_exams=bool(past_exam_context),
         )
         context_label = "חומר לימוד רלוונטי מהמסמכים שלי"
+
+    # Inject the student's global learning profile so the professor persona
+    # can calibrate difficulty, analogies, and depth to this specific student —
+    # without ever crossing into another course's material.
+    if _crm_profile:
+        system_prompt += (
+            f"\n\nSTUDENT PROFILE — the student you are examining:\n"
+            f"{_crm_profile}\n"
+            "Calibrate question difficulty, use examples from their field of study, "
+            "and pitch analogies at their level. This context is global — NEVER hint "
+            "at or retrieve material from courses other than the one in focus."
+        )
 
     context_parts: list[str] = []
     if context_text:

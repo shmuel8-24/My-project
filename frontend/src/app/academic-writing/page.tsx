@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { Settings as IconSettings, Minus, Plus, Home, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, LogOut, Folder } from 'lucide-react';
 import { useAuth }     from '../providers/auth';
 import { useLanguage } from '../providers/language';
@@ -133,10 +133,9 @@ interface SessionInfo { id: number; title: string; updated_at: string; }
 interface UploadedFile { name: string; size: number; fileId: string; }
 
 const WRITING_TYPES = [
-  { id: 'essay',    emoji: '✍️',  he: 'חיבור',         en: 'Essay' },
-  { id: 'research', emoji: '📚',  he: 'עבודת מחקר',    en: 'Research Paper' },
-  { id: 'summary',  emoji: '📝',  he: 'סיכום',          en: 'Summary' },
-  { id: 'email',    emoji: '📧',  he: 'אימייל אקדמי',  en: 'Academic Email' },
+  { id: 'essay',    emoji: '✍️',  he: 'חיבור',       en: 'Essay' },
+  { id: 'research', emoji: '📚',  he: 'עבודת מחקר',  en: 'Research Paper' },
+  { id: 'summary',  emoji: '📝',  he: 'סיכום',        en: 'Summary' },
 ] as const;
 type WritingTypeId = typeof WRITING_TYPES[number]['id'];
 
@@ -561,6 +560,7 @@ function Wizard({
   initialPageCount?: number;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   // Hard filter: never surface syllabus files in the document-selection list.
   const visibleDocs = docs.filter(d => {
@@ -569,7 +569,11 @@ function Wizard({
     return !fileName.includes('syllabus') && !fileName.includes('מפתחי קורס');
   });
 
-  const [step,               setStep]               = useState<1 | 2 | 3>(initialStep ?? 1);
+  // Derive step from URL so browser Back/Forward work natively.
+  const _urlStepNum = parseInt(searchParams.get('step') ?? '', 10);
+  const step: 1 | 2 | 3 = (_urlStepNum === 1 || _urlStepNum === 2 || _urlStepNum === 3)
+    ? _urlStepNum
+    : (initialStep ?? 1);
   const [sourceType,         setSourceType]         = useState<SourceType | null>(initialSourceType ?? null);
   const [customInstructions, setCustomInstructions] = useState(initialCustomInstructions ?? '');
   const [usePersonalStyle,   setUsePersonalStyle]   = useState(initialUsePersonalStyle ?? false);
@@ -636,23 +640,19 @@ function Wizard({
     boxShadow: '0 4px 16px rgba(81,123,62,0.12)',
   };
 
-  /* ── Source-type tile ── */
+  /* ── Source-type tile — vertical card layout ── */
   function SourceTile({ id, emoji, title, subtitle }: { id: SourceType; emoji: string; title: string; subtitle: string }) {
     const active = sourceType === id;
     return (
       <button onClick={() => { setSourceType(id); onSelectSession(null); onSelectDoc(null); }}
-        className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-start"
-        style={active ? tileActive : tileBase}
+        className="flex flex-col items-center justify-center gap-3 px-4 rounded-2xl text-center transition-all active:scale-[0.97] w-full"
+        style={{ minHeight: '160px', ...(active ? tileActive : tileBase) }}
         onMouseEnter={e => { if (!active) Object.assign((e.currentTarget as HTMLButtonElement).style, { background: 'rgba(255,255,255,0.75)', borderColor: 'rgba(255,255,255,0.65)' }); }}
-        onMouseLeave={e => { if (!active) Object.assign((e.currentTarget as HTMLButtonElement).style, { background: tileBase.background, borderColor: (tileBase.border as string).replace('1px solid ', '') }); }}>
-        <span className="text-3xl shrink-0 leading-none">{emoji}</span>
-        <div className="flex-1 min-w-0">
+        onMouseLeave={e => { if (!active) Object.assign((e.currentTarget as HTMLButtonElement).style, { background: tileBase.background as string, borderColor: (tileBase.border as string).replace('1px solid ', '') }); }}>
+        <span className="text-4xl leading-none">{emoji}</span>
+        <div>
           <p className="font-bold text-sm" style={{ color: active ? '#183025' : '#2C4A3B' }}>{title}</p>
           <p className="text-xs mt-0.5" style={{ color: '#7BA08A' }}>{subtitle}</p>
-        </div>
-        <div className="w-5 h-5 rounded-full border-2 shrink-0 flex items-center justify-center"
-          style={{ borderColor: active ? '#517B3E' : 'rgba(157,192,139,0.5)', background: active ? '#517B3E' : 'transparent' }}>
-          {active && <IconCheck className="w-3 h-3 text-white" />}
         </div>
       </button>
     );
@@ -714,7 +714,7 @@ function Wizard({
   const wtEmoji = WRITING_TYPES.find(w => w.id === writingType)?.emoji ?? '✍️';
 
   return (
-    <div className="flex flex-col items-center w-full max-w-lg mx-auto px-4 py-8 gap-8">
+    <div className="flex flex-col items-center w-full max-w-3xl mx-auto px-4 py-8 gap-8">
 
       {/* Progress bar */}
       <div className="flex items-center gap-0 w-full max-w-xs">
@@ -744,8 +744,8 @@ function Wizard({
         })}
       </div>
 
-      {/* Step card */}
-      <div className="w-full rounded-3xl p-6 flex flex-col gap-5" style={card}>
+      {/* Step card — always transparent; each step manages its own card surfaces */}
+      <div className="w-full flex flex-col gap-5">
 
         {/* ── Step 1: Source ── */}
         {step === 1 && (
@@ -754,7 +754,7 @@ function Wizard({
               <h2 className="text-xl font-bold" style={{ color: '#1C3329' }}>{t.leftTitle}</h2>
               <p className="text-sm mt-1" style={{ color: '#527061' }}>{he ? 'מה הבסיס שממנו תרצה לכתוב?' : 'What material will you base your writing on?'}</p>
             </div>
-            <div className="flex flex-col gap-2.5">
+            <div className="grid grid-cols-3 gap-6">
               <SourceTile id="upload"
                 emoji="📤"
                 title={t.rightTitle}
@@ -771,21 +771,20 @@ function Wizard({
 
             {/* Sub-content expands when a source type is selected */}
             {sourceType === 'upload' && (
-              <div className="mt-1 flex flex-col gap-3">
+              <div className="flex flex-col gap-3">
                 <div {...getRootProps()}
-                  className="rounded-2xl flex flex-col items-center justify-center gap-3 px-6 py-8 text-center select-none cursor-pointer transition-all"
+                  className="rounded-2xl flex flex-col items-center justify-center gap-5 px-8 py-14 text-center select-none cursor-pointer transition-all"
                   style={isDragActive
-                    ? { background: 'rgba(255,255,255,0.80)', border: '1px solid rgba(81,123,62,0.55)', boxShadow: '0 0 20px rgba(81,123,62,0.12)' }
+                    ? { background: 'rgba(255,255,255,0.92)', border: '2px dashed #517B3E', boxShadow: '0 0 28px rgba(81,123,62,0.18)' }
                     : uploading
-                      ? { background: 'rgba(255,255,255,0.40)', border: '1px solid rgba(255,255,255,0.40)', opacity: 0.6 }
-                      : { background: 'rgba(155,180,148,0.35)', border: '1px solid rgba(155,180,148,0.35)' }}>
+                      ? { background: 'rgba(255,255,255,0.50)', border: '2px dashed rgba(157,192,139,0.40)', opacity: 0.7 }
+                      : { background: 'rgba(255,255,255,0.68)', border: '2px dashed rgba(157,192,139,0.55)' }}>
                   <input {...getInputProps()} />
                   {uploading ? (
                     <>
-                      {/* Doc icon inside a spinning ring */}
-                      <div className="relative w-14 h-14 flex items-center justify-center shrink-0">
+                      <div className="relative w-16 h-16 flex items-center justify-center shrink-0">
                         <div className="absolute inset-0 rounded-full border-2 border-[#9DC08B]/25 border-t-[#517B3E] animate-spin" />
-                        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="#517B3E" strokeWidth={1.5}>
+                        <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="#517B3E" strokeWidth={1.5}>
                           <path strokeLinecap="round" strokeLinejoin="round"
                             d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0
                                0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5
@@ -794,30 +793,30 @@ function Wizard({
                                0 0-9-9Z" />
                         </svg>
                       </div>
-                      <div className="space-y-0.5 text-center">
-                        <p className="text-sm font-semibold" style={{ color: '#517B3E' }}>
+                      <div className="space-y-1 text-center">
+                        <p className="text-base font-semibold" style={{ color: '#517B3E' }}>
                           {he ? 'סורק ומנתח...' : 'Scanning & indexing...'}
                         </p>
-                        <p className="text-[11px]" style={{ color: '#7BA08A' }}>
+                        <p className="text-xs" style={{ color: '#7BA08A' }}>
                           {he ? 'מחלץ טקסט ומאנדקס לחיפוש' : 'Extracting text and indexing for search'}
                         </p>
                       </div>
                     </>
                   ) : isDragActive ? (
                     <>
-                      <div className="w-12 h-12 rounded-2xl flex items-center justify-center animate-bounce" style={{ background: '#517B3E' }}>
-                        <IconCloud className="w-7 h-7 text-white" />
+                      <div className="w-16 h-16 rounded-2xl flex items-center justify-center animate-bounce" style={{ background: '#517B3E' }}>
+                        <IconCloud className="w-9 h-9 text-white" />
                       </div>
-                      <p className="font-bold" style={{ color: '#517B3E' }}>{t.dropHere}</p>
+                      <p className="text-base font-bold" style={{ color: '#517B3E' }}>{t.dropHere}</p>
                     </>
                   ) : (
                     <>
-                      <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg,#9DC08B,#517B3E)' }}>
-                        <IconCloud className="w-7 h-7 text-white" />
+                      <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg,#9DC08B,#517B3E)' }}>
+                        <IconCloud className="w-9 h-9 text-white" />
                       </div>
-                      <div className="space-y-0.5">
-                        <p className="text-sm font-semibold" style={{ color: '#2C4A3B' }}>{t.dragDrop}</p>
-                        <p className="text-xs" style={{ color: '#7BA08A' }}>{t.dragHint}</p>
+                      <div className="space-y-1">
+                        <p className="text-base font-semibold" style={{ color: '#2C4A3B' }}>{t.dragDrop}</p>
+                        <p className="text-sm" style={{ color: '#7BA08A' }}>{t.dragHint}</p>
                       </div>
                     </>
                   )}
@@ -872,7 +871,7 @@ function Wizard({
             {sourceType === 'documents' && (
               <SelectList
                 items={visibleDocs} loading={docsLoading} empty={t.noDocs}
-                keyFn={d => d.file_id} label={d => d.name ?? d.file_name ?? d.filename ?? ''} subLabel={d => `${d.chunks} chunks`}
+                keyFn={d => d.file_id} label={d => d.name ?? d.file_name ?? d.filename ?? ''} subLabel={d => (d.name ?? d.file_name ?? d.filename ?? '').split('.').pop()?.toUpperCase() ?? ''}
                 selected={selectedDocId} onSelect={key => { onSelectDoc(key || null); onSelectSession(null); }}
               />
             )}
@@ -895,18 +894,21 @@ function Wizard({
               <h2 className="text-xl font-bold" style={{ color: '#1C3329' }}>{t.writingTypeSec}</h2>
               <p className="text-sm mt-1" style={{ color: '#527061' }}>{he ? 'איזה סוג יצירה תרצה לכתוב?' : 'What kind of piece do you want to write?'}</p>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-6">
               {WRITING_TYPES.map(wt => {
                 const label = he ? wt.he : wt.en;
                 const active = writingType === wt.id;
                 return (
                   <button key={wt.id} onClick={() => onSelectType(wt.id)}
-                    className="flex flex-col items-center gap-2 px-4 py-5 rounded-2xl text-center transition-all"
-                    style={active
-                      ? { background: 'linear-gradient(135deg,#517B3E,#2A3B22)', border: '1.5px solid rgba(81,123,62,0.5)', boxShadow: '0 6px 18px rgba(81,123,62,0.30)' }
-                      : tileBase}>
-                    <span className="text-3xl leading-none">{wt.emoji}</span>
-                    <span className="text-xs font-bold" style={{ color: active ? '#fff' : '#2C4A3B' }}>{label}</span>
+                    className="flex flex-col items-center justify-center gap-4 px-6 rounded-2xl text-center transition-all active:scale-[0.97] w-full"
+                    style={{
+                      minHeight: '180px',
+                      ...(active
+                        ? { background: 'linear-gradient(135deg,#517B3E,#2A3B22)', border: '1.5px solid rgba(81,123,62,0.5)', boxShadow: '0 10px 30px rgba(81,123,62,0.32)' }
+                        : { ...tileBase, boxShadow: '0 4px 16px rgba(81,123,62,0.09)' }),
+                    }}>
+                    <span className="text-5xl leading-none">{wt.emoji}</span>
+                    <span className="text-base font-bold" style={{ color: active ? '#fff' : '#2C4A3B' }}>{label}</span>
                   </button>
                 );
               })}
@@ -921,133 +923,149 @@ function Wizard({
               <h2 className="text-xl font-bold" style={{ color: '#1C3329' }}>{he ? 'אישור והתחלה' : 'Confirm & Start'}</h2>
               <p className="text-sm mt-1" style={{ color: '#527061' }}>{he ? 'כל ההגדרות מוכנות — לחץ להתחיל לכתוב' : 'Everything is set — click to start writing'}</p>
             </div>
-            <div className="flex flex-col gap-3">
-              <SummaryRow emoji="📂" label={he ? 'מקור החומר' : 'Source material'} value={sourceLabel()} />
-              <SummaryRow emoji={wtEmoji} label={he ? 'סוג כתיבה' : 'Writing type'} value={wtLabel} />
+
+            {/* Top row: 2 summary cards */}
+            <div className="grid grid-cols-2 gap-6">
+              <div className="rounded-2xl p-5 flex flex-col gap-1.5" style={{ background: 'rgba(255,255,255,0.82)', border: '1px solid rgba(157,192,139,0.35)', boxShadow: '0 4px 16px rgba(81,123,62,0.08)' }}>
+                <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: '#7BA08A' }}>{he ? 'מקור החומר' : 'Source material'}</p>
+                <div className="flex items-center gap-3 mt-1">
+                  <span className="text-2xl shrink-0">📂</span>
+                  <p className="text-sm font-bold truncate" style={{ color: '#1C3329' }}>{sourceLabel() || (he ? '—' : '—')}</p>
+                </div>
+              </div>
+              <div className="rounded-2xl p-5 flex flex-col gap-1.5" style={{ background: 'rgba(255,255,255,0.82)', border: '1px solid rgba(157,192,139,0.35)', boxShadow: '0 4px 16px rgba(81,123,62,0.08)' }}>
+                <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: '#7BA08A' }}>{he ? 'סוג כתיבה' : 'Writing type'}</p>
+                <div className="flex items-center gap-3 mt-1">
+                  <span className="text-2xl shrink-0">{wtEmoji}</span>
+                  <p className="text-sm font-bold" style={{ color: '#1C3329' }}>{wtLabel}</p>
+                </div>
+              </div>
             </div>
 
-            {/* Document settings — grouped into one bordered list so related
-                controls read as a single unit instead of loose floating rows. */}
-            <div className="flex flex-col rounded-2xl overflow-hidden" style={{
-              background: 'rgba(255,255,255,0.50)',
-              border: '1px solid rgba(157,192,139,0.38)',
-            }}>
-              {/* Page count stepper */}
-              <div className="flex items-center justify-between gap-3 px-4 py-4" style={{ borderBottom: '1px solid rgba(157,192,139,0.25)' }}>
-                <div className="flex-1 min-w-0">
+            {/* Settings card — 2-column: controls left, textarea right */}
+            <div className="rounded-2xl p-6" style={{ background: 'rgba(255,255,255,0.82)', border: '1px solid rgba(157,192,139,0.35)', boxShadow: '0 4px 16px rgba(81,123,62,0.08)' }}>
+              <div className="grid grid-cols-2 gap-8">
+
+                {/* Left column: page count + toggles */}
+                <div className="flex flex-col gap-6">
+                  {/* Page count stepper */}
+                  <div>
+                    <p className="text-sm font-semibold mb-0.5" style={{ color: '#1C3329' }}>
+                      {he ? 'אורך מוערך (עמודים)' : 'Estimated length (pages)'}
+                    </p>
+                    <p className="text-xs mb-3" style={{ color: '#7BA08A' }}>
+                      {he ? 'כמה עמודים בערך תרצה שהמסמך יכיל' : 'Roughly how many pages the document should span'}
+                    </p>
+                    <div className="flex items-center gap-2 w-fit" style={{
+                      background: 'rgba(232,239,229,0.60)',
+                      border: '1px solid rgba(157,192,139,0.42)',
+                      borderRadius: '0.75rem',
+                      padding: '6px 10px',
+                    }}>
+                      <button
+                        type="button"
+                        onClick={() => setPageCount(p => Math.max(1, p - 1))}
+                        disabled={pageCount <= 1}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                        style={{ color: '#2A3B22', background: 'rgba(81,123,62,0.10)' }}
+                        aria-label={he ? 'הפחת עמוד' : 'Decrease pages'}
+                      >
+                        <Minus className="w-3.5 h-3.5" strokeWidth={2.5} />
+                      </button>
+                      <input
+                        type="number"
+                        min={1}
+                        max={15}
+                        value={pageCount}
+                        onChange={e => {
+                          const v = parseInt(e.target.value, 10);
+                          if (!Number.isNaN(v)) setPageCount(Math.min(15, Math.max(1, v)));
+                        }}
+                        className="w-10 text-center text-sm font-bold outline-none bg-transparent [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        style={{ color: '#1C3329' }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setPageCount(p => Math.min(15, p + 1))}
+                        disabled={pageCount >= 15}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                        style={{ color: '#2A3B22', background: 'rgba(81,123,62,0.10)' }}
+                        aria-label={he ? 'הוסף עמוד' : 'Increase pages'}
+                      >
+                        <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Toggles */}
+                  <div className="flex flex-col gap-4">
+                    <div style={{ borderTop: '1px solid rgba(157,192,139,0.20)', paddingTop: '1rem' }}>
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold" style={{ color: '#1C3329' }}>{t.personalStyleLabel}</p>
+                          <p className="text-xs mt-0.5" style={{ color: '#7BA08A' }}>
+                            {he ? 'כתיבה בטון ובסגנון שמרגישים כמוך' : 'Writes in a tone that feels like you'}
+                          </p>
+                        </div>
+                        <ToggleSwitch checked={usePersonalStyle} onChange={setUsePersonalStyle} />
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold" style={{ color: '#1C3329' }}>{he ? 'הוסף מקורות' : 'Add sources'}</p>
+                        <p className="text-xs mt-0.5" style={{ color: '#7BA08A' }}>
+                          {he ? 'ציין מאיזה קובץ נלקח המידע' : 'Cite which file each paragraph draws from'}
+                        </p>
+                      </div>
+                      <ToggleSwitch checked={includeSources} onChange={setIncludeSources} />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right column: custom instructions */}
+                <div className="flex flex-col gap-2">
                   <p className="text-sm font-semibold" style={{ color: '#1C3329' }}>
-                    {he ? 'אורך מוערך (עמודים)' : 'Estimated length (pages)'}
+                    {he ? 'הנחיות מותאמות אישית' : 'Custom instructions'}
                   </p>
-                  <p className="text-xs mt-0.5" style={{ color: '#7BA08A' }}>
-                    {he ? 'כמה עמודים בערך תרצה שהמסמך יכיל' : 'Roughly how many pages the document should span'}
+                  <p className="text-xs mb-1" style={{ color: '#7BA08A' }}>
+                    {he ? 'כל דגש, מבנה, או הגבלה שתרצה להוסיף' : 'Any emphasis, structure, or constraint to add'}
                   </p>
-                </div>
-                <div className="flex items-center gap-2 shrink-0" style={{
-                  background: 'rgba(255,255,255,0.65)',
-                  border: '1px solid rgba(157,192,139,0.42)',
-                  borderRadius: '0.75rem',
-                  padding: '6px 10px',
-                }}>
-                  <button
-                    type="button"
-                    onClick={() => setPageCount(p => Math.max(1, p - 1))}
-                    disabled={pageCount <= 1}
-                    className="w-7 h-7 flex items-center justify-center rounded-lg text-base font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                    style={{ color: '#2A3B22', background: 'rgba(81,123,62,0.10)' }}
-                    aria-label={he ? 'הפחת עמוד' : 'Decrease pages'}
-                  >
-                    <Minus className="w-3.5 h-3.5" strokeWidth={2.5} />
-                  </button>
-                  <input
-                    type="number"
-                    min={1}
-                    max={15}
-                    value={pageCount}
-                    onChange={e => {
-                      const v = parseInt(e.target.value, 10);
-                      if (!Number.isNaN(v)) setPageCount(Math.min(15, Math.max(1, v)));
+                  <textarea
+                    dir="auto"
+                    value={customInstructions}
+                    onChange={e => setCustomInstructions(e.target.value)}
+                    placeholder={t.customInstructionsPh}
+                    className="flex-1 w-full rounded-xl resize-none outline-none text-sm transition-all"
+                    style={{
+                      background: 'rgba(249,252,250,0.80)',
+                      border: '1px solid rgba(157,192,139,0.42)',
+                      color: '#1A2E26',
+                      padding: '12px 14px',
+                      lineHeight: 1.65,
+                      fontFamily: 'inherit',
+                      minHeight: '140px',
                     }}
-                    className="w-10 text-center text-sm font-bold outline-none bg-transparent [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                    style={{ color: '#1C3329' }}
+                    onFocus={e => {
+                      e.currentTarget.style.background  = 'rgba(255,255,255,0.95)';
+                      e.currentTarget.style.borderColor = 'rgba(81,123,62,0.65)';
+                      e.currentTarget.style.boxShadow   = '0 0 0 2px rgba(81,123,62,0.10)';
+                    }}
+                    onBlur={e => {
+                      e.currentTarget.style.background  = 'rgba(249,252,250,0.80)';
+                      e.currentTarget.style.borderColor = 'rgba(157,192,139,0.42)';
+                      e.currentTarget.style.boxShadow   = 'none';
+                    }}
                   />
-                  <button
-                    type="button"
-                    onClick={() => setPageCount(p => Math.min(15, p + 1))}
-                    disabled={pageCount >= 15}
-                    className="w-7 h-7 flex items-center justify-center rounded-lg text-base font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                    style={{ color: '#2A3B22', background: 'rgba(81,123,62,0.10)' }}
-                    aria-label={he ? 'הוסף עמוד' : 'Increase pages'}
-                  >
-                    <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
-                  </button>
                 </div>
-              </div>
-
-              {/* Personal style toggle — single, specific description (no
-                  restating the label) so the row reads cleanly at a glance. */}
-              <div className="flex items-center gap-3 px-4 py-4" style={{ borderBottom: '1px solid rgba(157,192,139,0.25)' }}>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold" style={{ color: '#1C3329' }}>{t.personalStyleLabel}</p>
-                  <p className="text-xs mt-0.5" style={{ color: '#7BA08A' }}>
-                    {he
-                      ? 'ילמד מהחומרים שהעלית כדי לכתוב בטון ובסגנון שמרגישים כמוך'
-                      : 'Learns from your uploaded materials to write in a tone and style that feels like you'}
-                  </p>
-                </div>
-                <ToggleSwitch checked={usePersonalStyle} onChange={setUsePersonalStyle} />
-              </div>
-
-              {/* Include sources toggle */}
-              <div className="flex items-center gap-3 px-4 py-4">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold" style={{ color: '#1C3329' }}>{he ? 'הוסף מקורות' : 'Add sources'}</p>
-                  <p className="text-xs mt-0.5" style={{ color: '#7BA08A' }}>
-                    {he ? 'ציין מאיזה קובץ נלקח המידע בסוף כל פסקה' : 'Cite which file each paragraph draws from'}
-                  </p>
-                </div>
-                <ToggleSwitch checked={includeSources} onChange={setIncludeSources} />
               </div>
             </div>
 
-            {/* Custom instructions — plain textarea, kept visually separate from
-                the structured toggles above since it's freeform input. */}
-            <div className="flex flex-col gap-1.5 px-1">
-              <p className="text-sm font-semibold" style={{ color: '#1C3329' }}>
-                {he ? 'הנחיות מותאמות אישית' : 'Custom instructions'}
-              </p>
-              <textarea
-                dir="auto"
-                rows={3}
-                value={customInstructions}
-                onChange={e => setCustomInstructions(e.target.value)}
-                placeholder={t.customInstructionsPh}
-                className="w-full rounded-xl resize-none outline-none text-sm transition-all"
-                style={{
-                  background:  'rgba(255,255,255,0.50)',
-                  border:      '1px solid rgba(157,192,139,0.42)',
-                  color:       '#1A2E26',
-                  padding:     '14px 16px',
-                  lineHeight:  1.65,
-                  fontFamily:  'inherit',
-                  height:      96,
-                }}
-                onFocus={e => {
-                  e.currentTarget.style.background    = 'rgba(255,255,255,0.80)';
-                  e.currentTarget.style.borderColor   = 'rgba(81,123,62,0.65)';
-                  e.currentTarget.style.boxShadow     = '0 0 0 2px rgba(81,123,62,0.10)';
-                }}
-                onBlur={e => {
-                  e.currentTarget.style.background    = 'rgba(255,255,255,0.50)';
-                  e.currentTarget.style.borderColor   = 'rgba(157,192,139,0.42)';
-                  e.currentTarget.style.boxShadow     = 'none';
-                }}
-              />
-            </div>
-
-            <button onClick={() => onStart(customInstructions, usePersonalStyle, includeSources, pageCount, sourceType)}
-              className="w-full flex items-center justify-center gap-2.5 py-4 rounded-2xl text-base font-bold text-white transition-all active:scale-[0.98] mt-2"
-              style={{ background: 'linear-gradient(135deg,#517B3E,#2A3B22)', boxShadow: '0 8px 28px rgba(81,123,62,0.42)' }}>
-              <IconPen className="w-5 h-5" />
+            {/* Start Writing button — prominent, full width */}
+            <button
+              onClick={() => onStart(customInstructions, usePersonalStyle, includeSources, pageCount, sourceType)}
+              className="w-full flex items-center justify-center gap-3 py-5 rounded-2xl text-lg font-bold text-white transition-all active:scale-[0.98]"
+              style={{ background: 'linear-gradient(135deg,#517B3E,#2A3B22)', boxShadow: '0 10px 36px rgba(81,123,62,0.45)' }}>
+              <IconPen className="w-6 h-6" />
               {t.startWriting}
             </button>
           </>
@@ -1057,7 +1075,7 @@ function Wizard({
       {/* Navigation row */}
       <div className="flex items-center justify-between w-full">
         <button
-          onClick={() => step > 1 ? setStep(s => (s - 1) as 1 | 2 | 3) : router.push('/dashboard')}
+          onClick={() => step > 1 ? router.back() : router.push('/dashboard')}
           className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-800 hover:bg-gray-100/50"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1068,7 +1086,7 @@ function Wizard({
 
         {step < 3 && (
           <button
-            onClick={() => setStep(s => (s < 3 ? (s + 1) as 1 | 2 | 3 : s))}
+            onClick={() => router.push(`?step=${step + 1}`)}
             disabled={step === 1 ? !step1Ready : !step2Ready}
             className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold text-white transition-all active:scale-[0.98] disabled:cursor-not-allowed"
             style={(step === 1 ? step1Ready : step2Ready)
@@ -1087,12 +1105,12 @@ function Wizard({
 
 // maxChunks = pageCount * CHUNKS_PER_PAGE — a generous upper-bound safety net so the
 // loop always terminates; the real stopping condition is the word-count target below.
-const CHUNKS_PER_PAGE = 1.5;
+const CHUNKS_PER_PAGE = 2;
 // Absolute word-count target — single source of truth for "how long is this document?".
 // targetWordCount = pageCount * WORDS_PER_PAGE is sent to the backend so both sides
 // agree, and drives isFinalSection in generateParagraph: the loop keeps fetching body
 // chunks until the accumulated word count reaches this target.
-const WORDS_PER_PAGE = 300;
+const WORDS_PER_PAGE = 400;
 const countWords = (text: string) => (text.trim() ? text.trim().split(/\s+/).length : 0);
 
 /* ─── Writing panel — Co-Writer mode (paragraph-by-paragraph) ───────────── */
@@ -1188,7 +1206,6 @@ function WritingPanel({
       essay:    { he: 'טקסט רהוט עם מבנה ופסקאות ברורות',  en: 'fluent, well-structured prose'       },
       research: { he: 'דוח מפורט עם ניתוח מקצועי',          en: 'detailed analytical professional report' },
       summary:  { he: 'סיכום תמציתי ומובנה',                en: 'concise structured overview'          },
-      email:    { he: 'מכתב עסקי רשמי',                     en: 'formal business correspondence'       },
     };
     const safeHint = writingType ? TYPE_HINT_SAFE[writingType] : null;
     const typeHint  = safeHint
@@ -1284,7 +1301,9 @@ function WritingPanel({
           maxChunks: chunkTotal,
           targetWordCount: targetWords,
           studentName: [userFirstName, userLastName].filter(Boolean).join(' ') || null,
+          institution: userInstitution || null,
           fileIds: fileIds.length > 0 ? fileIds : null,
+          writingType: writingType ?? null,
           courseId:   selectedCourse?.id   ?? null,
           courseName: selectedCourse?.name ?? null,
         }),
@@ -1482,13 +1501,9 @@ function WritingPanel({
               {isFinished
                 ? (he ? '✅ מסמך מוכן' : '✅ Document ready')
                 : waitingForFeedback
-                  ? (targetWords > 0
-                      ? (he ? `סוקר טיוטה — כ-${reviewWordCount} מתוך ${targetWords} מילים` : `Reviewing draft — ~${reviewWordCount} of ${targetWords} words`)
-                      : (he ? 'סוקר חלק' : 'Reviewing draft'))
+                  ? (he ? 'סוקר טיוטה' : 'Reviewing draft')
                   : loading
-                    ? (targetWords > 0
-                        ? (he ? `כותב... (כ-${wordsSoFar} מתוך ${targetWords} מילים)` : `Writing… (~${wordsSoFar} of ${targetWords} words)`)
-                        : (he ? 'כותב...' : 'Writing…'))
+                    ? (he ? 'כותב...' : 'Writing…')
                     : he ? 'מצב כתיבה משותפת' : 'Co-Writer mode'}
             </p>
           </div>
@@ -1637,11 +1652,6 @@ function WritingPanel({
                         ? (he ? `פרק אחרון — אשר כדי לסיים` : `Final part — approve to finish`)
                         : (he ? `ממתין לאישורך` : `Awaiting your review`)}
                   </p>
-                  {targetWords > 0 && (
-                    <span className="text-[11px] font-mono font-bold shrink-0" style={{ color: '#517B3E', opacity: 0.8 }}>
-                      ~{reviewWordCount}/{targetWords}
-                    </span>
-                  )}
                 </div>
                 {targetWords > 0 && (
                   <div className="h-1 rounded-full overflow-hidden" style={{ background: 'rgba(81,123,62,0.15)' }}>
@@ -1740,6 +1750,15 @@ function WritingPanel({
                       <path strokeLinecap="round" strokeLinejoin="round" d={he ? 'M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3' : 'M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18'} />
                     </svg>
                     {he ? 'חזור לעריכה' : 'Back to editing'}
+                  </button>
+                  <button
+                    onClick={onBack}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95"
+                    style={{ background: 'rgba(81,123,62,0.10)', border: '1px solid rgba(81,123,62,0.35)', color: '#517B3E' }}>
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d={he ? 'M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3' : 'M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18'} />
+                    </svg>
+                    {he ? 'חזור לשלב הקודם' : 'Back to setup'}
                   </button>
                 </div>
               </div>
@@ -1857,6 +1876,7 @@ function WritingPanel({
 /* ─── Page ───────────────────────────────────────────────────────────────── */
 export default function AcademicWritingPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user: authUser, isLoading: authLoading } = useAuth();
   const { selectedCourse, courseHydrated } = useCourse();
   const { lang, toggleLanguage } = useLanguage();
@@ -1869,7 +1889,8 @@ export default function AcademicWritingPage() {
   const [headerScrolled,  setHeaderScrolled]  = useState(false);
 
   /* Config state */
-  const [phase,             setPhase]             = useState<'config' | 'writing'>('config');
+  // Derive phase from URL so browser Back button re-enables after reaching the writing view.
+  const phase: 'config' | 'writing' = searchParams.get('step') === 'writing' ? 'writing' : 'config';
   const [wizardInstructions,   setWizardInstructions]   = useState('');
   const [wizardPersonalStyle,  setWizardPersonalStyle]  = useState(false);
   const [wizardIncludeSources, setWizardIncludeSources] = useState(false);
@@ -2123,14 +2144,14 @@ export default function AcademicWritingPage() {
             initialUsePersonalStyle={wizardPersonalStyle}
             initialIncludeSources={wizardIncludeSources}
             initialPageCount={wizardPageCount}
-            onStart={(ci, ps, is, pc, st) => { setWizardInstructions(ci); setWizardPersonalStyle(ps); setWizardIncludeSources(is); setWizardPageCount(pc); setWizardSourceType(st); setPhase('writing'); }}
+            onStart={(ci, ps, is, pc, st) => { setWizardInstructions(ci); setWizardPersonalStyle(ps); setWizardIncludeSources(is); setWizardPageCount(pc); setWizardSourceType(st); router.push('?step=writing'); }}
           />
         ) : (
           <WritingPanel
             t={t} he={he}
             hasDoc={hasDoc}
             writingType={writingType}
-            onBack={() => setPhase('config')}
+            onBack={() => router.back()}
             wizardInstructions={wizardInstructions}
             usePersonalStyle={wizardPersonalStyle}
             includeSources={wizardIncludeSources}

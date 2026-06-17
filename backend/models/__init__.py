@@ -34,6 +34,7 @@ class User(_Base):
     gender                = Column(String(20),  nullable=True)
     study_year            = Column(String(50),  nullable=True)
     ai_style              = Column(String(100), nullable=True)
+    crm_profile           = Column(Text,        nullable=True)   # AI-curated student notes (cross-course CRM)
     prof_sims_this_month  = Column(Integer,     nullable=False, server_default='0')
     prof_sim_month_key    = Column(String(7),   nullable=False, server_default='')
     created_at            = Column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -228,6 +229,7 @@ with _db_engine.connect() as _conn:
         ("ALTER TABLE users ADD COLUMN gender VARCHAR(20)", "added gender to users"),
         ("ALTER TABLE users ADD COLUMN study_year VARCHAR(50)", "added study_year to users"),
         ("ALTER TABLE users ADD COLUMN ai_style VARCHAR(100)", "added ai_style to users"),
+        ("ALTER TABLE users ADD COLUMN crm_profile TEXT", "added crm_profile to users"),
         ("ALTER TABLE users ADD COLUMN prof_sims_this_month INTEGER NOT NULL DEFAULT 0", "added prof_sims_this_month to users"),
         ("ALTER TABLE users ADD COLUMN prof_sim_month_key VARCHAR(7) NOT NULL DEFAULT ''", "added prof_sim_month_key to users"),
         ("ALTER TABLE user_documents ADD COLUMN file_size_bytes INTEGER", "added file_size_bytes to user_documents"),
