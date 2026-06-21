@@ -8,7 +8,7 @@ import {
   PartyPopper, ArrowRight, ArrowLeft, Check, AlertCircle,
 } from 'lucide-react';
 
-const API = 'http://127.0.0.1:5003';
+const API = 'http://localhost:5003';
 
 // ─── Static data ──────────────────────────────────────────────────────────────
 

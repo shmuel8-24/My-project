@@ -12,7 +12,7 @@ from openai import OpenAI
 load_dotenv()
 
 # ── JWT ───────────────────────────────────────────────────────────────────────
-SECRET_KEY  = os.getenv("SECRET_KEY", "levy-ai-dev-secret-change-in-production")
+SECRET_KEY  = os.environ["SECRET_KEY"]  # required — app refuses to start if unset
 TOKEN_TTL_H = 24
 
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "").strip().lower()

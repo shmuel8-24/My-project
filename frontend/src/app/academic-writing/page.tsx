@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
-import { Settings as IconSettings, Minus, Plus, Home, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, LogOut, Folder } from 'lucide-react';
+import { Settings as IconSettings, Minus, Plus, Home, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, LogOut, Folder, Sparkles } from 'lucide-react';
 import { useAuth }     from '../providers/auth';
 import { useLanguage } from '../providers/language';
 import { useCourse }   from '../providers/course';
@@ -21,7 +21,7 @@ const AcademicRichEditor = dynamic(
   { ssr: false },
 );
 
-const API = 'http://127.0.0.1:5003';
+const API = 'http://localhost:5003';
 
 /* ─── Auth helpers ───────────────────────────────────────────────────────── */
 const UPLOADS_STORAGE_KEY = 'unote_academic_uploads';
@@ -1051,15 +1051,20 @@ function Wizard({
         )}
       </div>
 
-      {/* Navigation row — dir="ltr" forces Back on left and Next on right
-          regardless of the RTL page direction, matching browser history convention */}
-      <div dir="ltr" className="flex items-center justify-between w-full">
+      {/* Navigation row — inherits page direction so RTL/LTR layout is automatic.
+          In LTR (English): Back is on the left, Next on the right.
+          In RTL (Hebrew): flex-start is the RIGHT side, so Back (first child)
+          lands on the right and Next (second child) lands on the left — correct
+          for Hebrew where "forward" reads left-ward. Arrow directions flip to match. */}
+      <div className="flex items-center justify-between w-full">
         <button
           onClick={() => step > 1 ? router.back() : router.push('/dashboard')}
           className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-800 hover:bg-gray-100/50"
         >
+          {/* Arrow points ← in LTR (going back = leftward); → in RTL (going back = rightward) */}
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d='M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18' />
+            <path strokeLinecap="round" strokeLinejoin="round"
+              d={he ? 'M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3' : 'M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18'} />
           </svg>
           {step === 1 ? (he ? 'ביטול' : 'Cancel') : (he ? 'הקודם' : 'Back')}
         </button>
@@ -1073,8 +1078,10 @@ function Wizard({
               ? { background: 'linear-gradient(135deg,#517B3E,#2A3B22)', boxShadow: '0 4px 16px rgba(81,123,62,0.35)' }
               : { background: 'rgba(157,192,139,0.35)' }}>
             {he ? 'הבא' : 'Next'}
+            {/* Arrow points → in LTR (going forward = rightward); ← in RTL (going forward = leftward) */}
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d='M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3' />
+              <path strokeLinecap="round" strokeLinejoin="round"
+                d={he ? 'M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18' : 'M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3'} />
             </svg>
           </button>
         )}
@@ -1152,6 +1159,29 @@ function WritingPanel({
   // in the review card so the user has a sense of how much is left.
   const [wordsSoFar,  setWordsSoFar]  = useState(0);
   const [targetWords, setTargetWords] = useState(0);
+  const [isGenerating,    setIsGenerating]    = useState(false);
+  const [suggestedTitles, setSuggestedTitles] = useState<string[]>([]);
+
+  const handleGenerateTitles = async () => {
+    if (isGenerating) return;
+    setIsGenerating(true);
+    setSuggestedTitles([]);
+    try {
+      const res = await authFetch(`${API}/api/writing/suggest-titles`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          topic:       topic.trim(),
+          course_name: selectedCourse?.name ?? null,
+          course_id:   selectedCourse?.id   ?? null,
+        }),
+      });
+      if (!res.ok) return;
+      const data = await res.json() as { titles?: string[] };
+      if (Array.isArray(data.titles)) setSuggestedTitles(data.titles);
+    } catch { /* silent — user can retry */ }
+    finally  { setIsGenerating(false); }
+  };
 
   const wtLabel = writingType
     ? (he ? WRITING_TYPES.find(w => w.id === writingType)?.he : WRITING_TYPES.find(w => w.id === writingType)?.en) ?? ''
@@ -1493,7 +1523,7 @@ function WritingPanel({
                   ? (he ? 'סוקר טיוטה' : 'Reviewing draft')
                   : loading
                     ? (he ? 'כותב...' : 'Writing…')
-                    : he ? 'מצב כתיבה משותפת' : 'Co-Writer mode'}
+                    : he ? (isStarted ? 'מצב כתיבה משותפת' : 'בחירת כותרת') : (isStarted ? 'Co-Writer mode' : 'Title selection')}
             </p>
           </div>
           {isFinished && (
@@ -1544,17 +1574,64 @@ function WritingPanel({
                 <IconPen className="w-10 h-10 text-[#9DC08B]" />
               </div>
               <div>
-                <p className="font-semibold text-[#2d3b25]">{he ? 'מצב כתיבה משותפת' : 'Co-Writer Mode'}</p>
+                <p className="font-semibold text-[#2d3b25]">{he ? 'בחירת כותרת' : 'Title Selection'}</p>
                 <p className="text-sm text-[#7a9268] mt-1 max-w-sm">
-                  {he ? 'ה-AI יכתוב פסקה אחת בכל פעם. תוכל לאשר, לתקן, ולהמשיך עד שהמסמך מוכן.' : 'The AI writes one paragraph at a time. Approve, revise, or give feedback — until your document is ready.'}
+                  {he
+                    ? 'הזן נושא לעבודה שלך, או תן ל-AI להציע לך כותרות ממוקדות המבוססות על חומרי הקורס שלך.'
+                    : 'Enter your topic, or let the AI suggest focused titles based on your course materials.'}
                 </p>
               </div>
               <div className="w-full max-w-md flex flex-col gap-3">
-                <input type="text" value={topic} onChange={e => setTopic(e.target.value)} dir="auto"
-                  placeholder={t.topicPh}
-                  className="w-full rounded-xl px-4 py-3 text-sm outline-none"
-                  style={{ border: '1px solid rgba(157,192,139,0.4)', background: 'rgba(255,255,255,0.80)', color: '#2A3B22' }}
-                  onKeyDown={e => { if (e.key === 'Enter' && topic.trim() && hasDoc) generateParagraph(0, [], ''); }} />
+                {/* Input + inline Sparkles button */}
+                <div className="relative w-full">
+                  <input type="text" value={topic} onChange={e => setTopic(e.target.value)} dir="auto"
+                    placeholder={t.topicPh}
+                    className="w-full rounded-xl px-4 py-3 pe-12 text-sm outline-none"
+                    style={{ border: '1px solid rgba(157,192,139,0.4)', background: 'rgba(255,255,255,0.80)', color: '#2A3B22' }}
+                    onKeyDown={e => { if (e.key === 'Enter' && topic.trim() && hasDoc) generateParagraph(0, [], ''); }} />
+                  <button
+                    type="button"
+                    onClick={handleGenerateTitles}
+                    disabled={isGenerating}
+                    aria-label={he ? 'הצע כותרות באמצעות AI' : 'Suggest titles with AI'}
+                    className="absolute inset-y-0 end-0 flex items-center px-3 rounded-e-xl transition-colors hover:bg-black/5 disabled:opacity-40"
+                    title={he ? 'הצע כותרות' : 'Suggest titles'}
+                  >
+                    {isGenerating ? (
+                      <svg className="w-4 h-4 animate-spin text-[#517B3E]" fill="none" viewBox="0 0 24 24">
+                        <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.25"/>
+                        <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round"/>
+                      </svg>
+                    ) : (
+                      <Sparkles className="w-4 h-4 text-[#7c5bb5] hover:text-[#6047a0]" />
+                    )}
+                  </button>
+                </div>
+
+                {/* AI-suggested title chips */}
+                {suggestedTitles.length > 0 && (
+                  <div className="flex flex-col gap-1.5">
+                    <p className="text-xs text-[#7a9268]">{he ? 'כותרות מוצעות — לחץ לבחירה:' : 'Suggested titles — click to select:'}</p>
+                    <div className="flex flex-col gap-1.5">
+                      {suggestedTitles.map((title, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => setTopic(title)}
+                          className="w-full text-start px-3 py-2 rounded-xl text-xs font-medium transition-all hover:scale-[1.01] active:scale-[0.99]"
+                          style={{
+                            background:   topic === title ? 'rgba(81,123,62,0.12)' : 'rgba(124,91,181,0.07)',
+                            border:       topic === title ? '1px solid rgba(81,123,62,0.35)' : '1px solid rgba(124,91,181,0.22)',
+                            color:        topic === title ? '#517B3E' : '#5a3fa0',
+                          }}
+                        >
+                          {title}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <button onClick={() => generateParagraph(0, [], '')} disabled={!topic.trim() || !hasDoc}
                   className="w-full py-2.5 rounded-xl text-white text-sm font-bold transition-all active:scale-[0.99] disabled:cursor-not-allowed flex items-center justify-center gap-2"
                   style={{ backgroundColor: (topic.trim() && hasDoc) ? '#517B3E' : 'rgba(157,192,139,0.4)' }}>

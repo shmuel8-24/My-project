@@ -249,17 +249,9 @@ def register_verify_otp():
     return jsonify({"reg_token": reg_token}), 200
 
 
-@auth_bp.route("/api/login", methods=["POST", "OPTIONS"])
+@auth_bp.route("/api/login", methods=["POST"])
 @limiter.limit("5 per minute")
 def login():
-    if request.method == "OPTIONS":
-        resp = jsonify({})
-        resp.headers["Access-Control-Allow-Origin"]  = request.headers.get("Origin", "http://127.0.0.1:3000")
-        resp.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
-        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-        resp.headers["Access-Control-Max-Age"]       = "86400"
-        return resp, 200
-
     data     = request.get_json(silent=True) or {}
     email    = (data.get("email")    or "").strip().lower()
     password = (data.get("password") or "").strip()
@@ -297,7 +289,7 @@ def login():
         db.close()
 
 
-@auth_bp.route("/api/register", methods=["POST", "OPTIONS"])
+@auth_bp.route("/api/register", methods=["POST"])
 @limiter.limit("5 per minute")
 def register():
     """Step 3 of 3: create the account after email has been OTP-verified.
@@ -305,14 +297,6 @@ def register():
     Requires a ``reg_token`` issued by /api/register/verify-otp.  The token
     is single-use and expires 15 minutes after email verification.
     """
-    if request.method == "OPTIONS":
-        resp = jsonify({})
-        resp.headers["Access-Control-Allow-Origin"]  = request.headers.get("Origin", "http://127.0.0.1:3000")
-        resp.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
-        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-        resp.headers["Access-Control-Max-Age"]       = "86400"
-        return resp, 200
-
     data       = request.get_json(silent=True) or {}
     email      = (data.get("email")      or "").strip().lower()
     password   = (data.get("password")   or "").strip()
@@ -324,7 +308,7 @@ def register():
     if not email:         return jsonify({"success": False, "error": "Email is required"}), 400
     if not reg_token:     return jsonify({"success": False, "error": "אימות מייל נדרש לפני ההרשמה"}), 400
     if not password:      return jsonify({"success": False, "error": "סיסמה נדרשת"}), 400
-    if len(password) < 6: return jsonify({"success": False, "error": "הסיסמה חייבת להכיל לפחות 6 תווים"}), 400
+    if len(password) < 8: return jsonify({"success": False, "error": "הסיסמה חייבת להכיל לפחות 8 תווים"}), 400
     if not first_name:    return jsonify({"success": False, "error": "שם פרטי נדרש"}), 400
     if not last_name:     return jsonify({"success": False, "error": "שם משפחה נדרש"}), 400
 
@@ -416,8 +400,8 @@ def reset_password():
 
     if not token:
         return jsonify({"success": False, "error": "Token is required"}), 400
-    if not password or len(password) < 6:
-        return jsonify({"success": False, "error": "הסיסמה חייבת להכיל לפחות 6 תווים"}), 400
+    if not password or len(password) < 8:
+        return jsonify({"success": False, "error": "הסיסמה חייבת להכיל לפחות 8 תווים"}), 400
 
     db = SessionLocal()
     try:

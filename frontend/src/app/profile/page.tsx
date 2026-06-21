@@ -5,7 +5,7 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth, AUTH_KEYS } from '../providers/auth';
 
-const API = 'http://127.0.0.1:5003';
+const API = 'http://localhost:5003';
 
 // ── Static option sets ────────────────────────────────────────────────────────
 

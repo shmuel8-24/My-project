@@ -27,7 +27,7 @@ app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # 100 MB
 CORS(
     app,
     origins=["http://localhost:3000", "http://127.0.0.1:3000"],
-    allow_headers=["Content-Type", "Authorization"],
+    allow_headers=["Content-Type"],
     methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     supports_credentials=True,
     max_age=86400,

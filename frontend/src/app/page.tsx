@@ -380,7 +380,7 @@ export default function HomePage() {
     if (!validateEmail(val)) return;
     setLoading(true);
     try {
-      const res  = await fetch('http://127.0.0.1:5003/api/send-otp', {
+      const res  = await fetch('http://localhost:5003/api/send-otp', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: val }),
       });
@@ -400,7 +400,7 @@ export default function HomePage() {
     if (otpLoading) return;
     setOtpLoading(true);
     try {
-      const res  = await fetch('http://127.0.0.1:5003/api/verify-otp', {
+      const res  = await fetch('http://localhost:5003/api/verify-otp', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({ email: email.trim().toLowerCase(), code: otp }),
@@ -434,7 +434,7 @@ export default function HomePage() {
     if (!password) { setError(t.errNoPassword); return; }
     setLoading(true);
     try {
-      const res  = await fetch('http://127.0.0.1:5003/api/login', {
+      const res  = await fetch('http://localhost:5003/api/login', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({ email: val, password }),
@@ -464,7 +464,7 @@ export default function HomePage() {
     }
     setRegLoading(true);
     try {
-      const res  = await fetch('http://127.0.0.1:5003/api/register/send-otp', {
+      const res  = await fetch('http://localhost:5003/api/register/send-otp', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: em }),
       });
@@ -484,7 +484,7 @@ export default function HomePage() {
     if (regLoading) return;
     setRegLoading(true);
     try {
-      const res  = await fetch('http://127.0.0.1:5003/api/register/verify-otp', {
+      const res  = await fetch('http://localhost:5003/api/register/verify-otp', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: regEmail.trim().toLowerCase(), code: otp }),
       });
@@ -505,7 +505,7 @@ export default function HomePage() {
   const handleRegResend = async () => {
     setRegError('');
     try {
-      const res = await fetch('http://127.0.0.1:5003/api/register/send-otp', {
+      const res = await fetch('http://localhost:5003/api/register/send-otp', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: regEmail.trim().toLowerCase() }),
       });
@@ -527,11 +527,11 @@ export default function HomePage() {
   const handleRegStep4 = async (e: React.FormEvent) => {
     e.preventDefault();
     setRegError('');
-    if (regPassword.length < 6) { setRegError(t.errWeakPassword); return; }
+    if (regPassword.length < 8) { setRegError(t.errWeakPassword); return; }
     if (regPassword !== regConfirm) { setRegError(t.errPasswordMismatch); return; }
     setRegLoading(true);
     try {
-      const res  = await fetch('http://127.0.0.1:5003/api/register', {
+      const res  = await fetch('http://localhost:5003/api/register', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
@@ -570,7 +570,7 @@ export default function HomePage() {
     }
     setForgotLoading(true);
     try {
-      const res  = await fetch('http://127.0.0.1:5003/api/forgot-password', {
+      const res  = await fetch('http://localhost:5003/api/forgot-password', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: val }),
       });

@@ -11,7 +11,7 @@ import { useDropzone } from 'react-dropzone';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-const API = 'http://127.0.0.1:5003';
+const API = 'http://localhost:5003';
 
 // ── Exam style presets ────────────────────────────────────────────────────────
 const STYLE_OPTIONS = [

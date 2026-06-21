@@ -5,7 +5,7 @@ import { useCourse } from './course';
 import { useLanguage } from './language';
 import type { DeckSlide } from '../../components/SlideViewer';
 
-const API = 'http://127.0.0.1:5003';
+const API = 'http://localhost:5003';
 
 async function authFetch(url: string, init: RequestInit = {}) {
   return fetch(url, { ...init, credentials: 'include' });

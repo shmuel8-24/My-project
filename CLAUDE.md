@@ -13,14 +13,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 │   ├── models/
 │   │   └── __init__.py     # SQLAlchemy models + DB engine + SessionLocal + migrations
 │   ├── api/
-│   │   ├── middleware.py   # token_required, admin_required, _get_user_refreshed
-│   │   ├── auth.py         # Auth blueprint (login, OTP, register, profile, onboarding, etc.)
+│   │   ├── middleware.py   # token_required, admin_required, _extract_token (cookie-first)
+│   │   ├── auth.py         # Auth blueprint (login, OTP, register, profile, onboarding, logout, etc.)
 │   │   ├── courses.py      # Courses blueprint: parse-syllabus, save, update, delete, update-syllabus
 │   │   ├── documents.py    # Documents/RAG blueprint (upload, ask, sessions)
 │   │   ├── admin.py        # Admin blueprint + CFO agent + proactive scheduler
 │   │   ├── professor.py    # Professor Brain Simulator blueprint
 │   │   ├── presentation_agent.py # Presentation Agent blueprint: multi-tool file→deck generation
-│   │   └── export.py       # Export blueprint (paper, quiz, PDF, DOCX, slides) + all /api/mastery/* routes
+│   │   ├── export.py       # Export blueprint (paper, quiz, PDF, DOCX, slides) + all /api/mastery/* routes
+│   │   └── writing.py      # Writing blueprint: /api/writing/suggest-titles (stub; will become RAG)
 │   ├── services/
 │   │   ├── faiss_store.py  # FAISS vector store (FaissCollection — ChromaDB-compatible surface)
 │   │   ├── rag.py          # hybrid_search, BM25, get_user_collection (wraps faiss_store)
@@ -28,7 +29,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 │   │   ├── security.py     # DLP filter, PII redaction, HTML stripping, prompt sanitization (_sanitize)
 │   │   ├── email.py        # OTP + reset email (SMTP / Resend / terminal)
 │   │   ├── pdf.py          # PPTX text/slide extraction
-│   │   ├── code_runner.py  # Python sandbox (matplotlib Agg backend set here)
+│   │   ├── code_runner.py  # DISABLED stub — exec() removed for security; always returns error string
 │   │   ├── slides.py       # Slide-deck generation: generate_slide_deck (RAG) + generate_deck_via_agent (agent)
 │   │   └── startup.py      # Background backfill threads + orphan session migration
 │   ├── data/               # gitignored persistent storage
@@ -41,10 +42,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 │       ├── make_admin.py   # Promote user to admin
 │       └── seed_payments.py # Seed test payment data
 └── frontend/
-    ├── middleware.ts        # Active auth guard: hybrid Supabase + Flask-JWT; see frontend/CLAUDE.md
+    ├── middleware.ts        # Edge auth guard: all protected routes; hybrid Supabase + Flask-JWT cookie
     ├── src/
     │   ├── components/
-    │   │   ├── CoursePill.tsx          # Global course selector pill
+    │   │   ├── CoursePill.tsx          # Global course selector pill (name badge is static/non-clickable)
     │   │   ├── Sidebar.tsx             # SidebarDocumentsLink nav item (→ /my-documents)
     │   │   ├── AIThinkingIndicator.tsx # Streaming phase indicator (thinking/searching/running)
     │   │   ├── SelectionPopover.tsx    # Text-selection popover (explain / summarize / quiz)
@@ -69,7 +70,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     │       ├── profile/page.tsx                # Profile page (also owns Documents tab logic)
     │       ├── my-documents/page.tsx           # Standalone document management (~966 lines): list, upload, download, delete — primary nav target for all full-nav sidebars
     │       ├── settings/page.tsx               # Settings — full-nav sidebar + centered Preferences/Language card
-    │       ├── academic-writing/page.tsx       # AI co-writing (~2125 lines, WritingPanel inline)
+    │       ├── academic-writing/page.tsx       # AI co-writing (~2200 lines, WritingPanel inline)
     │       ├── presentation/page.tsx           # RAG slide deck from own documents → SlideLayouts
     │       ├── presentation-generator/page.tsx # Agent-based one-shot deck from uploaded files → SlideViewer
     │       ├── mastery/page.tsx                # Skill mastery — Skill Tree (syllabus topics) + per-document quiz modal + score tracking
@@ -88,7 +89,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     │       │   ├── page.tsx                    # Admin Overview — KPIs, AI Accountant chat, CFO notifications
     │       │   ├── AiAccountantChat.tsx
     │       │   └── users/page.tsx              # User Management table
-    │       ├── api/flask/[...path]/route.ts    # Server-side Flask proxy
+    │       ├── api/flask/[...path]/route.ts    # Server-side Flask proxy (forwards cookies to Flask)
     │       ├── types/katex.d.ts                # KaTeX type declarations
     │       └── providers/
     │           ├── auth.tsx
@@ -105,8 +106,10 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 # macOS only — required by WeasyPrint for /export-pdf:
 brew install pango
-cp .env.example .env   # fill in OPENAI_API_KEY (and optionally TAVILY_API_KEY)
+cp .env.example .env   # fill in OPENAI_API_KEY, SECRET_KEY (required), and optionally TAVILY_API_KEY
+```
 
+```bash
 # Frontend
 cd frontend && npm install
 ```
@@ -152,9 +155,9 @@ All secrets live in `backend/.env` (gitignored). `backend/.env.example` is the c
 |---|---|---|
 | `OPENAI_API_KEY` | OpenAI API — embeddings + chat completions | — |
 | `TAVILY_API_KEY` | Web search (optional); feature silently disabled if absent | — |
-| `SECRET_KEY` | JWT signing secret | insecure dev default — must override in prod |
+| `SECRET_KEY` | JWT signing secret — **required, no fallback; app crashes on startup if unset** | — |
 | `PORT` | Flask server port | `5003` (macOS 5000 is taken by AirPlay) |
-| `FLASK_ENV` | Set to `development` for Flask debug mode | — |
+| `FLASK_ENV` | Set to `production` to enable `Secure` flag on the JWT cookie | — |
 | `ADMIN_EMAIL` | Automatically promoted to admin on every login | — |
 | `FRONTEND_URL` | Base URL used in password-reset email links | `http://localhost:3000` |
 | `MAIL_SERVER` | SMTP host; enables email delivery when set | — |
@@ -212,13 +215,15 @@ Onboarding: `country`, `institution`, `degree_type`, `primary_major`, `secondary
 Each user owns a separate FAISS store directory (`data/faiss/user_{id}/`). File IDs are MD5 hex of the filename. The `UserDocument` SQL table is the authoritative ownership registry — every vector query validates ownership there before touching FAISS (defence-in-depth).
 
 **Auth (`@token_required` / `@admin_required`):**
-JWT HS256, 24 h TTL, `SECRET_KEY` from env. Two decorators inject `user_id` as the first function argument. Dual login modes: 6-digit OTP magic link and password. Rate limiting via Flask-Limiter (bucketed by `user_id` for auth'd requests, IP otherwise; `storage_uri="memory://"` — not distributed).
+JWT HS256, 24 h TTL, `SECRET_KEY` from env (required — app raises `KeyError` on startup if unset). The token lives in an **HttpOnly, SameSite=Lax cookie** named `levy_ai_token`, set by Flask's `_set_jwt_cookie()` helper in `api/auth.py`. The helper in `api/middleware.py` (`_extract_token()`) reads the cookie first, then falls back to the `Authorization: Bearer` header so non-browser clients still work. Two decorators inject `user_id` as the first function argument. Dual login modes: 6-digit OTP magic link and password. Rate limiting via Flask-Limiter (bucketed by `user_id` for auth'd requests, IP otherwise; `storage_uri="memory://"` — not distributed).
+
+Cookie settings: `httponly=True`, `samesite="Lax"`, `secure=True` only when `FLASK_ENV=production` (so localhost dev works over plain HTTP). The `POST /api/logout` endpoint clears the cookie server-side — JavaScript cannot clear an HttpOnly cookie directly.
 
 **User / plan system:**
 `role`: `'user'` | `'admin'`. `plan_type`: `'basic'` | `'pro'` | `'semester'`. Monthly counters reset automatically when the month key changes. `ADMIN_EMAIL` env var auto-promotes that account on every login.
 
 **File upload pipeline (`/upload-pdf`):**
-Accepts PDF, PPTX, PNG/JPG/JPEG. PDFs → PyMuPDF (`fitz`) in-memory (preserves Hebrew logical order). PPTX → `extract_pptx_text()`, slides prefixed `[שקופית N]`. Images → base64 in `_images_map` (not indexed). Text chunks → embedded → upserted into FAISS; old chunks for the same file purged first.
+Accepts PDF, PPTX, PNG/JPG/JPEG. Extension-validated against `_ALLOWED_EXTS`. PDFs → PyMuPDF (`fitz`) in-memory (preserves Hebrew logical order). PPTX → `extract_pptx_text()`, slides prefixed `[שקופית N]`. Images → base64 in `_images_map` (not indexed). Text chunks → embedded → upserted into FAISS; old chunks for the same file purged first.
 
 **Syllabus indexing (`api/courses.py`):**
 `_reindex_syllabus_for_course(user_id, course_name, full_text)` is the shared helper used by both `save_course` and `update_course_syllabus`. It: deletes existing FAISS chunks by `file_id`, re-embeds and upserts, rebuilds BM25, upserts the `UserDocument` ownership record, and updates `full_syllabus_text` + `syllabus_file_id` on the `CustomCourse` row. The `syllabus_file_id` is always `md5(f"syllabus_{user_id}_{course_name}").hexdigest()[:16]`.
@@ -232,10 +237,9 @@ Combines FAISS L2 similarity and BM25 via Reciprocal Rank Fusion (RRF constant 6
 1. Create/resume `ChatSession` in SQLite; save user message.
 2. Short queries (< 5 words) enriched with prior user question before embedding.
 3. `hybrid_search` retrieves chunks.
-4. LLM call with two OpenAI tools: `code_interpreter` and `search_web` (Tavily).
-5. `code_interpreter` → `execute_python_code()` in daemon thread (25 s timeout); captures stdout + matplotlib figures as base64 PNG.
-6. Non-empty `_images_map` → message sent as OpenAI multi-part array (text + image_url), activating vision.
-7. Events: `{type:"status", phase}` → `{type:"result", ...}` | `{type:"error"}`.
+4. LLM call with optional `search_web` tool (Tavily, when `TAVILY_API_KEY` is set). Code execution has been **permanently removed** — `services/code_runner.py` is a disabled stub that returns an error string; the `code_interpreter` tool is no longer passed to the LLM.
+5. Non-empty `_images_map` → message sent as OpenAI multi-part array (text + image_url), activating vision.
+6. Events: `{type:"status", phase}` → `{type:"result", ...}` | `{type:"error"}`.
 
 **Academic paper generation (`/generate-paper`) — SSE stream:**
 Stateless per-call — no conversation history stored. The frontend accumulates approved sections and sends the full `previousContent` on each subsequent call. An anti-repetition engine in the system prompt forces the model to catalog already-mentioned authors/cases/arguments and produce new material. Prompt text is sanitized via `_sanitize()` (lives in `services/security.py`, shared with `services/slides.py`) to avoid homework-filter refusals. **RAG diversity**: the FAISS query is enriched per chunk with a chapter-specific angle phrase from `_CHUNK_ANGLES` (e.g. intro → theory → examples → findings), so each generation call retrieves topically-distinct document sections rather than the same TOP_K chunks repeated every call.
@@ -253,14 +257,14 @@ Stateless per-call — no conversation history stored. The frontend accumulates 
 - `generate_slide_deck(client, topic, context, course_name)` — RAG-based. Used by `POST /api/generate-slides` (`api/export.py`): retrieves `hybrid_search` chunks from the user's own FAISS knowledge base (query enriched with "מושגים מרכזיים נתונים מספרים ומסקנות key concepts data statistics findings conclusions"), optionally restricted to `fileIds`. Returns 20 slides shaped `{title, content, layoutType, imageQuery}` with `layoutType ∈ {Title_Slide, Image_Right, Big_Metric}` — slide 1 is the `Title_Slide` cover and slide 20 is a content-rich `Image_Right` "Strategic Summary & Conclusion" (never a sparse "Thank you"/"תודה" closer). `imageQuery` is a short descriptive phrase only — never resolved to a real image.
 - `generate_deck_via_agent(client, topic, context, rag_context="")` — agent-based. Used by `POST /api/generate-presentation` (`api/presentation_agent.py`): a 4-tool OpenAI function-calling agent (`parse_document` for PDF/DOCX/PPTX, `transcribe_media` via Whisper for audio/video, `analyze_image` via vision, plus a forced final `build_presentation` tool call) processes freshly-uploaded files **in-memory only within this endpoint — never persisted to FAISS or the user's document set by `generate_deck_via_agent`/`presentation_agent.py` itself**. Separately, `presentation-generator/page.tsx`'s `persistToCourseLibrary()` POSTs any uploaded files whose extension is supported by `/upload-pdf` (`pdf`/`pptx`/`png`/`jpg`/`jpeg`) to `/upload-pdf` in parallel, tagged with the active `course_name` — so those files are additionally indexed into the user's permanent FAISS knowledge base and `UserDocument` registry and appear in `/my-documents`, exactly as a direct upload would (best-effort; failures don't block deck generation). Files only supported by the agent (`.docx`, audio/video) are never persisted anywhere. The endpoint additionally runs `hybrid_search(user_id, deck_topic, TOP_K)` against the user's *existing* FAISS knowledge base (all previously-indexed course materials) and passes the result as `rag_context` — the system prompt treats the uploaded files as the primary subject and the RAG chunks as supplementary depth/examples (both sources are synthesized together, never just one). All slide text (titles, bullets, metrics, tile/timeline/chart/architecture labels) is generated in **Hebrew regardless of source-material language** — only `iconName` and architecture `id` values stay in English as identifiers. Returns 20 slides shaped `{title, layout, content?, ...}` with `layout ∈ DECK_LAYOUTS = {title, bullets, metric, split-screen, timeline, barChart, tileGrid, bleedImage, architecture, quote_focus, formula_heavy, two_column}`. Each non-title/bullets/metric layout carries its own data field instead of (or alongside) `content`: `timeline` → `timelineData: {date, event}[]`, `barChart` → `chartData: {label, percentage}[]`, `tileGrid` → `tiles: {iconName, title, text}[]` (`iconName` ∈ `TILE_ICON_NAMES`), `architecture` → `layers: string[]` + `nodes: {id, label, layer}[]` + `connections: {from, to}[]`, `quote_focus` → `content` is ONE full-sentence Hebrew string (the foundational principle/definition/quote) plus optional `attribution` (short Hebrew source label), `formula_heavy` → required `latexFormula` (LaTeX, no `$`/`$$` delimiters) plus optional `content: string[]` (1-3 Hebrew bullets explaining the formula), `two_column` → `content: string[]` (3-5 Hebrew bullets) plus REQUIRED `keyTakeaway: {title, text}` — a definition/concept panel rendered beside the bullets (deliberately separate from `highlightBox`: always present and the slide's primary content, not a sparing supplementary callout). Additionally, any slide whose layout is in `HIGHLIGHT_BOX_LAYOUTS = {bullets, split-screen, bleedImage, quote_focus, formula_heavy}` (note: `two_column` is intentionally excluded — its `keyTakeaway` already provides the prominent panel) may carry an optional `highlightBox: {type: 'tip'|'warning'|'definition', title, text}` callout — used sparingly (2-4 slides per deck). `_validate_deck_slides` drops slides whose required per-layout data is missing/invalid (a malformed `highlightBox` is dropped individually without dropping the slide; `_extract_bullets()` is the shared helper for normalizing `content` into a bullet list across `bullets`/`split-screen`/`bleedImage`, `formula_heavy`, and `two_column`).
 
-**AI-generated slide images (Pollinations.ai):** For `"split-screen"`/`"bleedImage"` slides, `_DECK_SYSTEM_PROMPT` (rule 19) asks the model for an additional `imagePrompt` field — a highly descriptive 15-20 word **English** AI image-generation prompt (cinematic/professional/academic aesthetic) translated from the slide's Hebrew subject (e.g. for `"מגמות בשוק העבודה"`, something like `"a sleek modern office skyline at dusk, glowing data dashboards reflected in glass windows, cinematic professional photography, academic tone"`); this happens for free as part of the existing `build_presentation` tool call, no extra LLM call. `_validate_deck_slides` keeps `imagePrompt` only for those two layouts, as a plain string on the slide — there is no backend image resolution/provider abstraction. The frontend (`SlideViewer.tsx`'s `AIImage`) builds the image URL directly: `https://image.pollinations.ai/prompt/{encodeURIComponent(imagePrompt)}?width=800&height=600&nologo=true` — Pollinations generates the image on the fly when the browser requests this URL, free and with no API key. Absent `imagePrompt` ⇒ the slide renders its existing placeholder visual unchanged.
+**AI-generated slide images (Pollinations.ai):** For `"split-screen"`/`"bleedImage"` slides, `_DECK_SYSTEM_PROMPT` (rule 19) asks the model for an additional `imagePrompt` field — a highly descriptive 15-20 word **English** AI image-generation prompt (cinematic/professional/academic aesthetic) translated from the slide's Hebrew subject; this happens for free as part of the existing `build_presentation` tool call, no extra LLM call. `_validate_deck_slides` keeps `imagePrompt` only for those two layouts. The frontend (`SlideViewer.tsx`'s `AIImage`) builds the image URL directly: `https://image.pollinations.ai/prompt/{encodeURIComponent(imagePrompt)}?width=800&height=600&nologo=true` — free, no API key. Absent `imagePrompt` ⇒ the slide renders its existing placeholder visual unchanged.
 
 Both entry points share `_sanitize()` and the 10-slide McKinsey/BCG-style system prompt convention, but `_validate_slides`/`VALID_SLIDE_LAYOUTS` (RAG shape) and `_validate_deck_slides`/`DECK_LAYOUTS` (agent shape) are separate validators — the two slide shapes are intentionally different and rendered by different frontend components (`SlideLayouts.tsx` vs `SlideViewer.tsx`). Don't conflate them.
 
 **`SlideViewer.tsx` rendering — "Matcha Executive Light" deck theme:**
-`SlideViewer.tsx` renders each slide rectangle in a bright, high-contrast, consulting-style theme (`EXEC` palette: `#F8FAF5` background, `#8BAF84` accent for borders/icons/decorative fills, `#517B3E` accentDark for high-contrast accent text like metric values and timeline dates, `#1C3329` primary text, `#527061` secondary/cream text) — close to, but distinct from, the rest of the app's light Creamy Matcha UI. `ArchitectureLayout`'s `LAYER_COLORS` and `ChartSlide`'s `PIE_COLORS` use darker matcha-family tones chosen for contrast against this light background. It loads its own fonts via `next/font/google` (`Urbanist` for headings, `Assistant` for Hebrew/Latin body) — independent of the global `Heebo` font set in `layout.tsx`. Since the backend now always generates slide text in Hebrew (see `generate_deck_via_agent`), the slide rect and print pages are hardcoded `dir="rtl" lang="he"` regardless of the UI `lang` prop (only the surrounding controls — nav buttons, export buttons — respect `lang`). `TILE_ICONS` (lucide-react) maps `tileGrid` `iconName` strings to icon components and **must stay in sync with `TILE_ICON_NAMES` in `backend/services/slides.py`**. `ArchitectureLayout` lays nodes out per-layer in a CSS grid and draws `connections` as SVG lines between computed node-center percentages; its diagram area is forced `dir="ltr"` because the connector-line math assumes left-to-right x positions. The `barChart` layout renders via `ChartSlide.tsx` (recharts horizontal bar + donut, RTL-mirrored axes). `BulletsLayout`/`SplitScreenLayout`/`BleedImageLayout` give each bullet a context-relevant icon via `bulletIcon()` — a Hebrew/English keyword-matched `lucide-react` icon (`BULLET_ICON_RULES`), falling back to a small rotating set (`BULLET_ICON_FALLBACKS`) by index — replacing the previous uniform checkmark. `QuoteFocusLayout` (`quote_focus`) renders `content` as one large centered quote with a `Quote` glyph and optional `attribution` byline; `FormulaHeavyLayout` (`formula_heavy`) renders `latexFormula` via `FormulaBlock` (KaTeX `renderToString(..., { displayMode: true })`, kept `dir="ltr"` since math notation reads LTR even in RTL slides) above optional explanatory bullets. `TwoColumnLayout` (`two_column`) renders `content` as bullets on one side and a single prominent panel on the other — `slide.keyTakeaway.title`/`.text` with a `BookOpen` icon badge, styled via `theme.accentDark`/`theme.accent` — distinct from `SplitScreenLayout`, whose other side is a photo/placeholder. All three of `QuoteFocusLayout`, `FormulaHeavyLayout`, and `TwoColumnLayout`'s panel render a low-opacity `SlidePattern` (SVG dot-grid, `useId()`-scoped to avoid `<pattern>` id collisions when every slide renders simultaneously in the print view) as background texture. Any layout in `HIGHLIGHT_BOX_LAYOUTS` renders an optional `<HighlightBox>` callout when `slide.highlightBox` is present, colored by `type` via the active theme (`tip`→`accent`, `warning`→`layerColors[1]`, `definition`→`layerColors[3]`). Export controls offer both `downloadPdf` (`window.print()`, styled via `globals.css` `@media print`) and `downloadPptx` (`exportToPPTX` from `pptxExport.ts`, which dynamic-imports `pptxgenjs` so it never loads during SSR and maps each `DeckSlide` onto native PowerPoint shapes mirroring the `EXEC` palette, including `quote_focus`, `formula_heavy`, and `two_column` (bullets + a `keyTakeaway` title/text block in a tinted `roundRect` panel) — `formula_heavy` renders `latexFormula` as plain text in a `Cambria Math`-faced box since pptxgenjs has no KaTeX renderer; `slide.imagePrompt`'s AI-generated image and `slide.highlightBox` are not embedded in the PPTX export — those slides fall back to their placeholder/simpler representation in the exported file).
+`SlideViewer.tsx` renders each slide rectangle in a bright, high-contrast, consulting-style theme (`EXEC` palette: `#F8FAF5` background, `#8BAF84` accent for borders/icons/decorative fills, `#517B3E` accentDark for high-contrast accent text like metric values and timeline dates, `#1C3329` primary text, `#527061` secondary/cream text) — close to, but distinct from, the rest of the app's light Creamy Matcha UI. It loads its own fonts via `next/font/google` (`Urbanist` for headings, `Assistant` for Hebrew/Latin body) — independent of the global `Heebo` font set in `layout.tsx`. Since the backend always generates slide text in Hebrew, the slide rect and print pages are hardcoded `dir="rtl" lang="he"` regardless of the UI `lang` prop (only the surrounding controls — nav buttons, export buttons — respect `lang`). `TILE_ICONS` (lucide-react) maps `tileGrid` `iconName` strings to icon components and **must stay in sync with `TILE_ICON_NAMES` in `backend/services/slides.py`**. `ArchitectureLayout` lays nodes out per-layer in a CSS grid and draws `connections` as SVG lines between computed node-center percentages; its diagram area is forced `dir="ltr"` because the connector-line math assumes left-to-right x positions. The `barChart` layout renders via `ChartSlide.tsx` (recharts horizontal bar + donut, RTL-mirrored axes). Export controls offer both `downloadPdf` (`window.print()`, styled via `globals.css` `@media print`) and `downloadPptx` (`exportToPPTX` from `pptxExport.ts`, which dynamic-imports `pptxgenjs` so it never loads during SSR).
 
-**Slide images (`SlideViewer.tsx`'s `AIImage`):** `SplitScreenLayout`/`BleedImageLayout` render `slide.imagePrompt` via a plain `<img>` pointed at a Pollinations.ai URL built with `encodeURIComponent`, styled `object-cover`. While the image is generating (Pollinations can take several seconds) the existing themed `VisualPlaceholder`/`ImageIcon` fallback is shown underneath and the `<img>` fades in via `onLoad`; on `onError` the fallback is shown permanently instead — never a broken image. `rounded` controls corner rounding (true for split-screen's padded visual area, false for bleedImage's edge-to-edge half). `slide.imagePrompt` absent ⇒ the fallback renders immediately. Hebrew slide text itself is never overlaid on the image (it lives in the other half of the slide), so RTL/contrast of the actual content is unaffected by which image is generated.
+**Slide images (`SlideViewer.tsx`'s `AIImage`):** `SplitScreenLayout`/`BleedImageLayout` render `slide.imagePrompt` via a plain `<img>` pointed at a Pollinations.ai URL built with `encodeURIComponent`, styled `object-cover`. While the image is generating the existing themed `VisualPlaceholder`/`ImageIcon` fallback is shown underneath and the `<img>` fades in via `onLoad`; on `onError` the fallback is shown permanently instead — never a broken image.
 
 **Mastery system (`api/export.py`):**
 - `GET /api/mastery/topics` — joins `UserDocument` + `TopicMastery`; returns `[{file_id, topic, icon, mastery_pct|null, quiz_count}]`.
@@ -269,16 +273,16 @@ Both entry points share `_sanitize()` and the 10-slide McKinsey/BCG-style system
 - `GET /api/mastery/scores` — raw `TopicMastery` records for the user.
 - `GET /api/mastery/skill-tree?course_name=...` — powers the Mastery page's syllabus-derived "Skill Tree". Validates `CustomCourse` ownership (404 if not found/no syllabus). On first call, lazily extracts topics from `full_syllabus_text` via `services/mastery.py::extract_syllabus_topics()` (gpt-4o-mini, JSON mode) and persists them as ordered `SyllabusTopicMastery` rows; subsequent calls reuse the persisted rows. Computes `is_unlocked` sequentially — topic 0 is always unlocked, topic N unlocks once topic N-1's `mastery_pct >= UNLOCK_THRESHOLD` (50.0). Returns `{has_syllabus, course_name, topics: [{topic_id, topic, topic_order, mastery_pct, quiz_count, is_unlocked}]}`.
 
-**Mastery page Skill Tree UI (`mastery/page.tsx`):** When `selectedCourse` has a syllabus, a vertical "Skill Tree" / progress-path section renders above the existing per-document topic cards, fetching `GET /api/mastery/skill-tree?course_name=<selectedCourse.name>`. Each `SkillTreeCard` shows the topic name, a circular/horizontal mastery progress indicator, and quiz-count, styled with the "Matcha Executive Light" palette; locked topics (`is_unlocked === false`, below `UNLOCK_THRESHOLD = 50`) render dimmed with a `Lock` icon and are not clickable. Starting a quiz from a `SkillTreeCard` calls `startQuiz(topic, undefined, courseName)` / `submitResults(..., courseName)` — the same `QuizModal` and submit flow as the per-document cards, just routed through the `course_name` branch of `generate-quiz`/`submit-results` instead of `file_id`. This section is purely additive — the original "עדיין לא הועלו חומרי לימוד" per-document empty state is unchanged for courses without a syllabus.
+**Mastery page Skill Tree UI (`mastery/page.tsx`):** When `selectedCourse` has a syllabus, a vertical "Skill Tree" / progress-path section renders above the existing per-document topic cards. Each `SkillTreeCard` shows the topic name, a circular/horizontal mastery progress indicator, and quiz-count, styled with the "Matcha Executive Light" palette; locked topics (`is_unlocked === false`, below `UNLOCK_THRESHOLD = 50`) render dimmed with a `Lock` icon and are not clickable. Starting a quiz from a `SkillTreeCard` calls `startQuiz(topic, undefined, courseName)` / `submitResults(..., courseName)` — the same `QuizModal` and submit flow as the per-document cards, just routed through the `course_name` branch of `generate-quiz`/`submit-results` instead of `file_id`.
 
 **Professor Brain Simulator (`api/professor.py`):**
 `POST /api/professor-simulator/ask` — uses `gpt-4o` (not `gpt-4o-mini`). Rate limited to 2 simulations/month for basic plan. File ownership validated before RAG retrieval. Accepts an optional `mode` field, `"simulate"` (default) or `"predict_exam"`, and an optional `course_name` (scopes the past-exam lookup below to one course):
 - `"simulate"` — the original exam-trap-question flow: `_build_system_prompt(professor_name, exam_style, trap_types, topics, has_past_exams)` persona, context via `hybrid_search` (per-`file_ids` or whole-collection), capped at `_MAX_CONTEXT_CHARS` (20,000).
-- `"predict_exam"` — the "Predict my exam" (חזה את המבחן שלי) quick action. `file_ids` (the user's uploaded past exams) is required (400 if empty). Context is the **full** indexed text of those files via `services/rag.py::get_chunks_for_files(user_id, file_ids)` (manual metadata filter over `FaissCollection.get()` — not query-driven top-k), capped at `_MAX_PREDICTOR_CONTEXT_CHARS` (40,000). System prompt is the fixed `_EXAM_PREDICTOR_PROMPT` ("You are an expert exam predictor..." — analyze only the past exams, identify recurring patterns/structures, predict the next exam, be direct and objective; framed as an experienced TA's intuition — the prompt explicitly bans words like "probability"/"algorithm"/"model"/"score").
+- `"predict_exam"` — the "Predict my exam" (חזה את המבחן שלי) quick action. `file_ids` (the user's uploaded past exams) is required (400 if empty). Context is the **full** indexed text of those files via `services/rag.py::get_chunks_for_files(user_id, file_ids)` (manual metadata filter over `FaissCollection.get()` — not query-driven top-k), capped at `_MAX_PREDICTOR_CONTEXT_CHARS` (40,000). System prompt is the fixed `_EXAM_PREDICTOR_PROMPT` — framed as an experienced TA's intuition; explicitly bans words like "probability"/"algorithm"/"model"/"score".
 
 **"Lecturer's Brain" past-exam tagging (`UserDocument.is_past_exam`):** A `UserDocument` row can be flagged `is_past_exam=True` (Boolean column + idempotent migration in `models/__init__.py`). `services/rag.py::get_past_exam_file_ids(user_id, course_name=None)` returns the `file_id`s of a user's tagged past exams, optionally scoped to one course. `professor_ask` uses this in BOTH modes:
 - `"predict_exam"` — the request's `file_ids` are merged with `get_past_exam_file_ids(user_id, course_name)` (deduped via `dict.fromkeys`) before `get_chunks_for_files`, so the predictor sees the user's full historical record of past exams for the course, not just the single freshest upload.
-- `"simulate"` — the full text of `get_past_exam_file_ids(user_id, course_name)` is fetched via `get_chunks_for_files`, formatted as `"[מבחן קודם: ...]"` blocks, capped at `_MAX_PAST_EXAM_STYLE_CHARS` (8,000), and appended as a separate "מבחנים קודמים של הקורס" context block. When non-empty, `_build_system_prompt(..., has_past_exams=True)` appends a "המוח של המרצה" directive instructing the model to identify recurring patterns across those past exams and explicitly tie its answers back to them — under the same "present as a TA's intuition, never as statistics/algorithm" framing as `_EXAM_PREDICTOR_PROMPT`.
+- `"simulate"` — the full text of `get_past_exam_file_ids(user_id, course_name)` is fetched via `get_chunks_for_files`, formatted as `"[מבחן קודם: ...]"` blocks, capped at `_MAX_PAST_EXAM_STYLE_CHARS` (8,000), and appended as a separate "מבחנים קודמים של הקורס" context block. When non-empty, `_build_system_prompt(..., has_past_exams=True)` appends a "המוח של המרצה" directive instructing the model to identify recurring patterns across those past exams and explicitly tie its answers back to them.
 
 In `professor-simulator/page.tsx`, the "מבחן לדוגמא" single-PDF dropzone (`sampleExam` state) doubles as the "past exam" source for `predict_exam` mode: the "חזה את המבחן שלי" button calls `send(text, 'predict_exam')`, which sends `file_ids: [sampleExam.file_id]` and `mode: 'predict_exam'`. The sample-exam upload is sent with `is_past_exam: '1'`, and every chat request additionally sends `course_name: selectedCourse?.name ?? ''`.
 
@@ -295,12 +299,13 @@ In `professor-simulator/page.tsx`, the "מבחן לדוגמא" single-PDF dropzo
 | `/health` | GET | — | Liveness; reports FAISS chunk count |
 | `/api/check-email` | POST | — | Check if email is registered |
 | `/api/send-otp` | POST | — | Send 6-digit OTP for magic-link login |
-| `/api/verify-otp` | POST | — | Verify OTP → issue JWT |
-| `/api/login` | POST | — | Password login → issue JWT |
-| `/api/register` | POST | — | Create account |
+| `/api/verify-otp` | POST | — | Verify OTP → issue JWT (sets HttpOnly cookie) |
+| `/api/login` | POST | — | Password login → issue JWT (sets HttpOnly cookie) |
+| `/api/register` | POST | — | Create account (sets HttpOnly cookie) |
+| `/api/logout` | POST | — | Clear the JWT HttpOnly cookie |
 | `/api/forgot-password` | POST | — | Send password-reset email |
 | `/api/reset-password` | POST | — | Complete password reset |
-| `/api/refresh-token` | GET | user | Issue fresh JWT |
+| `/api/refresh-token` | GET | user | Issue fresh JWT (sets new HttpOnly cookie) |
 | `/api/profile` | GET, PATCH | user | Get/update profile |
 | `/api/user/onboarding` | POST | user | Save onboarding fields |
 | `/api/usage` | GET | user | Monthly upload/question counters |
@@ -321,6 +326,7 @@ In `professor-simulator/page.tsx`, the "מבחן לדוגמא" single-PDF dropzo
 | `/api/mastery/submit-results` | POST | user | Save quiz score; weighted mastery update |
 | `/api/mastery/scores` | GET | user | Raw mastery records |
 | `/api/mastery/skill-tree` | GET | user | Syllabus-derived Skill Tree (topics + per-topic mastery + unlock state) for a course |
+| `/api/writing/suggest-titles` | POST | user | AI-suggested paper titles for a topic (stub; replace with RAG) |
 | `/api/courses/parse-syllabus` | POST | user | Parse PDF → LLM metadata + full text (multipart) |
 | `/api/courses` | POST | user | Save CustomCourse + index syllabus to FAISS |
 | `/api/courses/details` | GET | user | Fetch course metadata by `?name=` |
@@ -344,7 +350,12 @@ Next.js 16 · React 19 · TypeScript · Tailwind CSS v4 · `react-dropzone` v15 
 
 > **Warning:** This Next.js version has breaking changes from older releases. Read `node_modules/next/dist/docs/` before writing Next.js-specific code.
 
-**`middleware.ts`** actively guards `/admin/*` and `/dashboard/*` with a hybrid Supabase + Flask-JWT auth check. It also sets security headers on every response. See `frontend/CLAUDE.md` for the full details — the pass-through description in older notes is stale.
+**`middleware.ts`** actively guards all protected routes with a hybrid Supabase + Flask-JWT cookie auth check. It also sets security headers on every response. Protected routes (unauthenticated → `/?login=true`):
+- `/workspace`, `/course-picker`, `/dashboard` (also requires `levy_ai_course_active` cookie → `/course-picker`)
+- `/academic-writing`, `/mastery`, `/my-documents`, `/presentation`, `/presentation-generator`
+- `/profile`, `/settings`, `/onboarding`
+- `/admin/*` (additionally requires `is_admin` claim in JWT payload)
+- `/login`, `/register` — authenticated users bounced to `/dashboard` or `/course-picker`
 
 **Post-login redirect:** After successful login/OTP, `page.tsx` routes to `WORKSPACE_ROUTE = '/dashboard'` (the Course Hub Home, not `/workspace`).
 
@@ -354,16 +365,34 @@ LanguageProvider → CourseProvider → AuthProvider → {children}
 ```
 All three providers must remain in this order.
 
-**API call patterns — two distinct approaches exist:**
+**API call patterns — two approaches exist:**
 
-1. **Server-side proxy** (`app/api/flask/[...path]/route.ts`): catches all methods on `/api/flask/*` and forwards to Flask. Exports `GET`, `POST`, `PATCH`, `PUT`, `DELETE`. Uses server-only `API_URL` env var. Logs every request to the `npm run dev` terminal.
+1. **Server-side proxy** (`app/api/flask/[...path]/route.ts`): catches all methods on `/api/flask/*` and forwards to Flask, including all request cookies. Uses server-only `API_URL` env var. Logs every request to the `npm run dev` terminal.
 
-2. **Direct browser calls**: Most pages call Flask directly at `const API = 'http://127.0.0.1:5003'` with `Authorization: Bearer <token>`. The proxy is an alternative — both patterns coexist in the codebase.
+2. **Direct browser calls**: Pages call Flask directly at `const API = 'http://localhost:5003'` (NOT `127.0.0.1` — the browser treats `localhost` and `127.0.0.1` as different sites, which breaks SameSite cookie transport). Every `fetch` must include `credentials: 'include'` so the `levy_ai_token` HttpOnly cookie is sent. No `Authorization: Bearer` headers — auth is entirely cookie-based.
+
+The per-page `authFetch` wrapper handles both concerns:
+```typescript
+async function authFetch(url: string, init: RequestInit = {}) {
+  const res = await fetch(url, { ...init, credentials: 'include' });
+  if (res.status === 401) { _clearAuth(); window.location.href = '/?login=true'; }
+  return res;
+}
+```
 
 **Critical note on DELETE vs POST for destructive actions:** Use `POST /api/courses/delete` (not `DELETE /api/courses`) to avoid HTTP method routing ambiguity in Flask and CORS preflight issues. This pattern is established in `courses.py`.
 
 **Auth (client-side):**
-JWT stored in `localStorage` key `levy_ai_token`. Use the global `AuthProvider` (`app/providers/auth.tsx`) and `useAuth()` hook. The `AUTH_KEYS` export lists every localStorage key the app touches — keep it in sync.
+The JWT is in an **HttpOnly cookie** — JavaScript cannot read it. `AuthProvider` (`app/providers/auth.tsx`) derives user state from lightweight localStorage profile keys only. `AuthUser` has NO `token` field. The `AUTH_KEYS` export lists all the localStorage keys the app touches — keep it in sync.
+
+| localStorage key | Contents |
+|---|---|
+| `levy_ai_email` | User's email (set on login/OTP) — presence indicates authenticated |
+| `levy_ai_first_name`, `levy_ai_last_name` | Display names |
+| `levy_ai_gender`, `levy_ai_institution`, etc. | Onboarding profile fields |
+| `levy_ai_is_admin` | `'true'`/`'false'` string — UI display flag only (backend enforces real admin check) |
+
+`readUserFromStorage()` returns `null` when `levy_ai_email` is absent (not logged in). `updateToken()` now takes no meaningful argument — it just re-reads localStorage to sync React state after a token refresh sets a new HttpOnly cookie. `logout()` calls `POST /api/logout` first (Flask clears the HttpOnly cookie), then wipes localStorage.
 
 **Course context (`providers/course.tsx`):**
 Exports `CourseProvider` / `useCourse()` / `COURSES` (three built-in courses: `infi1`, `ds`, `phys`). The context exposes:
@@ -387,18 +416,22 @@ URL param `[id]` is the localStorage Course ID (string like `custom_${Date.now()
 **Academic writing (`academic-writing/page.tsx`):**
 ~2200 lines. `WritingPanel` drives a co-writing SSE loop: `generateParagraph(paragraphNum, approved[], feedback)` sends `previousContent` (raw concatenated approved text — no UI labels), `currentChunkIndex`, `maxChunks`, `isFinalSection`, `fileIds`. `CHUNKS_PER_PAGE=2`; `WORDS_PER_PAGE=400`; `maxChunks = pageCount * 2`. Approved sections accumulate in `approvedParagraphs[]` (pure LLM text only — never UI strings). `resetSession()` zeroes all state including `chunkIndexRef` for a clean new paper. `handleNextStep` is the single unified approve callback: it appends the current draft to `approvedParagraphs[]`, then either finalizes (`setIsFinished(true)`) when `next.length >= maxChunks`, or advances `chunkIndexRef` and calls `generateParagraph` — evaluated synchronously against the just-built array (not stale React state).
 
-**Wizard step order** (URL `?step=N`): Step 1 = Writing Type selection (essay/research/summary tiles); Step 2 = Source selection (upload/documents/sessions with sub-content dropzone); Step 3 = Confirmation. `step1Ready = writingType !== null`; `step2Ready` = source selected. Both the Academic Writing wizard and the Presentation Generator wizard use `dir="ltr"` on their nav row `<div>` so Back sits on the left and Next on the right in both English and Hebrew modes.
+The **WritingPanel entry screen** (shown when `!isStarted`) is a **Title Selection UI**: the user enters a topic in an input field that has an inline `<Sparkles>` button (purple, `end-0` positioned — left in Hebrew RTL, right in English LTR). Clicking Sparkles calls `POST /api/writing/suggest-titles` and renders AI-suggested titles as clickable chips below the input; clicking a chip sets it as the topic. The static `t.topicChips` section below the chips offers quick generic topic starters.
+
+**Wizard step order** (URL `?step=N`): Step 1 = Writing Type selection (essay/research/summary tiles); Step 2 = Source selection (upload/documents/sessions with sub-content dropzone); Step 3 = Confirmation. `step1Ready = writingType !== null`; `step2Ready` = source selected. The wizard nav row inherits the page's `dir` — in Hebrew (RTL) the Back button (first DOM child) lands on the RIGHT and Next (second DOM child) lands on the LEFT, matching Hebrew reading flow. Arrow SVG paths are conditionally flipped per language.
 
 **`workspace/page.tsx` structure:**
 Very large (~3087 lines). Inline components in order: `CodeExecutionBlock` → `QuizModal` → `LogoutConfirmModal` → `Sidebar` → `Home`. Every logout entry point must call `setShowLogoutModal(true)` — never `handleLogout()` directly. No shared `<Sidebar>` shell exists in this codebase — each page owns its own sidebar.
 
-`hasDoc` in the `Home` component is a **derived constant** (`const hasDoc = visibleDocList.length > 0`), not React state. It is computed from `visibleDocList` — the same filename-filtered array that drives the "N מסמכים זמינים" count display — so the chat enable/disable state always matches what the user sees. Do not re-introduce a `useState(false)` for `hasDoc`; it must stay derived from `visibleDocList` to avoid the mismatch where the backend returns a syllabus-named file (filtered out locally) and the chat incorrectly enables itself.
+`hasDoc` in the `Home` component is a **derived constant** (`const hasDoc = visibleDocList.length > 0`), not React state. It is computed from `visibleDocList` — the same filename-filtered array that drives the "N מסמכים זמינים" count display — so the chat enable/disable state always matches what the user sees. Do not re-introduce a `useState(false)` for `hasDoc`.
 
 **Full-nav sidebar pattern (`mastery/page.tsx`, `academic-writing/page.tsx`, `presentation/page.tsx`, `presentation-generator/page.tsx`, `settings/page.tsx`, `workspace/page.tsx`, `workspace/professor-simulator/page.tsx`):**
-Each page has its own copy-pasted hamburger-triggered sidebar (`MasterySidebar` / local `Sidebar` — unrelated to `components/Sidebar.tsx`, which is a different, smaller component): backdrop (`z-40`) + slide-in `<aside>` panel (`z-50`, `translateClass` for RTL/LTR direction), nav links (Home/StudyLab/Academic Writing/Create Presentation/Professor's Brain/Mastery/My Documents/Settings/Collaboration "Soon" — every full-nav sidebar includes a "🎬 Create Presentation" → `/presentation-generator` item and a `Folder`-icon "My Documents" → `/my-documents` item), an active-course indicator via `useCourse()`, an admin-only "Admin CT" section gated on `isAdmin` (decoded from the JWT via `decodeJwtPayload`), and a bottom Logout button wired to `LogoutConfirmModal`. The header also carries a profile-avatar popover (`AvatarContent`, name/email, Logout). `mastery/page.tsx`'s `MasterySidebar` is the canonical reference — copy it verbatim (including `AvatarContent`/`IconShield`/`LogoutConfirmModal`/`decodeJwtPayload` helpers) when adding this shell to a new page rather than re-deriving it. Newer headers (`settings`, `admin/*`, and the post-rewrite `academic-writing`/`mastery`/`presentation-generator`) drop the centered page-title badge entirely — just hamburger+logo on the start side and CoursePill+language-toggle+avatar-popover on the end side; `presentation/page.tsx` still has the older centered title badge and hasn't been migrated.
+Each page has its own copy-pasted hamburger-triggered sidebar: backdrop (`z-40`) + slide-in `<aside>` panel (`z-50`, `translateClass` for RTL/LTR direction), nav links (Home/StudyLab/Academic Writing/Create Presentation/Professor's Brain/Mastery/My Documents/Settings/Collaboration "Soon"), an active-course indicator via `useCourse()`, an admin-only "Admin CT" section gated on `isAdmin`, and a bottom Logout button wired to `LogoutConfirmModal`. `mastery/page.tsx`'s `MasterySidebar` is the canonical reference — copy it verbatim when adding this shell to a new page.
+
+`isAdmin` in sidebars and page guards is now read as: `localStorage.getItem('levy_ai_is_admin') === 'true'` (stored at login, not decoded from JWT — the JWT is HttpOnly). Pages still check it via `const [isAdmin] = useState(() => typeof window !== 'undefined' && localStorage.getItem('levy_ai_is_admin') === 'true')`. The header also carries a profile-avatar popover (`AvatarContent`, name/email, Logout). Newer headers (`settings`, `admin/*`, `academic-writing`, `mastery`, `presentation-generator`) drop the centered page-title badge entirely.
 
 **Admin pages (`admin/page.tsx`, `admin/users/page.tsx`):**
-These two pages share one `AdminShell.tsx` component (not copy-pasted, unlike the full-nav pattern above — with only two admin pages a shared component was preferred over duplicating ~300 lines twice) providing the sidebar/header/footer chrome. There is no `admin/layout.tsx`; both pages wrap their content directly in `<AdminShell>...</AdminShell>`. `AdminShell`'s sidebar extends the standard nav with an always-visible "Admin CT" section (🖥️ Platform → `/dashboard`, 🛡️ Overview → `/admin`, 👥 User Management → `/admin/users`, 📚 Course Assignments "Soon") — not gated on `isAdmin` since `AdminShell` is only ever rendered on confirmed-admin routes (each page's own auth-guard effect still calls `router.replace('/?login=true')` for non-admins before rendering `AdminShell`). Page content sits on `AdminShell`'s `#97AB92` background inside `max-w-7xl`/`max-w-6xl mx-auto` containers.
+These two pages share one `AdminShell.tsx` component providing the sidebar/header/footer chrome. There is no `admin/layout.tsx`; both pages wrap their content directly in `<AdminShell>...</AdminShell>`. `AdminShell`'s sidebar extends the standard nav with an always-visible "Admin CT" section — not gated on `isAdmin` since `AdminShell` is only ever rendered on confirmed-admin routes (each page's own auth-guard effect still calls `router.replace('/?login=true')` for non-admins before rendering `AdminShell`). Page content sits on `AdminShell`'s `#97AB92` background inside `max-w-7xl`/`max-w-6xl mx-auto` containers.
 
 **`/my-documents` page:**
 The primary document management page (`my-documents/page.tsx`, ~966 lines). Has its own full-nav sidebar (`MyDocumentsSidebar`), full document list per active course, upload zone, download, and delete. All full-nav sidebars across the app link here via a `Folder`-icon nav item. The dashboard `CrystalCard` "המסמכים שלי" also routes here.
@@ -411,7 +444,7 @@ After registration, users land on `/onboarding`. Onboarding data saved via `POST
 
 **Key conventions:**
 - **Tailwind v4** — CSS-first config only. No `tailwind.config.ts`. All config in `app/globals.css`.
-- **Default language is English/LTR** — `layout.tsx` sets `<html lang="en" dir="ltr">` and `LanguageProvider` defaults to `'en'`; Hebrew is an opt-in. Individual pages still use `dir={lang === 'he' ? 'rtl' : 'ltr'}` on their root div. Wizard navigation rows use `dir="ltr"` as a local override to keep Back on left / Next on right regardless of the active language. Never hardcode `dir="rtl"` globally or use `flex-row-reverse`.
+- **Default language is English/LTR** — `layout.tsx` sets `<html lang="en" dir="ltr">` and `LanguageProvider` defaults to `'en'`; Hebrew is an opt-in. Individual pages use `dir={lang === 'he' ? 'rtl' : 'ltr'}` on their root div. Never hardcode `dir="rtl"` globally or use `flex-row-reverse`. Wizard navigation rows inherit the page's direction — no `dir="ltr"` override — so Hebrew users get RTL button placement naturally. Use `insetInlineEnd`/`end-0`/`pe-N` (RTL-aware Tailwind classes) for absolutely positioned inline elements.
 - **Blob downloads** — When triggering a file download from a `fetch` response, always: `document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(() => window.URL.revokeObjectURL(url), 100)` — omitting `appendChild` silently fails in Firefox; revoking synchronously races the download start.
 - **Creamy Matcha design tokens** — Active design system:
   - Global body background: `#F9FCFA`; primary text: `#1C3329`; secondary text: `#527061`
@@ -432,7 +465,10 @@ After registration, users land on `/onboarding`. Onboarding data saved via `POST
 - `D` design-token object at the top centralises all colours
 - **Course Selector view** (when `selectedCourse === null`): uses `COURSES` + `customCourses` from the provider
 - **Course Focus view** (when course selected): `CrystalCard` quick actions + `MaterialRow` list
-- The "Create Presentation" `CrystalCard` routes to `/presentation-generator` (3-step wizard: Step 1 = Source, Step 2 = Settings, Step 3 = Confirm+Generate; URL `?step=N` driven by `useSearchParams`). Style/tone is hardcoded to `'academic'` in `providers/presentation.tsx` — the `presentationStyle`/`setPresentationStyle` fields have been removed from the context. `/presentation` (RAG deck from already-indexed docs, topic-only, no upload) is a separate, intentionally distinct feature and is not linked from the dashboard.
+- **Course switch ceremony**: selecting a new course triggers a Framer Motion fade-out → pulsing loader (shows incoming course icon + spinner) → fade-in with new course data. `displayedCourse` state lags `selectedCourse` by 395 ms to keep the DOM correct during the transition. The page wrapper is `motion.div` with a mount animation (`initial={{ opacity: 0, y: 14 }}`).
+- The "Create Presentation" `CrystalCard` routes to `/presentation-generator` (3-step wizard). `/presentation` (RAG deck from already-indexed docs, topic-only, no upload) is a separate, intentionally distinct feature and is not linked from the dashboard.
+
+**`CoursePill.tsx`** — The main pill (showing course name + icon) is a **static `<div>`**, not a button. It does not navigate anywhere. The chevron `▾` button opens the quick-switch dropdown; the `×` button clears the course. The "no course selected" pill (`📚 בחר קורס ▾`) IS a button → routes to `/course-picker`.
 
 **z-index layering (wizard exit modals / dropdowns):**
 

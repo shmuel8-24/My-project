@@ -9,7 +9,7 @@ import { useCourse }   from '../providers/course';
 import CoursePill      from '../../components/CoursePill';
 import { type Slide, SlideRenderer } from '../../components/SlideLayouts';
 
-const API = 'http://127.0.0.1:5003';
+const API = 'http://localhost:5003';
 
 /* ── Auth / fetch helpers ─────────────────────────────────────────────────── */
 async function authFetch(url: string, init: RequestInit = {}) {

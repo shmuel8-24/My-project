@@ -6,6 +6,7 @@ def register_blueprints(app):
     from api.professor import professor_bp
     from api.courses import courses_bp
     from api.presentation_agent import presentation_agent_bp
+    from api.writing import writing_bp
     app.register_blueprint(auth_bp)
     app.register_blueprint(documents_bp)
     app.register_blueprint(admin_bp)
@@ -13,3 +14,4 @@ def register_blueprints(app):
     app.register_blueprint(professor_bp)
     app.register_blueprint(courses_bp)
     app.register_blueprint(presentation_agent_bp)
+    app.register_blueprint(writing_bp)

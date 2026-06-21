@@ -10,7 +10,7 @@ import CoursePill        from '../../components/CoursePill';
 import Skeleton          from '../../components/ui/Skeleton';
 import { playSuccess }   from '../../utils/audio';
 
-const API = 'http://127.0.0.1:5003';
+const API = 'http://localhost:5003';
 
 
 /* ── Quiz types ───────────────────────────────────────────────────────────────── */
