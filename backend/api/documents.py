@@ -2,7 +2,6 @@ import base64
 import hashlib
 import json
 import os
-import re
 from datetime import datetime, timezone
 
 import fitz
@@ -190,11 +189,12 @@ def _educational_synthesize(full_text: str, doc_name: str, original_question: st
 _EPHEMERAL_MAX_CHARS = 60_000
 
 _EPHEMERAL_SYSTEM = (
-    "אתה עוזר לימודי מומחה. לפניך תוכן ממסמכים שהמשתמש העלה לניתוח מיידי. "
-    "ענה בצורה מפורטת ומובנית על השאלה בהתבסס אך ורק על התוכן שסופק. "
-    "השתמש בציטוטים ישירים ובדוגמאות מהמסמך כשרלוונטי. "
-    "אם התשובה אינה במסמך, ציין זאת בבירור — אל תמציא מידע שאינו בטקסט. "
-    "ענה בשפה שבה נשאלת השאלה (עברית אם בעברית, אנגלית אם באנגלית)."
+    "You are an expert academic study assistant. The user has uploaded documents for immediate in-session analysis. "
+    "Answer the question in a detailed, well-structured way based strictly and exclusively on the provided content. "
+    "Use direct quotes and concrete examples from the document where relevant. "
+    "If the answer is not found in the document, state this clearly — never fabricate information not present in the text. "
+    "CRITICAL RULE: Detect the language of the user's question. Reply exclusively in that same language — "
+    "if the user writes in Hebrew, reply in fluent natural Hebrew; if the user writes in English, reply in English."
 )
 
 
@@ -292,15 +292,43 @@ def ephemeral_ask(user_id: int):
     )
 
 
-# ── OCR (optional) ─────────────────────────────────────────────────────────────
-try:
-    import pytesseract
-    from PIL import Image as _PILImage
-    _TESSERACT_OK = True
-    print("[OCR] pytesseract available — image text extraction enabled")
-except ImportError:
-    _TESSERACT_OK = False
-    print("[OCR] pytesseract not installed — images will use vision-only mode")
+# ── Vision-based text extraction ───────────────────────────────────────────────
+def _extract_text_via_vision(img_bytes: bytes, mime: str, filename: str, user_id: int) -> str:
+    """Use GPT-4o Vision to extract text from an image (Hebrew + English).
+
+    Returns the extracted text string, or empty string on failure.
+    """
+    data_url = f"data:{mime};base64,{base64.b64encode(img_bytes).decode()}"
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type":      "image_url",
+                        "image_url": {"url": data_url, "detail": "high"},
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            "חלץ את כל הטקסט המופיע בתמונה זו בצורה מדויקת ומלאה. "
+                            "שמור על סדר הפסקאות והמשפטים. "
+                            "אם מדובר בסיכומי שיעור, דפי נוסחאות או מסמכים בעברית או באנגלית, "
+                            "העתק אותם מילה במילה ללא תוספות או פרשנויות משלך."
+                        ),
+                    },
+                ],
+            }],
+            max_tokens=4096,
+            temperature=0,
+        )
+        text = (response.choices[0].message.content or "").strip()
+        print(f"[Vision OCR] u{user_id}: {filename!r} → {len(text)} chars extracted")
+        return text
+    except Exception as exc:
+        print(f"[Vision OCR] u{user_id}: {filename!r} — extraction failed: {exc}")
+        return ""
 
 
 @documents_bp.route("/health", methods=["GET"])
@@ -311,7 +339,6 @@ def health():
 @documents_bp.route("/upload-pdf", methods=["POST"])
 @token_required
 def upload_pdf(user_id: int):
-    import io as _io
     raw_files   = request.files.getlist("files")
     valid_files = [f for f in raw_files if f and f.filename]
     if not valid_files:
@@ -370,82 +397,70 @@ def upload_pdf(user_id: int):
             chunks_from_ocr = 0
             ocr_chars       = 0
 
-            if _TESSERACT_OK:
-                ocr_text = ""
+            ocr_text  = _extract_text_via_vision(img_bytes, _IMG_MIME[ext], filename, user_id)
+            ocr_chars = len(ocr_text)
+
+            if ocr_text:
+                ocr_file_id   = hashlib.md5(filename.encode()).hexdigest()[:16]
+                ocr_upload_dt = datetime.now(timezone.utc).isoformat()
+
+                # Persistence guard — skip re-indexing if already present
+                _ocr_guard_db = SessionLocal()
                 try:
-                    pil_img = _PILImage.open(_io.BytesIO(img_bytes))
+                    _ocr_already = _ocr_guard_db.query(UserDocument).filter(
+                        UserDocument.user_id == user_id,
+                        UserDocument.file_id == ocr_file_id,
+                    ).first()
+                finally:
+                    _ocr_guard_db.close()
+
+                if _ocr_already:
+                    print(f"[Vision OCR] u{user_id}: {filename!r} already indexed "
+                          f"(file_id={ocr_file_id}) — skipping (persistence policy)")
+                else:
+                    ocr_chunks = text_splitter.split_text(ocr_text)
+                    ocr_metas  = [
+                        {
+                            "source":      filename,
+                            "file_name":   filename,
+                            "file_id":     ocr_file_id,
+                            "page_number": 1,
+                            "total_pages": 1,
+                            "upload_date": ocr_upload_dt,
+                            "chunk_index": i,
+                            "user_id":     user_id,
+                            "file_type":   "image_ocr",
+                            "course_name": course_name,
+                        }
+                        for i in range(len(ocr_chunks))
+                    ]
+                    ocr_ids = [f"{filename}_chunk_{i}" for i in range(len(ocr_chunks))]
                     try:
-                        ocr_text = pytesseract.image_to_string(pil_img, lang="eng+heb").strip()
-                    except pytesseract.TesseractError:
-                        ocr_text = pytesseract.image_to_string(pil_img, lang="eng").strip()
-                    ocr_chars = len(ocr_text)
-                    print(f"[OCR] u{user_id}: {filename!r} → {ocr_chars} chars extracted")
-                except Exception as ocr_exc:
-                    print(f"[OCR] u{user_id}: {filename!r} — extraction failed: {ocr_exc}")
-
-                if ocr_text:
-                    ocr_file_id   = hashlib.md5(filename.encode()).hexdigest()[:16]
-                    ocr_upload_dt = datetime.now(timezone.utc).isoformat()
-
-                    # Persistence guard for OCR images
-                    _ocr_guard_db = SessionLocal()
-                    try:
-                        _ocr_already = _ocr_guard_db.query(UserDocument).filter(
-                            UserDocument.user_id == user_id,
-                            UserDocument.file_id == ocr_file_id,
-                        ).first()
-                    finally:
-                        _ocr_guard_db.close()
-
-                    if _ocr_already:
-                        print(f"[OCR] u{user_id}: {filename!r} already indexed "
-                              f"(file_id={ocr_file_id}) — skipping (persistence policy)")
-                    else:
-                        ocr_chunks = text_splitter.split_text(ocr_text)
-                        ocr_metas  = [
-                            {
-                                "source":      filename,
-                                "file_name":   filename,
-                                "file_id":     ocr_file_id,
-                                "page_number": 1,
-                                "total_pages": 1,
-                                "upload_date": ocr_upload_dt,
-                                "chunk_index": i,
-                                "user_id":     user_id,
-                                "file_type":   "image_ocr",
-                                "course_name": course_name,
-                            }
-                            for i in range(len(ocr_chunks))
-                        ]
-                        ocr_ids = [f"{filename}_chunk_{i}" for i in range(len(ocr_chunks))]
+                        ocr_vectors = embeddings_model.embed_documents(ocr_chunks)
+                        col.upsert(ids=ocr_ids, embeddings=ocr_vectors,
+                                   documents=ocr_chunks, metadatas=ocr_metas)
+                        chunks_from_ocr = len(ocr_chunks)
+                        print(f"[Vision OCR] u{user_id}: {filename!r} → {chunks_from_ocr} chunks embedded")
+                        _ocr_db = SessionLocal()
                         try:
-                            ocr_vectors = embeddings_model.embed_documents(ocr_chunks)
-                            col.upsert(ids=ocr_ids, embeddings=ocr_vectors,
-                                       documents=ocr_chunks, metadatas=ocr_metas)
-                            chunks_from_ocr = len(ocr_chunks)
-                            print(f"[OCR] u{user_id}: {filename!r} → {chunks_from_ocr} chunks embedded")
-                            _ocr_db = SessionLocal()
-                            try:
-                                _ocr_exists = _ocr_db.query(UserDocument).filter(
-                                    UserDocument.user_id == user_id,
-                                    UserDocument.file_id == ocr_file_id,
-                                ).first()
-                                if not _ocr_exists:
-                                    _ocr_db.add(UserDocument(
-                                        user_id=user_id, file_id=ocr_file_id, filename=filename,
-                                        file_size_bytes=len(img_bytes), course_name=course_name,
-                                        is_past_exam=is_past_exam, is_session_only=is_session_only))
-                                    _ocr_db.commit()
-                                    _save_upload_file(user_id, ocr_file_id, filename, img_bytes)
-                            except Exception as reg_exc:
-                                print(f"[OCR] WARNING: ownership registration failed: {reg_exc}")
-                                _ocr_db.rollback()
-                            finally:
-                                _ocr_db.close()
-                        except Exception as embed_exc:
-                            print(f"[OCR] u{user_id}: {filename!r} — embedding failed: {embed_exc}")
-            else:
-                print(f"[OCR] u{user_id}: {filename!r} — pytesseract not available, vision-only mode")
+                            _ocr_exists = _ocr_db.query(UserDocument).filter(
+                                UserDocument.user_id == user_id,
+                                UserDocument.file_id == ocr_file_id,
+                            ).first()
+                            if not _ocr_exists:
+                                _ocr_db.add(UserDocument(
+                                    user_id=user_id, file_id=ocr_file_id, filename=filename,
+                                    file_size_bytes=len(img_bytes), course_name=course_name,
+                                    is_past_exam=is_past_exam, is_session_only=is_session_only))
+                                _ocr_db.commit()
+                                _save_upload_file(user_id, ocr_file_id, filename, img_bytes)
+                        except Exception as reg_exc:
+                            print(f"[Vision OCR] WARNING: ownership registration failed: {reg_exc}")
+                            _ocr_db.rollback()
+                        finally:
+                            _ocr_db.close()
+                    except Exception as embed_exc:
+                        print(f"[Vision OCR] u{user_id}: {filename!r} — embedding failed: {embed_exc}")
 
             img_results.append({
                 "source": filename, "size": len(img_bytes),
@@ -852,8 +867,7 @@ def ask(user_id: int):
             system_prompt = (
                 SECURITY_SYSTEM_INSTRUCTION
                 + "You are a scientist, engineer, and knowledgeable assistant for U-Note, "
-                "serving Hebrew-speaking university students. "
-                "Answer conversational questions naturally in Hebrew. "
+                "serving university students. "
                 "For factual or document questions, base your answer on the provided context.\n\n"
                 "SOURCE CITATION RULES — CRITICAL (apply to every single response):\n"
                 "• By default, NEVER include citations, source references, document names, "
@@ -870,7 +884,10 @@ def ask(user_id: int):
                 "NEVER write LaTeX commands like \\psi or \\rho as bare text outside delimiters. "
                 "CRITICAL: When explaining mathematical or physical concepts, DO NOT write or "
                 "execute Python code to display or typeset formulas. You MUST use LaTeX "
-                "formatting directly in your response — $$ for display equations, $ for inline."
+                "formatting directly in your response — $$ for display equations, $ for inline.\n\n"
+                "CRITICAL RULE: Detect the language of the user's message. Reply exclusively in "
+                "that same language — if the user writes in Hebrew, reply in fluent natural Hebrew; "
+                "if the user writes in English, reply in English."
                 + web_search_instruction
                 + no_execution_instruction
                 + image_instruction

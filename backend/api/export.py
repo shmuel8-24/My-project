@@ -1,8 +1,7 @@
 import json
+import re
 from datetime import datetime, timezone
 
-import markdown
-from markdown.extensions.codehilite import CodeHiliteExtension
 from flask import Blueprint, Response, jsonify, request, send_file, stream_with_context
 
 from api.middleware import _build_student_crm, token_required
@@ -286,7 +285,8 @@ def generate_paper(user_id: int):
         "without a title/headers, follow that constraint exactly and output pure prose only — "
         "but if that section opens a new logical part of the document, it MUST still begin "
         "with a real `## Heading` line rather than naming the section inline.\n"
-        "- Write in formal Hebrew unless the style guidelines specify otherwise\n"
+        "- CRITICAL RULE: Write in Hebrew by default. If the provided source material is "
+        "predominantly in English, write in English instead.\n"
         "- Base every claim strictly on the provided source data — do not invent information\n"
         "- After each factual claim note the source filename in parentheses, "
         "e.g. (מקור: file.pdf)\n"
@@ -851,7 +851,8 @@ def mastery_generate_quiz(user_id: int):
         "If no context is supplied, draw on sound academic knowledge of the topic.\n"
         "3. Each question has exactly 4 options (plain strings — no letter prefixes like 'א.' or 'A.').\n"
         "4. 'correct' is the 0-based integer index (0–3) of the correct option.\n"
-        "5. Write all questions and options in Hebrew.\n"
+        "5. CRITICAL RULE: Write all questions and options in Hebrew by default. "
+        "If the provided course context is overwhelmingly in English, write in English instead.\n"
         "6. Distractors must be plausible but clearly refuted by the material.\n"
         "7. Vary question depth: factual recall, concept definition, cause-effect, application."
     )
@@ -1130,7 +1131,6 @@ def mastery_skill_tree(user_id: int):
 @token_required
 def export_pdf(user_id: int):
     try:
-        from io import BytesIO
         from weasyprint import HTML as WeasyHTML
     except OSError:
         return jsonify({

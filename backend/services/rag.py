@@ -3,7 +3,7 @@ import re
 import numpy as np
 from rank_bm25 import BM25Okapi
 
-from extensions import RRF_K, TOP_K, _bm25_map, _images_map, embeddings_model
+from extensions import RRF_K, _bm25_map, _images_map, embeddings_model
 from models import SessionLocal, UserDocument
 from services.faiss_store import FaissCollection, get_user_store
 

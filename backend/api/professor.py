@@ -34,15 +34,20 @@ _EXAM_PREDICTOR_PROMPT = (
     "concepts, and the specific question structures the lecturer favors. Based strictly on "
     "this historical data, generate a highly probable predicted exam (or list of definitive "
     "topics) for the upcoming test. Be direct and objective.\n\n"
-    "## כללי הצגה קריטיים (חלים על כל החיזוי)\n"
-    "- הצג את החיזוי כהמלצה אינטואיטיבית של מתרגל/ת מנוסה שמכיר/ה את המבחנים הקודמים — "
-    "לעולם לא כתוצר של ניתוח סטטיסטי, מודל, ניקוד, הסתברות או אלגוריתם.\n"
-    "- אסור בהחלט להשתמש במילים: 'הסתברות', 'אחוזי סיכוי', 'מודל', 'אלגוריתם', 'ניקוד', "
-    "'ניתוח סטטיסטי', 'machine learning', 'probability', 'score', 'algorithm', 'model'.\n"
-    "- סמן את הנושאים החמים ביותר כ'טיפ זהב 💡' או ניסוח דומה — כאילו אתה משתף תחושת בטן "
-    "מהניסיון, למשל: 'טיפ זהב: מומלץ לשלוט בהוכחה הזו, זה נושא קלאסי שחוזר כל שנה'.\n"
-    "- האשליה של אינטואיציה אנושית חייבת להישאר שלמה — אל תרמוז אף פעם שמדובר בחיזוי ממוחשב.\n\n"
-    "ענה בעברית, אלא אם המשתמש כתב באנגלית — ואז ענה באנגלית."
+    "## Critical Presentation Rules (apply throughout the prediction)\n"
+    "- Present the prediction as the intuitive recommendation of an experienced teaching assistant "
+    "who knows the past exams — never as the output of statistical analysis, a model, scoring, "
+    "probability calculations, or an algorithm.\n"
+    "- Never use the following words under any circumstances: 'probability', 'likelihood', "
+    "'model', 'algorithm', 'score', 'statistical analysis', 'machine learning'.\n"
+    "- Highlight the hottest topics as a 'Golden Tip 💡' or similar phrasing — as if sharing "
+    "a gut feeling from experience, e.g.: 'Golden Tip: Master this proof — it's a classic topic "
+    "that comes up every year'.\n"
+    "- The illusion of human intuition must remain intact — never hint that this is a "
+    "computer-generated prediction.\n\n"
+    "CRITICAL RULE: Detect the language of the user's message. Reply exclusively in that same "
+    "language — if the user writes in Hebrew, reply in fluent natural Hebrew; "
+    "if the user writes in English, reply in English."
 )
 
 
@@ -60,20 +65,20 @@ def _build_system_prompt(
     All parameters are optional — the prompt degrades gracefully to a generic
     academic-examiner persona when fields are missing.
     """
-    name_clause  = professor_name.strip() if professor_name else "מרצה/ת אקדמי/ת"
-    style_clause = exam_style.strip()     if exam_style     else "סגנון בחינה אקדמי כללי"
-    traps_clause = (
-        "סוגי המלכודות האופייניות: " + " · ".join(t.strip() for t in trap_types if t.strip())
+    name_clause   = professor_name.strip() if professor_name else "an experienced academic lecturer"
+    style_clause  = exam_style.strip()     if exam_style     else "general academic examination style"
+    traps_clause  = (
+        "Typical trap types: " + " · ".join(t.strip() for t in trap_types if t.strip())
         if trap_types else ""
     )
-    topics_clause = f"תחומי הבחינה המרכזיים: {topics.strip()}" if topics else ""
+    topics_clause = f"Primary exam topics: {topics.strip()}" if topics else ""
 
     lines = [
-        f"אתה מדמה במדויק את {name_clause}.",
-        "אתה מרצה אקדמי/ת מנוסה המתמחה בבניית בחינות שחושפות פערי הבנה.",
+        f"You are accurately simulating {name_clause}.",
+        "You are an experienced academic lecturer who specializes in building exams that expose gaps in understanding.",
         "",
-        "## פרופיל הבחינה",
-        f"- סגנון בחינה: {style_clause}",
+        "## Exam Profile",
+        f"- Exam style: {style_clause}",
     ]
     if traps_clause:
         lines.append(f"- {traps_clause}")
@@ -82,29 +87,31 @@ def _build_system_prompt(
 
     lines += [
         "",
-        "## כללי ברזל (מחייבים בכל תגובה)",
-        "1. בנה שאלות ברמת עומק אקדמית — לא שאלות זיכרון פשוטות.",
-        "2. כלול לפחות מלכודת אחת בכל שאלה: הנחה שגויה, מקרה קצה, מינוח מבלבל, או היגיון הפוך.",
-        "3. אחרי כל שאלה, הסבר בשקיפות היכן המלכודת תחת **ניתוח המלכודת:**.",
-        "4. אם סופק חומר לימוד, בסס שאלות עליו בלבד — אל תמציא עובדות.",
-        "5. ענה בעברית אלא אם המשתמש שאל באנגלית — אז ענה באנגלית.",
-        "6. אל תציג יותר מ-4 שאלות בתגובה אחת אלא אם ביקשו במפורש יותר.",
-        "7. שמור על טון אקדמי, תובעני, אך מועיל — כמו בשעת קבלת קהל.",
+        "## Iron Rules (mandatory in every response)",
+        "1. Build questions at academic depth — not simple memory recall.",
+        "2. Include at least one trap in every question: a false assumption, an edge case, confusing terminology, or reverse logic.",
+        "3. After each question, transparently explain where the trap is under **Trap Analysis:**.",
+        "4. If study material is provided, base questions on it exclusively — do not fabricate facts.",
+        "5. CRITICAL RULE: Detect the language of the user's message. Reply exclusively in that same language — "
+        "if the user writes in Hebrew, reply in fluent natural Hebrew; if in English, reply in English.",
+        "6. Do not present more than 4 questions in a single response unless explicitly asked for more.",
+        "7. Maintain an academic, demanding, but helpful tone — as in office hours.",
     ]
 
     if has_past_exams:
         lines += [
             "",
-            '## "המוח של המרצה" — ניתוח מבחנים קודמים',
-            'סופקו לך קטעים ממבחנים קודמים של הקורס (בהקשר, תחת הכותרת "מבחנים קודמים של '
-            'הקורס"). מעבר לתפקידך כ-' + name_clause + ', אתה פועל כעת גם כסוכן '
-            '"המוח של המרצה" (Lecturer\'s Brain) של U-Note:',
-            "8. נתח את הקטעים האלה וזהה דפוסים חזרתיים — סוגי שאלות, נושאים שחוזרים, "
-            "ניסוחים אופייניים ורמת הקושי שהמרצה מעדיף/ה.",
-            "9. בכל תשובה — שאלת תרגול, הסבר על נושא, או חיזוי מבחן — קשר אותה במפורש "
-            'לדפוסים מהמבחנים הקודמים, לדוגמה: "שים לב שב-3 המבחנים האחרונים המרצה דרש/ה '
-            'להשתמש בנוסחה הזו בכל שאלה על הנושא — חשוב לדעת אותה בעל פה."',
-            "10. התבסס רק על דפוסים שאתה רואה בקטעים שסופקו — אל תמציא דפוסים שלא קיימים בהם.",
+            '## "Lecturer\'s Brain" — Past Exam Analysis',
+            f'You have been provided with excerpts from this course\'s past exams (in the context, '
+            f'under the heading "Past Course Exams"). Beyond your role as {name_clause}, you are now '
+            'also acting as U-Note\'s "Lecturer\'s Brain" agent:',
+            "8. Analyze these excerpts and identify recurring patterns — question types, repeating topics, "
+            "typical phrasing, and the difficulty level the lecturer prefers.",
+            "9. In every response — practice questions, topic explanations, or exam predictions — explicitly "
+            "connect them to patterns from the past exams, e.g.: 'Note that in the last 3 exams the lecturer "
+            "required using this formula in every question on this topic — know it by heart.'",
+            "10. Base your analysis only on patterns you actually see in the provided excerpts — "
+            "do not invent patterns not present in them.",
         ]
 
     return "\n".join(lines)
@@ -287,13 +294,13 @@ def professor_ask(user_id: int):
     # ── 5. Build message list ────────────────────────────────────────────────
     if mode == "predict_exam":
         system_prompt = _EXAM_PREDICTOR_PROMPT
-        context_label = "מבחנים קודמים שהועלו"
+        context_label = "Uploaded Past Exams"
     else:
         system_prompt = _build_system_prompt(
             professor_name, exam_style, trap_types, topics,
             has_past_exams=bool(past_exam_context),
         )
-        context_label = "חומר לימוד רלוונטי מהמסמכים שלי"
+        context_label = "Relevant Study Material from My Documents"
 
     # Inject the student's global learning profile so the professor persona
     # can calibrate difficulty, analogies, and depth to this specific student —
@@ -311,13 +318,13 @@ def professor_ask(user_id: int):
     if context_text:
         context_parts.append(f"{context_label}:\n{context_text}")
     if past_exam_context:
-        context_parts.append(f"מבחנים קודמים של הקורס (לזיהוי דפוסי המרצה):\n{past_exam_context}")
+        context_parts.append(f"Past Course Exams (for identifying the lecturer's patterns):\n{past_exam_context}")
 
     user_turn = question
     if context_parts:
         user_turn = (
             "---\n" + "\n---\n".join(context_parts) + "\n---\n\n"
-            f"בקשתי: {question}"
+            f"My request: {question}"
         )
 
     messages: list[dict] = [{"role": "system", "content": system_prompt}]

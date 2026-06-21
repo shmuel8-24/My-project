@@ -1163,24 +1163,31 @@ function WritingPanel({
   const [suggestedTitles, setSuggestedTitles] = useState<string[]>([]);
 
   const handleGenerateTitles = async () => {
+    console.log("✨ BUTTON CLICKED!");
     if (isGenerating) return;
     setIsGenerating(true);
     setSuggestedTitles([]);
+    const payload = {
+      topic:       topic.trim(),
+      course_name: selectedCourse?.name ?? null,
+      course_id:   selectedCourse?.id   || 'default_test_course',
+    };
+    console.log("Sparkles sending payload:", payload);
     try {
       const res = await authFetch(`${API}/api/writing/suggest-titles`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({
-          topic:       topic.trim(),
-          course_name: selectedCourse?.name ?? null,
-          course_id:   selectedCourse?.id   ?? null,
-        }),
+        body:    JSON.stringify(payload),
       });
-      if (!res.ok) return;
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data = await res.json() as { titles?: string[] };
       if (Array.isArray(data.titles)) setSuggestedTitles(data.titles);
-    } catch { /* silent — user can retry */ }
-    finally  { setIsGenerating(false); }
+    } catch (error) {
+      console.error("Failed to fetch titles:", error);
+      alert('שגיאה בחיבור לשרת');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const wtLabel = writingType
@@ -1584,9 +1591,9 @@ function WritingPanel({
               <div className="w-full max-w-md flex flex-col gap-3">
                 {/* Input + inline Sparkles button */}
                 <div className="relative w-full">
-                  <input type="text" value={topic} onChange={e => setTopic(e.target.value)} dir="auto"
+                  <input type="text" value={topic} onChange={e => setTopic(e.target.value)} dir="rtl"
                     placeholder={t.topicPh}
-                    className="w-full rounded-xl px-4 py-3 pe-12 text-sm outline-none"
+                    className="w-full rounded-xl pr-4 pl-12 py-3 text-sm outline-none text-right"
                     style={{ border: '1px solid rgba(157,192,139,0.4)', background: 'rgba(255,255,255,0.80)', color: '#2A3B22' }}
                     onKeyDown={e => { if (e.key === 'Enter' && topic.trim() && hasDoc) generateParagraph(0, [], ''); }} />
                   <button
@@ -1594,7 +1601,7 @@ function WritingPanel({
                     onClick={handleGenerateTitles}
                     disabled={isGenerating}
                     aria-label={he ? 'הצע כותרות באמצעות AI' : 'Suggest titles with AI'}
-                    className="absolute inset-y-0 end-0 flex items-center px-3 rounded-e-xl transition-colors hover:bg-black/5 disabled:opacity-40"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 z-50 flex items-center justify-center pointer-events-auto cursor-pointer rounded-lg p-1 transition-colors hover:bg-black/5 disabled:opacity-40"
                     title={he ? 'הצע כותרות' : 'Suggest titles'}
                   >
                     {isGenerating ? (
@@ -1617,7 +1624,7 @@ function WritingPanel({
                         <button
                           key={i}
                           type="button"
-                          onClick={() => setTopic(title)}
+                          onClick={() => { setTopic(title); setSuggestedTitles([]); }}
                           className="w-full text-start px-3 py-2 rounded-xl text-xs font-medium transition-all hover:scale-[1.01] active:scale-[0.99]"
                           style={{
                             background:   topic === title ? 'rgba(81,123,62,0.12)' : 'rgba(124,91,181,0.07)',

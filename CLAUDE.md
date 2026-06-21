@@ -21,7 +21,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 │   │   ├── professor.py    # Professor Brain Simulator blueprint
 │   │   ├── presentation_agent.py # Presentation Agent blueprint: multi-tool file→deck generation
 │   │   ├── export.py       # Export blueprint (paper, quiz, PDF, DOCX, slides) + all /api/mastery/* routes
-│   │   └── writing.py      # Writing blueprint: /api/writing/suggest-titles (stub; will become RAG)
+│   │   └── writing.py      # Writing blueprint: /api/writing/suggest-titles — two-mode RAG title suggestion (topic-less scans course materials via broad FAISS query; topic mode grounds suggestions in topic + RAG)
 │   ├── services/
 │   │   ├── faiss_store.py  # FAISS vector store (FaissCollection — ChromaDB-compatible surface)
 │   │   ├── rag.py          # hybrid_search, BM25, get_user_collection (wraps faiss_store)
@@ -82,7 +82,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     │       │   ├── page.tsx                    # Main RAG workspace (~3087 lines; all inline)
     │       │   ├── documents/page.tsx          # Legacy route alias → Profile page on Documents tab (navigation now uses /my-documents)
     │       │   ├── UserProfileModal.tsx
-    │       │   ├── UpgradeModal.tsx
     │       │   └── professor-simulator/page.tsx
     │       ├── admin/
     │       │   ├── AdminShell.tsx              # Shared sidebar+header+footer chrome for all /admin/* pages
@@ -326,7 +325,7 @@ In `professor-simulator/page.tsx`, the "מבחן לדוגמא" single-PDF dropzo
 | `/api/mastery/submit-results` | POST | user | Save quiz score; weighted mastery update |
 | `/api/mastery/scores` | GET | user | Raw mastery records |
 | `/api/mastery/skill-tree` | GET | user | Syllabus-derived Skill Tree (topics + per-topic mastery + unlock state) for a course |
-| `/api/writing/suggest-titles` | POST | user | AI-suggested paper titles for a topic (stub; replace with RAG) |
+| `/api/writing/suggest-titles` | POST | user | AI-suggested paper titles: empty `topic` triggers broad FAISS scan (top-10 chunks from course materials); non-empty `topic` grounds suggestions in topic + RAG. Both modes require `course_id`. |
 | `/api/courses/parse-syllabus` | POST | user | Parse PDF → LLM metadata + full text (multipart) |
 | `/api/courses` | POST | user | Save CustomCourse + index syllabus to FAISS |
 | `/api/courses/details` | GET | user | Fetch course metadata by `?name=` |
@@ -416,7 +415,7 @@ URL param `[id]` is the localStorage Course ID (string like `custom_${Date.now()
 **Academic writing (`academic-writing/page.tsx`):**
 ~2200 lines. `WritingPanel` drives a co-writing SSE loop: `generateParagraph(paragraphNum, approved[], feedback)` sends `previousContent` (raw concatenated approved text — no UI labels), `currentChunkIndex`, `maxChunks`, `isFinalSection`, `fileIds`. `CHUNKS_PER_PAGE=2`; `WORDS_PER_PAGE=400`; `maxChunks = pageCount * 2`. Approved sections accumulate in `approvedParagraphs[]` (pure LLM text only — never UI strings). `resetSession()` zeroes all state including `chunkIndexRef` for a clean new paper. `handleNextStep` is the single unified approve callback: it appends the current draft to `approvedParagraphs[]`, then either finalizes (`setIsFinished(true)`) when `next.length >= maxChunks`, or advances `chunkIndexRef` and calls `generateParagraph` — evaluated synchronously against the just-built array (not stale React state).
 
-The **WritingPanel entry screen** (shown when `!isStarted`) is a **Title Selection UI**: the user enters a topic in an input field that has an inline `<Sparkles>` button (purple, `end-0` positioned — left in Hebrew RTL, right in English LTR). Clicking Sparkles calls `POST /api/writing/suggest-titles` and renders AI-suggested titles as clickable chips below the input; clicking a chip sets it as the topic. The static `t.topicChips` section below the chips offers quick generic topic starters.
+The **WritingPanel entry screen** (shown when `!isStarted`) is a **Title Selection UI**: the user enters a topic in an `dir="rtl" text-right` input field. An inline `<Sparkles>` button (purple, physically `left-3 top-1/2 -translate-y-1/2`, `z-50`, `pointer-events-auto`) sits inside the input on the left. The input has `pl-12 pr-4` physical padding to keep text clear of the icon. Clicking Sparkles calls `POST /api/writing/suggest-titles` with `{ topic, course_name, course_id }` — topic may be empty, in which case the backend does a broad RAG scan. Suggested titles render as clickable chips below the input; clicking a chip sets the topic AND clears the chips (`setSuggestedTitles([])`), without auto-submitting. The static `t.topicChips` section below offers quick generic topic starters.
 
 **Wizard step order** (URL `?step=N`): Step 1 = Writing Type selection (essay/research/summary tiles); Step 2 = Source selection (upload/documents/sessions with sub-content dropzone); Step 3 = Confirmation. `step1Ready = writingType !== null`; `step2Ready` = source selected. The wizard nav row inherits the page's `dir` — in Hebrew (RTL) the Back button (first DOM child) lands on the RIGHT and Next (second DOM child) lands on the LEFT, matching Hebrew reading flow. Arrow SVG paths are conditionally flipped per language.
 
