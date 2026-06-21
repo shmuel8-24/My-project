@@ -7,16 +7,11 @@ import AdminShell from '../AdminShell';
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://127.0.0.1:5003';
 
-function getToken() { return typeof window !== 'undefined' ? localStorage.getItem('levy_ai_token') : null; }
-function decodeJwtPayload(t: string): Record<string, unknown> | null {
-  try { const b = t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'); return JSON.parse(atob(b)); }
-  catch { return null; }
-}
 function authFetch(url: string, init: RequestInit = {}) {
-  const token = getToken();
   return fetch(url, {
     ...init,
-    headers: { ...(init.headers as Record<string,string> ?? {}), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(init.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}) },
+    credentials: 'include',
+    headers: { ...(init.headers as Record<string,string> ?? {}), ...(init.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}) },
   });
 }
 
@@ -206,16 +201,14 @@ export default function AdminUsersPage() {
       const u = authUserRef.current;
       if (!u) { if (alive) router.replace('/?login=true'); return; }
       try {
-        const res = await fetch(`${API}/api/refresh-token`, { headers: { Authorization: `Bearer ${u.token}` } });
+        const res = await fetch(`${API}/api/refresh-token`, { credentials: 'include' });
         if (res.ok) {
-          const d = await res.json() as { token?: string };
-          if (d.token && alive) { localStorage.setItem('levy_ai_token', d.token); updateToken(d.token); }
+          if (alive) updateToken();
         }
       } catch { /* backend down — continue with stored token */ }
       if (!alive) return;
-      const latest  = localStorage.getItem('levy_ai_token');
-      const payload = latest ? decodeJwtPayload(latest) : null;
-      if (!payload || (!payload.is_admin && payload.role !== 'admin')) { router.replace('/?login=true'); return; }
+      const isAdminFlag = localStorage.getItem('levy_ai_is_admin') === 'true';
+      if (!isAdminFlag) { router.replace('/?login=true'); return; }
       if (alive) setIsAdmin(true);
     })();
     return () => { alive = false; };

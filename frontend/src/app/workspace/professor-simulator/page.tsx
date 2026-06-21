@@ -36,19 +36,8 @@ interface UploadedFile {
 }
 
 // ── Auth / fetch helpers ──────────────────────────────────────────────────────
-function getToken() {
-  return typeof window !== 'undefined' ? localStorage.getItem('levy_ai_token') : null;
-}
-
 async function authFetch(url: string, init: RequestInit = {}) {
-  const token = getToken();
-  return fetch(url, {
-    ...init,
-    headers: {
-      ...((init.headers as Record<string, string>) ?? {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
+  return fetch(url, { ...init, credentials: 'include' });
 }
 
 /**
@@ -76,13 +65,6 @@ async function safeJson(res: Response): Promise<Record<string, unknown>> {
 function formatBytes(b: number): string {
   if (b < 1_048_576) return `${(b / 1024).toFixed(1)} KB`;
   return `${(b / 1_048_576).toFixed(1)} MB`;
-}
-
-function decodeJwtPayload(token: string): Record<string, unknown> | null {
-  try {
-    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    return JSON.parse(atob(b64));
-  } catch { return null; }
 }
 
 // ── Small shared components ───────────────────────────────────────────────────
@@ -526,10 +508,7 @@ export default function ProfessorSimulatorPage() {
 
   const [isAdmin] = useState(() => {
     if (typeof window === 'undefined') return false;
-    const token = localStorage.getItem('levy_ai_token');
-    if (!token) return false;
-    const p = decodeJwtPayload(token);
-    return p?.is_admin === true;
+    return localStorage.getItem('levy_ai_is_admin') === 'true';
   });
   const [userEmail]     = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_email')      ?? '') : '');
   const [userFirstName] = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_first_name') ?? '') : '');
@@ -565,7 +544,7 @@ export default function ProfessorSimulatorPage() {
 
   // ── Logout ────────────────────────────────────────────────────────────────────
   const handleLogout = useCallback(() => {
-    ['levy_ai_token','levy_ai_email','levy_ai_first_name','levy_ai_last_name',
+    ['levy_ai_email','levy_ai_first_name','levy_ai_last_name',
      'levy_ai_institution','levy_ai_primary_major','levy_ai_degree_type',
      'levy_ai_country','levy_ai_secondary_major','levy_ai_gender',
     ].forEach(k => localStorage.removeItem(k));

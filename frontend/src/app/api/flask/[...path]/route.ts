@@ -23,12 +23,16 @@ async function proxy(req: NextRequest, segments: string[]): Promise<NextResponse
   // ── Every request is logged — visible in `npm run dev` terminal ──────────
   console.log(`\n[Flask Proxy] ${req.method} → ${upstream}`);
 
-  // Forward only the headers Flask cares about
+  // Forward the auth cookie and content-type so Flask can authenticate the request.
+  // The levy_ai_token is HttpOnly — the browser never reads it, but the Next.js
+  // server-side proxy CAN read it from the incoming request and forward it.
   const fwdHeaders: Record<string, string> = {};
-  const auth = req.headers.get('authorization');
-  const ct   = req.headers.get('content-type');
-  if (auth) fwdHeaders['authorization'] = auth;
-  if (ct)   fwdHeaders['content-type']  = ct;
+  const auth    = req.headers.get('authorization');
+  const ct      = req.headers.get('content-type');
+  const cookies = req.headers.get('cookie');
+  if (auth)    fwdHeaders['authorization'] = auth;
+  if (ct)      fwdHeaders['content-type']  = ct;
+  if (cookies) fwdHeaders['cookie']        = cookies;
 
   const body = req.method !== 'GET' && req.method !== 'HEAD'
     ? await req.arrayBuffer()

@@ -11,7 +11,7 @@ from api.middleware import (
     _make_token,
     token_required,
 )
-from extensions import ADMIN_EMAIL, client, limiter
+from extensions import ADMIN_EMAIL, TOKEN_TTL_H, client, limiter
 from models import (
     ChatMessage, ChatSession, OtpCode, PasswordResetToken,
     SessionLocal, User, UserDocument, sql_func,
@@ -20,6 +20,46 @@ from services.email import send_otp_email, send_reset_email
 from services.security import strip_html
 
 auth_bp = Blueprint("auth", __name__)
+
+# ── Cookie helpers ─────────────────────────────────────────────────────────────
+_COOKIE_SECURE = os.getenv("FLASK_ENV") == "production"
+
+
+def _set_jwt_cookie(response, token: str) -> None:
+    """Attach the JWT as an HttpOnly, SameSite=Lax cookie.
+    secure=True only in production so localhost dev still works over plain HTTP.
+    """
+    response.set_cookie(
+        "levy_ai_token",
+        value=token,
+        max_age=TOKEN_TTL_H * 3600,
+        httponly=True,
+        secure=_COOKIE_SECURE,
+        samesite="Lax",
+        path="/",
+    )
+
+
+def _clear_jwt_cookie(response) -> None:
+    """Expire the JWT cookie — used by /api/logout."""
+    response.set_cookie(
+        "levy_ai_token",
+        value="",
+        max_age=0,
+        httponly=True,
+        secure=_COOKIE_SECURE,
+        samesite="Lax",
+        path="/",
+    )
+
+
+@auth_bp.route("/api/logout", methods=["POST"])
+def logout():
+    """Clear the JWT HttpOnly cookie — client-side logout."""
+    resp = jsonify({"success": True})
+    _clear_jwt_cookie(resp)
+    return resp, 200
+
 
 # Short-lived registry of emails whose address has been OTP-verified during
 # the registration wizard.  Keyed by email; value is {token, expires_at}.
@@ -124,13 +164,15 @@ def verify_otp():
         db.refresh(user)
         token = _make_token(user.id, user.email, user.role)
         print(f"[OTP] Verified: {email} (id={user.id}, role={user.role})")
-        return jsonify({
-            "token":      token,
+        resp = jsonify({
             "email":      user.email,
             "first_name": user.first_name,
             "last_name":  user.last_name,
             "role":       user.role,
-        }), 200
+            "is_admin":   user.role == "admin",
+        })
+        _set_jwt_cookie(resp, token)
+        return resp, 200
     finally:
         db.close()
 
@@ -241,14 +283,16 @@ def login():
 
         token = _make_token(user.id, user.email, user.role)
         print(f"[Login] {email} (id={user.id}, role={user.role})")
-        return jsonify({
+        resp = jsonify({
             "success":    True,
-            "token":      token,
             "email":      user.email,
             "first_name": user.first_name,
             "last_name":  user.last_name,
             "role":       user.role,
-        }), 200
+            "is_admin":   user.role == "admin",
+        })
+        _set_jwt_cookie(resp, token)
+        return resp, 200
     finally:
         db.close()
 
@@ -310,14 +354,16 @@ def register():
         db.refresh(user)
         print(f"[Register] {first_name} {last_name} <{email}> role={assigned_role} gender={gender!r}")
         token = _make_token(user.id, user.email, user.role)
-        return jsonify({
+        resp = jsonify({
             "success":    True,
-            "token":      token,
             "email":      user.email,
             "first_name": user.first_name,
             "last_name":  user.last_name,
             "role":       user.role,
-        }), 201
+            "is_admin":   user.role == "admin",
+        })
+        _set_jwt_cookie(resp, token)
+        return resp, 201
     finally:
         db.close()
 
@@ -560,7 +606,9 @@ def refresh_token(user_id: int):
             return jsonify({"error": "User not found"}), 404
         new_token = _make_token(user.id, user.email, user.role)
         print(f"[refresh-token] user_id={user_id} email={user.email} role={user.role}")
-        return jsonify({"token": new_token, "role": user.role, "is_admin": user.role == "admin"}), 200
+        resp = jsonify({"role": user.role, "is_admin": user.role == "admin"})
+        _set_jwt_cookie(resp, new_token)
+        return resp, 200
     finally:
         db.close()
 

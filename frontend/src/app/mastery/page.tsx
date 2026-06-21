@@ -12,17 +12,6 @@ import { playSuccess }   from '../../utils/audio';
 
 const API = 'http://127.0.0.1:5003';
 
-/* ── Auth helpers ─────────────────────────────────────────────────────────────── */
-function getToken() {
-  return typeof window !== 'undefined' ? localStorage.getItem('levy_ai_token') : null;
-}
-
-function decodeJwtPayload(token: string): Record<string, unknown> | null {
-  try {
-    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    return JSON.parse(atob(b64));
-  } catch { return null; }
-}
 
 /* ── Quiz types ───────────────────────────────────────────────────────────────── */
 type QuizState = 'closed' | 'loading' | 'active' | 'done' | 'error';
@@ -899,10 +888,7 @@ export default function MasteryPage() {
   // ── User info ──────────────────────────────────────────────────────────────
   const [isAdmin] = useState(() => {
     if (typeof window === 'undefined') return false;
-    const token = localStorage.getItem('levy_ai_token');
-    if (!token) return false;
-    const p = decodeJwtPayload(token);
-    return p?.is_admin === true;
+    return localStorage.getItem('levy_ai_is_admin') === 'true';
   });
   const [userEmail]     = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_email')      ?? '') : '');
   const [userFirstName] = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_first_name') ?? '') : '');
@@ -959,11 +945,8 @@ export default function MasteryPage() {
   // ── Load topics + mastery scores from backend ─────────────────────────────
   useEffect(() => {
     if (!authUser) return;
-    const token = getToken();
     const courseParam = selectedCourse ? `?course=${selectedCourse.id}` : '';
-    const request = token
-      ? fetch(`${API}/api/mastery/topics${courseParam}`, { headers: { Authorization: `Bearer ${token}` } })
-      : Promise.resolve(null);
+    const request = fetch(`${API}/api/mastery/topics${courseParam}`, { credentials: 'include' });
     request
       .then(r => (r && r.ok) ? r.json() : [])
       .then((data: { file_id: string; topic: string; icon: string; mastery_pct: number | null; quiz_count: number }[]) => {
@@ -982,12 +965,9 @@ export default function MasteryPage() {
   // ── Load Skill Tree (syllabus-derived topics + mastery) from backend ──────
   useEffect(() => {
     if (!authUser || !selectedCourse) return;
-    const token = getToken();
-    const request = token
-      ? fetch(`${API}/api/mastery/skill-tree?course_name=${encodeURIComponent(selectedCourse.name)}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        })
-      : Promise.resolve(null);
+    const request = fetch(`${API}/api/mastery/skill-tree?course_name=${encodeURIComponent(selectedCourse.name)}`, {
+      credentials: 'include',
+    });
     request
       .then(r => (r && r.ok) ? r.json() : { has_syllabus: false, topics: [] })
       .then((data: { has_syllabus: boolean; topics: SkillTreeTopic[] }) => {
@@ -1000,7 +980,7 @@ export default function MasteryPage() {
 
   // ── Logout ─────────────────────────────────────────────────────────────────
   const handleLogout = useCallback(() => {
-    ['levy_ai_token','levy_ai_email','levy_ai_first_name','levy_ai_last_name',
+    ['levy_ai_email','levy_ai_first_name','levy_ai_last_name',
      'levy_ai_institution','levy_ai_primary_major','levy_ai_degree_type',
      'levy_ai_country','levy_ai_secondary_major','levy_ai_gender',
     ].forEach(k => localStorage.removeItem(k));
@@ -1014,12 +994,11 @@ export default function MasteryPage() {
     setSubmitState('loading');
     setNewMasteryPct(null);
     try {
-      const token = getToken();
       const res = await fetch(`${API}/api/mastery/submit-results`, {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify(
           courseName ? { topic, course_name: courseName, score, total } : { topic, file_id: fileId, score, total }
@@ -1096,12 +1075,11 @@ export default function MasteryPage() {
     setNewMasteryPct(null);
 
     try {
-      const token = getToken();
       const res   = await fetch(`${API}/api/mastery/generate-quiz`, {
         method:  'POST',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify(courseName ? { topic, course_name: courseName } : { topic, file_id: fileId }),
       });

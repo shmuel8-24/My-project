@@ -24,12 +24,16 @@ function getGreeting(he: boolean): string {
 
 /* ── Course card ─────────────────────────────────────────────────────────── */
 function CourseCard({
-  course, isActive, he,
-}: { course: Course; isActive: boolean; he: boolean }) {
+  course, isActive, isSelecting, he,
+}: { course: Course; isActive: boolean; isSelecting: boolean; he: boolean }) {
   return (
     <div
       className="flex flex-col items-center justify-center w-56 aspect-square rounded-[2rem] bg-gradient-to-br from-[#EAF4F8] to-white border border-sky-100/80 shadow-[0_2px_10px_-3px_rgba(135,206,235,0.2)] hover:shadow-[0_8px_20px_-6px_rgba(135,206,235,0.4)] hover:-translate-y-1.5 transition-all duration-300 ease-out cursor-pointer p-6"
-      style={isActive ? {
+      style={isSelecting ? {
+        borderColor: '#517B3E',
+        boxShadow: '0 0 0 3px rgba(81,123,62,0.28), 0 6px 20px rgba(81,123,62,0.18)',
+        background: 'linear-gradient(135deg, #f0f7ed, #fafffe)',
+      } : isActive ? {
         borderColor: '#38bdf8',
         boxShadow: '0 0 0 3px rgba(125,211,252,0.40)',
       } : undefined}
@@ -37,7 +41,16 @@ function CourseCard({
       <p className="text-2xl font-extrabold text-sky-600 tracking-tight text-center leading-snug">
         {course.name}
       </p>
-      {isActive && (
+      {isSelecting && (
+        <span className="mt-3 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider"
+          style={{ background: 'rgba(81,123,62,0.12)', border: '1px solid rgba(81,123,62,0.28)', color: '#517B3E' }}>
+          <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+          </svg>
+          {he ? 'נבחר' : 'Selected'}
+        </span>
+      )}
+      {!isSelecting && isActive && (
         <span className="mt-3 inline-flex items-center px-3 py-1 rounded-full bg-sky-100 border border-sky-200 text-sky-700 text-xs font-bold uppercase tracking-wider">
           {he ? 'פעיל' : 'Active'}
         </span>
@@ -158,6 +171,7 @@ export default function CoursePickerPage() {
   const { triggerHaptic } = useHaptics();
 
   const [selecting,      setSelecting]      = useState<string | null>(null);
+  const [isExiting,      setIsExiting]      = useState(false);
   const [courseToDelete, setCourseToDelete] = useState<Course | null>(null);
   const [isDeleting,     setIsDeleting]     = useState(false);
   const [toast,          setToast]          = useState('');
@@ -217,13 +231,12 @@ export default function CoursePickerPage() {
 
   const handleSyllabusUpload = useCallback(async (course: Course, file: File) => {
     setIsUploadingSyllabus(true);
-    const token    = localStorage.getItem('levy_ai_token') ?? '';
     const formData = new FormData();
     formData.append('file', file);
     formData.append('course_name', course.name);
     try {
       const res = await fetch(`${API}/api/courses/update-syllabus`, {
-        method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: formData,
+        method: 'POST', credentials: 'include', body: formData,
       });
       const raw = await res.text();
       let data: Record<string, unknown> = {};
@@ -256,20 +269,24 @@ export default function CoursePickerPage() {
     triggerHaptic('light');
     setSelecting(course.id);
     setSelectedCourse(course);
-    setTimeout(() => router.push('/dashboard'), 260);
+    // Phase 1 (0–160 ms): card presses + matcha-green border visible
+    // Phase 2 (160–380 ms): card stays pressed while page fades out
+    // Phase 3 (380 ms): navigate — dashboard mounts with slide-up fade
+    setTimeout(() => setIsExiting(true), 160);
+    setTimeout(() => router.push('/dashboard'), 380);
   }
 
   const handleDeleteConfirm = useCallback(async () => {
     if (!courseToDelete) return;
     setIsDeleting(true);
 
-    const token = localStorage.getItem('levy_ai_token') ?? '';
     try {
       // Use a dedicated POST endpoint rather than DELETE to avoid HTTP method
       // routing ambiguity in Flask and CORS preflight complications.
       const res = await fetch(`${API}/api/courses/delete`, {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ course_name: courseToDelete.name }),
       });
       const raw = await res.text();
@@ -318,9 +335,12 @@ export default function CoursePickerPage() {
 
   return (
     <>
-      <div
+      <motion.div
         dir={he ? 'rtl' : 'ltr'}
         className="!bg-[#97AB92] w-full min-h-screen flex flex-col items-center justify-center px-6 py-16"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: isExiting ? 0 : 1 }}
+        transition={{ duration: 0.22, ease: 'easeInOut' }}
       >
         {/* Decorative leaf watermarks */}
         <div className="fixed inset-0 pointer-events-none select-none overflow-hidden" style={{ zIndex: 0 }}>
@@ -386,11 +406,11 @@ export default function CoursePickerPage() {
                       disabled={!!selecting || !!courseToDelete}
                       className="outline-none"
                       style={{
-                        transform:  isSelecting ? 'scale(0.91)' : 'scale(1)',
-                        transition: 'transform 0.18s ease',
+                        transform:  isSelecting ? 'scale(0.95)' : 'scale(1)',
+                        transition: 'transform 0.22s cubic-bezier(0.34, 1.28, 0.64, 1)',
                       }}
                     >
-                      <CourseCard course={course} isActive={isActive} he={he} />
+                      <CourseCard course={course} isActive={isActive} isSelecting={isSelecting} he={he} />
                     </button>
 
                     {/* 3-dots menu trigger — revealed on hover */}
@@ -464,7 +484,7 @@ export default function CoursePickerPage() {
 
           </div>
         </div>
-      </div>
+      </motion.div>
 
       {/* ── Context dropdown (fixed to viewport — escapes all overflow constraints) ── */}
       <AnimatePresence>

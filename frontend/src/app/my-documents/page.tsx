@@ -15,17 +15,6 @@ import Skeleton        from '../../components/ui/Skeleton';
 
 const API = 'http://127.0.0.1:5003';
 
-/* ── Auth helpers ─────────────────────────────────────────────────────────────── */
-function getToken() {
-  return typeof window !== 'undefined' ? localStorage.getItem('levy_ai_token') : null;
-}
-
-function decodeJwtPayload(token: string): Record<string, unknown> | null {
-  try {
-    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    return JSON.parse(atob(b64));
-  } catch { return null; }
-}
 
 /* ── Shared micro-components ─────────────────────────────────────────────────── */
 function LogoMark({ size = 36 }: { size?: number }) {
@@ -434,15 +423,34 @@ function DeleteDocModal({ filename, deleting, error, onConfirm, onCancel }: {
   filename: string; deleting: boolean; error: string | null;
   onConfirm: () => void; onCancel: () => void;
 }) {
+  const [isClosing, setIsClosing] = useState(false);
+
+  function handleClose() {
+    if (deleting) return;
+    setIsClosing(true);
+    setTimeout(onCancel, 180);
+  }
+
   return (
     <div
       className="fixed inset-0 z-[70] flex items-center justify-center p-4"
-      style={{ backgroundColor: 'rgba(42,59,34,0.45)', backdropFilter: 'blur(4px)' }}
-      onClick={e => { if (e.target === e.currentTarget && !deleting) onCancel(); }}
+      style={{
+        backgroundColor: isClosing ? 'rgba(42,59,34,0)' : 'rgba(42,59,34,0.45)',
+        backdropFilter:  isClosing ? 'blur(0px)' : 'blur(4px)',
+        transition: 'background-color 0.18s ease, backdrop-filter 0.18s ease',
+      }}
+      onClick={e => { if (e.target === e.currentTarget && !deleting) handleClose(); }}
     >
       <div
         className="w-full max-w-sm rounded-2xl overflow-hidden"
-        style={{ background: 'rgba(255,255,255,0.98)', border: '1px solid rgba(157,192,139,0.3)', boxShadow: '0 24px 64px rgba(20,40,15,0.25)' }}
+        style={{
+          background: 'rgba(255,255,255,0.98)',
+          border: '1px solid rgba(157,192,139,0.3)',
+          boxShadow: '0 24px 64px rgba(20,40,15,0.25)',
+          opacity:   isClosing ? 0 : 1,
+          transform: isClosing ? 'scale(0.93) translateY(8px)' : 'scale(1) translateY(0)',
+          transition: 'opacity 0.16s ease, transform 0.16s cubic-bezier(0.4,0,1,1)',
+        }}
       >
         <div className="px-6 pt-6 pb-2">
           <h2 className="font-bold text-[#1a2e14] text-lg">מחיקת מסמך</h2>
@@ -457,7 +465,7 @@ function DeleteDocModal({ filename, deleting, error, onConfirm, onCancel }: {
             style={{ background: '#dc2626' }}>
             {deleting ? 'מוחק...' : 'מחק'}
           </button>
-          <button onClick={onCancel} disabled={deleting}
+          <button onClick={handleClose} disabled={deleting}
             className="flex-1 py-2.5 rounded-xl text-sm font-bold transition-all disabled:opacity-60 disabled:cursor-not-allowed"
             style={{ background: 'rgba(81,123,62,0.1)', color: '#517B3E', border: '1px solid rgba(81,123,62,0.2)' }}>
             ביטול
@@ -519,10 +527,7 @@ export default function MyDocumentsPage() {
   // ── User info ──────────────────────────────────────────────────────────────
   const [isAdmin] = useState(() => {
     if (typeof window === 'undefined') return false;
-    const token = localStorage.getItem('levy_ai_token');
-    if (!token) return false;
-    const p = decodeJwtPayload(token);
-    return p?.is_admin === true;
+    return localStorage.getItem('levy_ai_is_admin') === 'true';
   });
   const [userEmail]     = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_email')      ?? '') : '');
   const [userFirstName] = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_first_name') ?? '') : '');
@@ -573,14 +578,9 @@ export default function MyDocumentsPage() {
   // Each DocCard displays a course badge so the user can see which course each
   // file belongs to.  Uploading still tags to the currently active course.
   const fetchDocuments = useCallback(() => {
-    const token = getToken();
     const request = Promise.resolve()
       .then(() => { setDocsLoading(true); })
-      .then(() => token
-        ? fetch(`${API}/api/profile/documents`, {
-            headers: { Authorization: `Bearer ${token}` },
-          })
-        : Promise.resolve(null));
+      .then(() => fetch(`${API}/api/profile/documents`, { credentials: 'include' }));
     request
       .then(r => (r && r.ok) ? r.json() : { documents: [] })
       .then((data: { documents: DocItem[] }) => setDocuments(data.documents ?? []))
@@ -613,7 +613,6 @@ export default function MyDocumentsPage() {
   const handleFileChange = useCallback(async (e: ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files?.length || !selectedCourse) return;
-    const token = getToken();
 
     setUploading(true);
     setUploadError(null);
@@ -623,7 +622,7 @@ export default function MyDocumentsPage() {
       fd.append('course_name', selectedCourse.name);
       const res  = await fetch(`${API}/upload-pdf`, {
         method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        credentials: 'include',
         body: fd,
       });
       const data = await res.json();
@@ -647,11 +646,10 @@ export default function MyDocumentsPage() {
 
   // ── Download a document ────────────────────────────────────────────────────
   const handleDownload = useCallback(async (doc: DocItem) => {
-    const token = getToken();
     setDownloadingId(doc.file_id);
     try {
       const res = await fetch(`${API}/documents/${doc.file_id}/download`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        credentials: 'include',
       });
       if (!res.ok) return;
       const blob = await res.blob();
@@ -673,13 +671,12 @@ export default function MyDocumentsPage() {
   // ── Delete a document ──────────────────────────────────────────────────────
   const handleConfirmDelete = useCallback(async () => {
     if (!docToDelete) return;
-    const token = getToken();
     setDeletingId(docToDelete.file_id);
     setDeleteError(null);
     try {
       const res = await fetch(`${API}/documents/${docToDelete.file_id}`, {
         method: 'DELETE',
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        credentials: 'include',
       });
       if (!res.ok) {
         setDeleteError(he ? 'שגיאה במחיקת המסמך.' : 'Error deleting document.');
@@ -709,7 +706,7 @@ export default function MyDocumentsPage() {
   }, [docToDelete, he]);
 
   const handleLogout = useCallback(() => {
-    ['levy_ai_token','levy_ai_email','levy_ai_first_name','levy_ai_last_name',
+    ['levy_ai_email','levy_ai_first_name','levy_ai_last_name',
      'levy_ai_institution','levy_ai_primary_major','levy_ai_degree_type',
      'levy_ai_country','levy_ai_secondary_major','levy_ai_gender',
     ].forEach(k => localStorage.removeItem(k));

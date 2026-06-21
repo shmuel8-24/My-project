@@ -391,7 +391,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
 
   const handleLogout = () => {
     [
-      'levy_ai_token', 'levy_ai_email', 'levy_ai_first_name', 'levy_ai_last_name',
+      'levy_ai_email', 'levy_ai_first_name', 'levy_ai_last_name',
       'levy_ai_institution', 'levy_ai_primary_major', 'levy_ai_degree_type',
       'levy_ai_country', 'levy_ai_secondary_major', 'levy_ai_gender', 'levy_ai_course',
     ].forEach(k => localStorage.removeItem(k));

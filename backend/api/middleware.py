@@ -23,14 +23,24 @@ def _make_token(user_id: int, email: str, role: str = "user") -> str:
     return pyjwt.encode(payload, SECRET_KEY, algorithm="HS256")
 
 
+def _extract_token() -> str | None:
+    """Read the JWT from the HttpOnly cookie first, Bearer header as fallback."""
+    cookie = request.cookies.get("levy_ai_token")
+    if cookie:
+        return cookie
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer ") and len(auth) > 7:
+        return auth[7:]
+    return None
+
+
 def token_required(f):
-    """Validate Bearer JWT and inject user_id as the first argument."""
+    """Validate JWT (cookie or Bearer header) and inject user_id as the first argument."""
     @functools.wraps(f)
     def decorated(*args, **kwargs):
-        auth = request.headers.get("Authorization", "")
-        if not auth.startswith("Bearer "):
+        token = _extract_token()
+        if not token:
             return jsonify({"error": "Authentication required. Please log in."}), 401
-        token = auth[7:]
         try:
             payload = pyjwt.decode(token, SECRET_KEY, algorithms=["HS256"])
             user_id: int = payload["user_id"]
@@ -43,13 +53,12 @@ def token_required(f):
 
 
 def admin_required(f):
-    """Validate Bearer JWT and enforce role == 'admin'."""
+    """Validate JWT (cookie or Bearer header) and enforce role == 'admin'."""
     @functools.wraps(f)
     def decorated(*args, **kwargs):
-        auth = request.headers.get("Authorization", "")
-        if not auth.startswith("Bearer "):
+        token = _extract_token()
+        if not token:
             return jsonify({"error": "Authentication required."}), 401
-        token = auth[7:]
         try:
             payload = pyjwt.decode(token, SECRET_KEY, algorithms=["HS256"])
         except pyjwt.ExpiredSignatureError:

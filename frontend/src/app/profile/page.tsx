@@ -160,19 +160,8 @@ interface ProfileDoc {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function getToken() {
-  return typeof window !== 'undefined' ? localStorage.getItem('levy_ai_token') : null;
-}
-
 async function authFetch(url: string, init: RequestInit = {}) {
-  const token = getToken();
-  return fetch(url, {
-    ...init,
-    headers: {
-      ...((init.headers as Record<string, string>) ?? {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
+  return fetch(url, { ...init, credentials: 'include' });
 }
 
 function formatBytes(bytes: number | null | undefined): string {
@@ -358,8 +347,9 @@ export function ProfilePageInner() {
   const [documents,     setDocuments]     = useState<ProfileDoc[]>([]);
   const [loadingDocs,   setLoadingDocs]   = useState(false);
   const [docsLoaded,    setDocsLoaded]    = useState(false);
-  const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
-  const [docToDelete,   setDocToDelete]   = useState<ProfileDoc | null>(null);
+  const [deletingDocId,       setDeletingDocId]       = useState<string | null>(null);
+  const [docToDelete,         setDocToDelete]         = useState<ProfileDoc | null>(null);
+  const [isDeleteModalClosing, setIsDeleteModalClosing] = useState(false);
   const [docErr,        setDocErr]        = useState('');
 
   // ── Language sync ──────────────────────────────────────────────────────────
@@ -534,6 +524,12 @@ export function ProfilePageInner() {
     } catch { setDocErr(i18n.he.docDeleteErr); }
     finally { setDeletingDocId(null); setDocToDelete(null); }
   };
+
+  function closeDeleteModal() {
+    if (deletingDocId) return;
+    setIsDeleteModalClosing(true);
+    setTimeout(() => { setDocToDelete(null); setIsDeleteModalClosing(false); }, 180);
+  }
 
   // ── Derived display values ─────────────────────────────────────────────────
   const initials = [firstName[0], lastName[0]].filter(Boolean).join('').toUpperCase()
@@ -1129,9 +1125,13 @@ export function ProfilePageInner() {
       {/* Delete-document confirmation */}
       {docToDelete && (
         <div
-          className="fixed inset-0 z-[80] flex items-center justify-center p-4 animate-slide-up-fade"
-          style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(8px)' }}
-          onClick={e => { if (e.target === e.currentTarget && !deletingDocId) setDocToDelete(null); }}
+          className="fixed inset-0 z-[80] flex items-center justify-center p-4"
+          style={{
+            backgroundColor: isDeleteModalClosing ? 'rgba(0,0,0,0)' : 'rgba(0,0,0,0.45)',
+            backdropFilter:  isDeleteModalClosing ? 'blur(0px)' : 'blur(8px)',
+            transition: 'background-color 0.18s ease, backdrop-filter 0.18s ease',
+          }}
+          onClick={e => { if (e.target === e.currentTarget && !deletingDocId) closeDeleteModal(); }}
         >
           <div
             dir={dir}
@@ -1141,22 +1141,29 @@ export function ProfilePageInner() {
               backdropFilter: 'blur(20px)',
               border: '1px solid rgba(220,38,38,0.18)',
               boxShadow: '0 20px 60px rgba(30,10,10,0.22), 0 4px 16px rgba(220,38,38,0.08)',
+              opacity:   isDeleteModalClosing ? 0 : 1,
+              transform: isDeleteModalClosing ? 'scale(0.93) translateY(8px)' : 'scale(1) translateY(0)',
+              transition: 'opacity 0.16s ease, transform 0.16s cubic-bezier(0.4,0,1,1)',
             }}
           >
             <div
               className="flex items-center gap-3 px-5 py-4"
               style={{ background: 'rgba(220,38,38,0.04)', borderBottom: '1px solid rgba(220,38,38,0.12)' }}
             >
-              <div
-                className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0"
+              <button
+                type="button"
+                onClick={closeDeleteModal}
+                disabled={!!deletingDocId}
+                aria-label={t.cancel}
+                className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 cursor-pointer transition-opacity hover:opacity-70 disabled:opacity-40"
                 style={{ background: 'rgba(220,38,38,0.10)', border: '1px solid rgba(220,38,38,0.2)' }}
               >
                 <svg className="w-5 h-5 text-[#dc2626]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                   <path strokeLinecap="round" strokeLinejoin="round"
                     d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
                 </svg>
-              </div>
-              <h2 className="text-base font-bold text-[#1a2e14]">{t.deleteDocTitle}</h2>
+              </button>
+              <h2 className="flex-1 text-base font-bold text-[#1a2e14]">{t.deleteDocTitle}</h2>
             </div>
 
             <div className="px-5 py-5">
@@ -1167,7 +1174,7 @@ export function ProfilePageInner() {
 
             <div className="flex gap-2 px-4 pb-4">
               <button
-                onClick={() => setDocToDelete(null)}
+                onClick={closeDeleteModal}
                 disabled={!!deletingDocId}
                 className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold border transition-all disabled:opacity-50"
                 style={{ color: '#7a9268', borderColor: 'rgba(157,192,139,0.45)', background: 'transparent' }}

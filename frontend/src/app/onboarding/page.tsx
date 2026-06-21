@@ -273,19 +273,8 @@ function StepHeading({ title, subtitle }: { title: string; subtitle?: string }) 
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
 
-function getToken() {
-  return typeof window !== 'undefined' ? localStorage.getItem('levy_ai_token') : null;
-}
-
 async function authFetch(url: string, init: RequestInit = {}) {
-  const token = getToken();
-  return fetch(url, {
-    ...init,
-    headers: {
-      ...((init.headers as Record<string, string>) ?? {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
+  return fetch(url, { ...init, credentials: 'include' });
 }
 
 function LogoMark() {
@@ -356,7 +345,7 @@ export default function OnboardingPage() {
 
   // Redirect unauthenticated users
   useEffect(() => {
-    if (!getToken()) router.replace('/?login=true');
+    if (!localStorage.getItem('levy_ai_email')) router.replace('/?login=true');
   }, [router]);
 
   // Defensive clamp if `steps` shrinks while pointing past its end

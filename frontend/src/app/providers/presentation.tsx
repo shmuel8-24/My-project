@@ -7,19 +7,8 @@ import type { DeckSlide } from '../../components/SlideViewer';
 
 const API = 'http://127.0.0.1:5003';
 
-function getToken() {
-  return typeof window !== 'undefined' ? localStorage.getItem('levy_ai_token') : null;
-}
-
 async function authFetch(url: string, init: RequestInit = {}) {
-  const token = getToken();
-  return fetch(url, {
-    ...init,
-    headers: {
-      ...((init.headers as Record<string, string>) ?? {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
+  return fetch(url, { ...init, credentials: 'include' });
 }
 
 async function safeJson(res: Response): Promise<Record<string, unknown>> {

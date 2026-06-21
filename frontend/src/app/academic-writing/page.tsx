@@ -24,20 +24,10 @@ const AcademicRichEditor = dynamic(
 const API = 'http://127.0.0.1:5003';
 
 /* ─── Auth helpers ───────────────────────────────────────────────────────── */
-function getToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem('levy_ai_token');
-}
-function decodeJwtPayload(token: string): Record<string, unknown> | null {
-  try {
-    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    return JSON.parse(atob(b64));
-  } catch { return null; }
-}
 const UPLOADS_STORAGE_KEY = 'unote_academic_uploads';
 
 function _clearAuth() {
-  ['levy_ai_token','levy_ai_email','levy_ai_first_name','levy_ai_last_name',
+  ['levy_ai_email','levy_ai_first_name','levy_ai_last_name',
    'levy_ai_institution','levy_ai_primary_major','levy_ai_degree_type',
    'levy_ai_country','levy_ai_secondary_major','levy_ai_gender',
    UPLOADS_STORAGE_KEY,
@@ -45,18 +35,7 @@ function _clearAuth() {
   document.cookie = 'levy_ai_session=; path=/; SameSite=Lax; max-age=0';
 }
 async function authFetch(url: string, init: RequestInit = {}): Promise<Response> {
-  const token = getToken();
-  if (token) {
-    const p = decodeJwtPayload(token);
-    if (p?.exp && (p.exp as number) * 1000 < Date.now()) {
-      _clearAuth(); window.location.href = '/?login=true';
-      return new Response(null, { status: 401 });
-    }
-  }
-  const res = await fetch(url, {
-    ...init,
-    headers: { ...((init.headers as Record<string, string>) ?? {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-  });
+  const res = await fetch(url, { ...init, credentials: 'include' });
   if (res.status === 401) { _clearAuth(); window.location.href = '/?login=true'; }
   return res;
 }
@@ -1915,7 +1894,7 @@ export default function AcademicWritingPage() {
   const activeSourceFileIds = useMemo(() => uploadedFiles.map(f => f.fileId), [uploadedFiles]);
 
   /* User info */
-  const [isAdmin]       = useState(() => typeof window !== 'undefined' ? (() => { const tk = localStorage.getItem('levy_ai_token'); if (!tk) return false; return decodeJwtPayload(tk)?.is_admin === true; })() : false);
+  const [isAdmin]       = useState(() => typeof window !== 'undefined' ? localStorage.getItem('levy_ai_is_admin') === 'true' : false);
   const [userEmail]     = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_email')      ?? '') : '');
   const [userFirstName,   setUserFirstName]   = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_first_name') ?? '') : '');
   const [userLastName,    setUserLastName]    = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_last_name')  ?? '') : '');

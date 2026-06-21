@@ -8,9 +8,9 @@
  *
  * Behaviours:
  *  • No course selected  → shows "📚 בחר קורס ▾" → click routes to /course-picker
- *  • Course selected     → shows icon + name, plus a chevron that opens a
- *    dropdown listing every course (built-in + custom). Picking one switches
- *    the active course instantly via CourseContext — no navigation needed.
+ *  • Course selected     → shows a static badge (icon + name) plus a chevron
+ *    that opens a dropdown listing every course. Picking one switches the
+ *    active course via CourseContext — no navigation needed.
  *  • × button            → clears the selected course and routes to /course-picker
  *    (most pages assume an active course, so clearing it leaves the user on
  *    /course-picker to choose a new one — same destination as the pill itself
@@ -72,14 +72,13 @@ export default function CoursePill() {
   return (
     <div className="relative" ref={containerRef}>
       <div className="flex items-center gap-1.5">
-        {/* Main pill — routes to course picker for full management */}
-        <button
-          onClick={() => router.push('/course-picker')}
-          className={pillBase}
+        {/* Main pill — static visual indicator, not interactive */}
+        <div
+          className="flex items-center gap-2 px-4 py-1.5 bg-white border border-[#D3E0D8] rounded-full shadow-sm text-sm font-semibold text-[#1C3329] select-none"
         >
           <span className="text-base leading-none">{selectedCourse.icon}</span>
           <span className="max-w-[110px] truncate">{selectedCourse.name}</span>
-        </button>
+        </div>
 
         {/* Chevron — toggles the quick-switch dropdown */}
         <button

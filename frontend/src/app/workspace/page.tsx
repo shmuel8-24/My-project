@@ -21,24 +21,13 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
+import { motion, AnimatePresence } from 'framer-motion';
 
 const API = 'http://127.0.0.1:5003';
 
 /* ─── Auth helpers ───────────────────────────────────────────────────────────── */
-function getToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem('levy_ai_token');
-}
-
-function decodeJwtPayload(token: string): Record<string, unknown> | null {
-  try {
-    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    return JSON.parse(atob(b64));
-  } catch { return null; }
-}
-
 const _AUTH_KEYS = [
-  'levy_ai_token', 'levy_ai_email', 'levy_ai_first_name', 'levy_ai_last_name',
+  'levy_ai_email', 'levy_ai_first_name', 'levy_ai_last_name',
   'levy_ai_institution', 'levy_ai_primary_major', 'levy_ai_degree_type',
   'levy_ai_country', 'levy_ai_secondary_major', 'levy_ai_gender',
 ] as const;
@@ -49,26 +38,7 @@ function _clearAuth() {
 }
 
 async function authFetch(url: string, init: RequestInit = {}): Promise<Response> {
-  const token = getToken();
-
-  // Proactive expiry check — avoids a round-trip when we can already tell the
-  // token is expired from the `exp` claim.
-  if (token) {
-    const p = decodeJwtPayload(token);
-    if (p?.exp && (p.exp as number) * 1000 < Date.now()) {
-      _clearAuth();
-      window.location.href = '/?login=true';
-      return new Response(null, { status: 401 });
-    }
-  }
-
-  const res = await fetch(url, {
-    ...init,
-    headers: {
-      ...((init.headers as Record<string, string>) ?? {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
+  const res = await fetch(url, { ...init, credentials: 'include' });
   if (res.status === 401) {
     _clearAuth();
     window.location.href = '/?login=true';
@@ -1074,6 +1044,7 @@ function UploadedDocsList({
 }) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [docToDelete, setDocToDelete] = useState<DocumentInfo | null>(null);
+  const [isDeleteModalClosing, setIsDeleteModalClosing] = useState(false);
 
   // Safety net: prop already filtered upstream, but guard here too against partial objects.
   const visibleDocs = docs.filter(d => {
@@ -1088,6 +1059,12 @@ function UploadedDocsList({
     setDeletingId(null);
     setDocToDelete(null);
   };
+
+  function closeDeleteModal() {
+    if (deletingId !== null) return;
+    setIsDeleteModalClosing(true);
+    setTimeout(() => { setDocToDelete(null); setIsDeleteModalClosing(false); }, 180);
+  }
 
   const getFileIcon = (name: string) => {
     const lower = name.toLowerCase();
@@ -1156,9 +1133,13 @@ function UploadedDocsList({
 
       {docToDelete && createPortal(
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center p-4 animate-slide-up-fade"
-          style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)' }}
-          onClick={e => { if (e.target === e.currentTarget && deletingId === null) setDocToDelete(null); }}
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+          style={{
+            backgroundColor: isDeleteModalClosing ? 'rgba(0,0,0,0)' : 'rgba(0,0,0,0.5)',
+            backdropFilter:  isDeleteModalClosing ? 'blur(0px)' : 'blur(8px)',
+            transition: 'background-color 0.18s ease, backdrop-filter 0.18s ease',
+          }}
+          onClick={e => { if (e.target === e.currentTarget && deletingId === null) closeDeleteModal(); }}
         >
           <div
             dir={lang === 'he' ? 'rtl' : 'ltr'}
@@ -1168,19 +1149,26 @@ function UploadedDocsList({
               backdropFilter: 'blur(20px)',
               border: '1px solid rgba(220,38,38,0.18)',
               boxShadow: '0 20px 60px rgba(30,10,10,0.22), 0 4px 16px rgba(220,38,38,0.08)',
+              opacity:   isDeleteModalClosing ? 0 : 1,
+              transform: isDeleteModalClosing ? 'scale(0.93) translateY(8px)' : 'scale(1) translateY(0)',
+              transition: 'opacity 0.16s ease, transform 0.16s cubic-bezier(0.4,0,1,1)',
             }}
           >
             <div
               className="flex items-center gap-3 px-5 py-4"
               style={{ background: 'rgba(220,38,38,0.04)', borderBottom: '1px solid rgba(220,38,38,0.12)' }}
             >
-              <div
-                className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0"
+              <button
+                type="button"
+                onClick={closeDeleteModal}
+                disabled={deletingId !== null}
+                aria-label={t.cancel}
+                className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 cursor-pointer transition-opacity hover:opacity-70 disabled:opacity-40"
                 style={{ background: 'rgba(220,38,38,0.10)', border: '1px solid rgba(220,38,38,0.2)' }}
               >
                 <IconX className="w-5 h-5 text-[#dc2626]" />
-              </div>
-              <h2 className="text-base font-bold text-[#1a2e14]">{t.deleteDocTitle}</h2>
+              </button>
+              <h2 className="flex-1 text-base font-bold text-[#1a2e14]">{t.deleteDocTitle}</h2>
             </div>
 
             <div className="px-5 py-5">
@@ -1191,7 +1179,7 @@ function UploadedDocsList({
 
             <div className="flex gap-2 px-4 pb-4">
               <button
-                onClick={() => setDocToDelete(null)}
+                onClick={closeDeleteModal}
                 disabled={deletingId !== null}
                 className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold border transition-all disabled:opacity-50"
                 style={{ color: '#7a9268', borderColor: 'rgba(157,192,139,0.45)', background: 'transparent' }}
@@ -1236,7 +1224,8 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [searchPhase, setSearchPhase] = useState<'thinking' | 'searching_web' | 'running_code'>('thinking');
-  const [visibleSources, setVisibleSources] = useState<Set<string>>(new Set());
+  const [visibleSources,   setVisibleSources]   = useState<Set<string>>(new Set());
+  const [visibleCitations, setVisibleCitations] = useState<Set<string>>(new Set());
   const [availableDocs, setAvailableDocs] = useState<DocumentInfo[]>([]);
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
   const bottomRef   = useRef<HTMLDivElement>(null);
@@ -1705,33 +1694,68 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
                     <CodeExecutionBlock code={msg.executedCode} output={msg.codeOutput} images={msg.images} t={t} />
                   )}
 
-                  {/* Document citation badges — page-level source attribution */}
+                  {/* Document citation badges — hidden by default, toggled per-message */}
                   {msg.role === 'assistant' && msg.citations && msg.citations.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mt-1.5">
-                      {msg.citations.map((cite, i) => (
-                        <span key={i}
-                          className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full"
-                          style={{
-                            background: 'rgba(107,144,74,0.09)',
-                            color:      '#3d6030',
-                            border:     '1px solid rgba(107,144,74,0.22)',
-                          }}>
-                          <svg className="w-3 h-3 shrink-0 opacity-70" fill="none" viewBox="0 0 24 24"
-                            stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round"
-                              d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
-                          </svg>
-                          <span className="max-w-[110px] truncate">
-                            {cite.file_name.replace(/\.[^/.]+$/, '')}
-                          </span>
-                          {cite.page_number != null && (
-                            <span className="text-[10px] font-bold px-1 rounded"
-                              style={{ background: 'rgba(107,144,74,0.18)', color: '#2d5020' }}>
-                              p.{cite.page_number}
-                            </span>
-                          )}
-                        </span>
-                      ))}
+                    <div className="mt-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setVisibleCitations(prev => {
+                          const next = new Set(prev);
+                          if (next.has(msg.id)) next.delete(msg.id); else next.add(msg.id);
+                          return next;
+                        })}
+                        className="flex items-center gap-1 text-[11px] font-medium transition-colors"
+                        style={{ background: 'transparent', border: 'none', padding: 0, color: '#9aaf8d', cursor: 'pointer' }}
+                        onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#517B3E'; }}
+                        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = '#9aaf8d'; }}
+                      >
+                        <svg
+                          className={`w-3 h-3 shrink-0 transition-transform duration-200 ${visibleCitations.has(msg.id) ? 'rotate-180' : ''}`}
+                          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" d="m19 9-7 7-7-7" />
+                        </svg>
+                        {visibleCitations.has(msg.id) ? t.hideSources : t.showSources(msg.citations.length)}
+                      </button>
+
+                      <AnimatePresence>
+                        {visibleCitations.has(msg.id) && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.22, ease: 'easeInOut' }}
+                            style={{ overflow: 'hidden' }}
+                          >
+                            <div className="flex flex-wrap gap-1.5 pt-1.5">
+                              {msg.citations.map((cite, i) => (
+                                <span key={i}
+                                  className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full"
+                                  style={{
+                                    background: 'rgba(107,144,74,0.09)',
+                                    color:      '#3d6030',
+                                    border:     '1px solid rgba(107,144,74,0.22)',
+                                  }}>
+                                  <svg className="w-3 h-3 shrink-0 opacity-70" fill="none" viewBox="0 0 24 24"
+                                    stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round"
+                                      d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+                                  </svg>
+                                  <span className="max-w-[110px] truncate">
+                                    {cite.file_name.replace(/\.[^/.]+$/, '')}
+                                  </span>
+                                  {cite.page_number != null && (
+                                    <span className="text-[10px] font-bold px-1 rounded"
+                                      style={{ background: 'rgba(107,144,74,0.18)', color: '#2d5020' }}>
+                                      p.{cite.page_number}
+                                    </span>
+                                  )}
+                                </span>
+                              ))}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </div>
                   )}
 
@@ -2295,10 +2319,7 @@ function Home() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAdmin] = useState(() => {
     if (typeof window === 'undefined') return false;
-    const token = localStorage.getItem('levy_ai_token');
-    if (!token) return false;
-    const p = decodeJwtPayload(token);
-    return p?.is_admin === true;
+    return localStorage.getItem('levy_ai_is_admin') === 'true';
   });
   const [userEmail]     = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_email')      ?? '') : '');
   const [userFirstName] = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_first_name') ?? '') : '');

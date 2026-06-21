@@ -133,9 +133,8 @@ export default function EditCoursePage() {
     setOriginalName(course.name);
     setColor(course.color || COLOR_OPTIONS[0].value);
 
-    const token = localStorage.getItem('levy_ai_token') ?? '';
     fetch(`${API}/api/courses/details?name=${encodeURIComponent(course.name)}`, {
-      headers: { Authorization: `Bearer ${token}` },
+      credentials: 'include',
     })
       .then(async res => {
         if (!res.ok) return;
@@ -190,12 +189,11 @@ export default function EditCoursePage() {
   const handleSyllabusReparse = useCallback(async (file: File) => {
     setIsReparsing(true);
     setReparseError('');
-    const token    = localStorage.getItem('levy_ai_token') ?? '';
     const formData = new FormData();
     formData.append('file', file);
     try {
       const res = await fetch(`${API}/api/courses/parse-syllabus`, {
-        method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: formData,
+        method: 'POST', credentials: 'include', body: formData,
       });
       const raw = await res.text();
       let data: Record<string, unknown> = {};
@@ -228,12 +226,11 @@ export default function EditCoursePage() {
 
   /* ── Save ──────────────────────────────────────────────────────────────── */
   async function handleSave() {
-    const token = localStorage.getItem('levy_ai_token') ?? '';
-
     // Fire-and-forget backend update
     fetch(`${API}/api/courses/update`, {
       method:  'PATCH',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         course_name:        originalName,
         new_course_name:    name.trim() !== originalName ? name.trim() : null,

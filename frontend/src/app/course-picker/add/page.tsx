@@ -120,7 +120,6 @@ export default function AddCoursePage() {
     setIsParsingPDF(true);
     setParseError('');
 
-    const token    = localStorage.getItem('levy_ai_token') ?? '';
     const formData = new FormData();
     // Append the File object directly — DO NOT set Content-Type manually;
     // the browser sets multipart/form-data with the correct boundary automatically.
@@ -129,7 +128,7 @@ export default function AddCoursePage() {
     try {
       const res = await fetch(`${API}/api/courses/parse-syllabus`, {
         method:  'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: 'include',
         body:    formData,
       });
 
@@ -238,10 +237,10 @@ export default function AddCoursePage() {
     addCustomCourse(localCourse);
 
     // Fire-and-forget backend save (indexes syllabus to ChromaDB for RAG)
-    const token = localStorage.getItem('levy_ai_token') ?? '';
     fetch(`${API}/api/courses`, {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         course_name:        name.trim(),
         lecturer_name:      lecturer.trim(),

@@ -402,6 +402,7 @@ export default function HomePage() {
     try {
       const res  = await fetch('http://127.0.0.1:5003/api/verify-otp', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ email: email.trim().toLowerCase(), code: otp }),
       });
       const data = await res.json();
@@ -414,13 +415,11 @@ export default function HomePage() {
       if (data.email)      localStorage.setItem('levy_ai_email',      data.email);
       if (data.first_name) localStorage.setItem('levy_ai_first_name', data.first_name);
       if (data.last_name)  localStorage.setItem('levy_ai_last_name',  data.last_name);
+      localStorage.setItem('levy_ai_is_admin', String(data.is_admin === true));
       // Session presence cookie — read by middleware before JS runs.
       document.cookie = 'levy_ai_session=1; path=/; SameSite=Lax; max-age=86400';
-      // Token cookie — allows middleware to decode the is_admin claim server-side.
-      if (data.token) document.cookie = `levy_ai_token=${data.token}; path=/; SameSite=Lax; max-age=86400`;
-      // Write the token through the auth context so `useAuth().user` is populated
-      // immediately — pages guard on it right after the redirect below.
-      if (data.token) updateToken(data.token);
+      // JWT is now HttpOnly — set by Flask. Sync the auth context from localStorage.
+      updateToken();
       setIsTransitioning(true);
       setTimeout(() => router.push(WORKSPACE_ROUTE), 1800);
     } catch { setNetError(true); }
@@ -437,6 +436,7 @@ export default function HomePage() {
     try {
       const res  = await fetch('http://127.0.0.1:5003/api/login', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ email: val, password }),
       });
       const data = await res.json();
@@ -444,11 +444,10 @@ export default function HomePage() {
       if (data.email)      localStorage.setItem('levy_ai_email',      data.email);
       if (data.first_name) localStorage.setItem('levy_ai_first_name', data.first_name);
       if (data.last_name)  localStorage.setItem('levy_ai_last_name',  data.last_name);
+      localStorage.setItem('levy_ai_is_admin', String(data.is_admin === true));
       document.cookie = 'levy_ai_session=1; path=/; SameSite=Lax; max-age=86400';
-      if (data.token) document.cookie = `levy_ai_token=${data.token}; path=/; SameSite=Lax; max-age=86400`;
-      // Write the token through the auth context so `useAuth().user` is populated
-      // immediately — pages guard on it right after the redirect below.
-      if (data.token) updateToken(data.token);
+      // JWT is now HttpOnly — set by Flask. Sync the auth context from localStorage.
+      updateToken();
       setIsTransitioning(true);
       setTimeout(() => router.push(WORKSPACE_ROUTE), 1800);
     } catch { setNetError(true); }
@@ -534,6 +533,7 @@ export default function HomePage() {
     try {
       const res  = await fetch('http://127.0.0.1:5003/api/register', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           email:      regEmail.trim().toLowerCase(),
           password:   regPassword,
@@ -548,11 +548,10 @@ export default function HomePage() {
       if (data.email)      localStorage.setItem('levy_ai_email',      data.email);
       if (data.first_name) localStorage.setItem('levy_ai_first_name', data.first_name);
       if (data.last_name)  localStorage.setItem('levy_ai_last_name',  data.last_name);
+      localStorage.setItem('levy_ai_is_admin', String(data.is_admin === true));
       document.cookie = 'levy_ai_session=1; path=/; SameSite=Lax; max-age=86400';
-      if (data.token) document.cookie = `levy_ai_token=${data.token}; path=/; SameSite=Lax; max-age=86400`;
-      // Write the token through the auth context so `useAuth().user` is populated
-      // immediately — onboarding (and any later guard) sees it right away.
-      if (data.token) updateToken(data.token);
+      // JWT is now HttpOnly — set by Flask. Sync the auth context from localStorage.
+      updateToken();
       closeRegisterModal();
       setIsTransitioning(true);
       setIsLoginModalOpen(true);

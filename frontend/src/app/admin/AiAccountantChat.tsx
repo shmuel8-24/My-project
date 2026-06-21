@@ -105,17 +105,12 @@ const CHART_COLORS = ['#517B3E', '#6B904A', '#2A3B22', '#8DB56B', '#4a7a36'];
    Auth helper
 ════════════════════════════════════════════════════════════════════════════ */
 
-function getToken(): string | null {
-  return typeof window !== 'undefined' ? localStorage.getItem('levy_ai_token') : null;
-}
-
 function authFetch(url: string, init: RequestInit = {}) {
-  const token = getToken();
   return fetch(url, {
     ...init,
+    credentials: 'include',
     headers: {
       ...((init.headers as Record<string, string>) ?? {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       'Content-Type': 'application/json',
     },
   });

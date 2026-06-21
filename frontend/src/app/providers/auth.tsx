@@ -3,28 +3,21 @@
 /**
  * Global auth context.
  *
- * Lives in the root layout so it mounts once and survives every client-side
- * route transition.  Individual pages read `useAuth()` instead of touching
- * localStorage directly — this is the single source of truth for the current
- * user session.
+ * The JWT lives exclusively in an HttpOnly cookie set by the Flask backend.
+ * JavaScript never reads it. Session state is derived from lightweight profile
+ * keys in localStorage (email, name, is_admin flag — not credentials).
  *
- * Responsibilities
- *   • Read + validate the JWT from localStorage on first client render
- *   • Expose `user`, `isLoading`, `logout`, and `updateToken`
- *   • On expiry detection: clear all auth keys immediately so no other page
- *     can falsely pass its own auth check on a stale token
- *
- * NOT responsible for
- *   • Redirecting (pages own their own redirect logic)
- *   • Token refresh (admin page does that; it calls `updateToken` afterward)
+ * On logout the backend endpoint is called so Flask can clear the HttpOnly
+ * cookie; localStorage profile keys are then wiped client-side.
  */
 
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 
+const API = 'http://127.0.0.1:5003';
+
 /* ── Shared constants ─────────────────────────────────────────────────────── */
 
 export const AUTH_KEYS = [
-  'levy_ai_token',
   'levy_ai_email',
   'levy_ai_first_name',
   'levy_ai_last_name',
@@ -34,23 +27,14 @@ export const AUTH_KEYS = [
   'levy_ai_country',
   'levy_ai_secondary_major',
   'levy_ai_gender',
+  'levy_ai_is_admin',
 ] as const;
 
 export type AuthKey = (typeof AUTH_KEYS)[number];
 
-/* ── JWT helper (re-exported so pages can stop duplicating it) ─────────────── */
-
-export function decodeJwtPayload(token: string): Record<string, unknown> | null {
-  try {
-    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    return JSON.parse(atob(b64));
-  } catch { return null; }
-}
-
 /* ── User shape ───────────────────────────────────────────────────────────── */
 
 export interface AuthUser {
-  token: string;
   email: string;
   firstName: string;
   lastName: string;
@@ -66,16 +50,14 @@ export interface AuthUser {
 /* ── Context value ────────────────────────────────────────────────────────── */
 
 interface AuthContextValue {
-  /** Populated after the first client-side render; null when not logged in. */
   user: AuthUser | null;
-  /** True for the brief window between mount and the first localStorage read. */
   isLoading: boolean;
   /**
-   * Call this after a successful /api/refresh-token to keep the context in
-   * sync with the new JWT written to localStorage.
+   * Call after a successful /api/refresh-token (backend sets new HttpOnly
+   * cookie) to re-sync the React context from localStorage profile keys.
+   * The token parameter is accepted but ignored — it is never stored client-side.
    */
-  updateToken: (token: string) => void;
-  /** Full session wipe + hard redirect to /. */
+  updateToken: (token?: string) => void;
   logout: () => void;
 }
 
@@ -83,35 +65,28 @@ interface AuthContextValue {
 
 function clearAuthStorage() {
   AUTH_KEYS.forEach(k => localStorage.removeItem(k));
+  // Clear the presence + course cookies set from JS
   document.cookie = 'levy_ai_session=; path=/; SameSite=Lax; max-age=0';
-  document.cookie = 'levy_ai_token=; path=/; SameSite=Lax; max-age=0';
+  document.cookie = 'levy_ai_course_active=; path=/; SameSite=Lax; max-age=0';
+  // NOTE: levy_ai_token is HttpOnly — only the server can clear it via /api/logout
 }
 
 function readUserFromStorage(): AuthUser | null {
   if (typeof window === 'undefined') return null;
-
-  const token = localStorage.getItem('levy_ai_token');
-  if (!token) return null;
-
-  const payload = decodeJwtPayload(token);
-  if (!payload) { clearAuthStorage(); return null; }
-
-  if (payload.exp && (payload.exp as number) * 1000 < Date.now()) {
-    clearAuthStorage();
-    return null;
-  }
+  // Presence is determined by levy_ai_email — only written after a successful auth handshake.
+  const email = localStorage.getItem('levy_ai_email');
+  if (!email) return null;
 
   return {
-    token,
-    email:          localStorage.getItem('levy_ai_email')          ?? '',
-    firstName:      localStorage.getItem('levy_ai_first_name')     ?? '',
-    lastName:       localStorage.getItem('levy_ai_last_name')      ?? '',
-    isAdmin:        payload.is_admin === true || payload.role === 'admin',
-    gender:         localStorage.getItem('levy_ai_gender')         ?? '',
-    institution:    localStorage.getItem('levy_ai_institution')    ?? '',
-    primaryMajor:   localStorage.getItem('levy_ai_primary_major')  ?? '',
-    degreeType:     localStorage.getItem('levy_ai_degree_type')    ?? '',
-    country:        localStorage.getItem('levy_ai_country')        ?? '',
+    email,
+    firstName:      localStorage.getItem('levy_ai_first_name')      ?? '',
+    lastName:       localStorage.getItem('levy_ai_last_name')       ?? '',
+    isAdmin:        localStorage.getItem('levy_ai_is_admin')        === 'true',
+    gender:         localStorage.getItem('levy_ai_gender')          ?? '',
+    institution:    localStorage.getItem('levy_ai_institution')     ?? '',
+    primaryMajor:   localStorage.getItem('levy_ai_primary_major')   ?? '',
+    degreeType:     localStorage.getItem('levy_ai_degree_type')     ?? '',
+    country:        localStorage.getItem('levy_ai_country')         ?? '',
     secondaryMajor: localStorage.getItem('levy_ai_secondary_major') ?? '',
   };
 }
@@ -121,8 +96,6 @@ function readUserFromStorage(): AuthUser | null {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  // Both start "empty" so server render and first client paint match — no
-  // hydration mismatch.  The useEffect below fills them in after mount.
   const [user,      setUser]      = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -131,12 +104,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsLoading(false);
   }, []);
 
-  const updateToken = useCallback((token: string) => {
-    localStorage.setItem('levy_ai_token', token);
+  // Re-sync context from localStorage (called after server sets a new cookie).
+  const updateToken = useCallback((_token?: string) => {
     setUser(readUserFromStorage());
   }, []);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    // Ask the server to clear the HttpOnly cookie first.
+    try {
+      await fetch(`${API}/api/logout`, { method: 'POST', credentials: 'include' });
+    } catch { /* proceed with local cleanup even if the request fails */ }
     clearAuthStorage();
     setUser(null);
     window.location.href = '/';

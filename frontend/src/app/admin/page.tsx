@@ -13,25 +13,12 @@ import { useAuth } from '../providers/auth';
  */
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://127.0.0.1:5003';
 
-function getToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem('levy_ai_token');
-}
-
-function decodeJwtPayload(token: string): Record<string, unknown> | null {
-  try {
-    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    return JSON.parse(atob(b64));
-  } catch { return null; }
-}
-
 function authFetch(url: string, init: RequestInit = {}) {
-  const token = getToken();
   return fetch(url, {
     ...init,
+    credentials: 'include',
     headers: {
       ...((init.headers as Record<string, string>) ?? {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init.body && !(init.body instanceof FormData)
         ? { 'Content-Type': 'application/json' }
         : {}),
@@ -145,7 +132,7 @@ function Toast({ msg, ok }: { msg: string; ok: boolean }) {
  */
 type PingStatus = 'checking' | 'online' | 'offline';
 
-function ServerStatus({ token }: { token: string | null }) {
+function ServerStatus() {
   const [ping,   setPing]   = useState<PingStatus>('checking');
   const [detail, setDetail] = useState('');
 
@@ -177,11 +164,11 @@ function ServerStatus({ token }: { token: string | null }) {
     return () => ctrl.abort();
   }, []);
 
-  const payload    = token ? decodeJwtPayload(token) : null;
-  const isAdmin    = Boolean(payload?.is_admin);
-  const tokenLabel = !token    ? 'No token — log in first'
-                   : isAdmin   ? `Admin ✓  (${String(payload?.email ?? '')})`
-                   :             `Non-admin  role: ${String(payload?.role ?? '?')}`;
+  const isAdmin    = typeof window !== 'undefined' && localStorage.getItem('levy_ai_is_admin') === 'true';
+  const hasSession = typeof window !== 'undefined' && !!localStorage.getItem('levy_ai_email');
+  const tokenLabel = !hasSession ? 'No session — log in first'
+                   : isAdmin     ? `Admin ✓  (${String(localStorage.getItem('levy_ai_email') ?? '')})`
+                   :               'Non-admin role';
 
   const rows: Array<{ label: string; value: string; status: 'ok' | 'warn' | 'err' }> = [
     {
@@ -201,7 +188,7 @@ function ServerStatus({ token }: { token: string | null }) {
     {
       label:  'Auth Token',
       value:  tokenLabel,
-      status: !token ? 'err' : isAdmin ? 'ok' : 'warn',
+      status: !hasSession ? 'err' : isAdmin ? 'ok' : 'warn',
     },
   ];
 
@@ -616,31 +603,22 @@ export default function AdminPage() {
   }, [showToast, fetchUsers]);
 
   const handleRefreshToken = useCallback(async () => {
-    const token = getToken();
-    if (!token) { showToast('Not logged in', false); return; }
     try {
-      const res = await fetch(`${API}/api/refresh-token`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetch(`${API}/api/refresh-token`, { credentials: 'include' });
       if (!res.ok) { showToast(`Token refresh failed: HTTP ${res.status}`, false); return; }
-      const data = await res.json() as { token?: string };
-      if (!data.token) { showToast('No token in response', false); return; }
-      localStorage.setItem('levy_ai_token', data.token);
-      const payload = decodeJwtPayload(data.token);
-      if (payload?.is_admin) {
+      updateToken();
+      const isAdminFlag = localStorage.getItem('levy_ai_is_admin') === 'true';
+      if (isAdminFlag) {
         showToast('Admin token refreshed successfully');
         setIsAdmin(true);
         void fetchUsers();
       } else {
-        showToast(
-          `Role is "${String(payload?.role ?? '?')}" — run: python scripts/make_admin.py`,
-          false,
-        );
+        showToast('Non-admin — run: python scripts/make_admin.py', false);
       }
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Error', false);
     }
-  }, [showToast, fetchUsers]);
+  }, [showToast, fetchUsers, updateToken]);
 
   const handleOpenChatFromAlert = useCallback((message: string) => {
     setChatPreload(message);
@@ -702,27 +680,19 @@ export default function AdminPage() {
         return;
       }
 
-      // Attempt a silent token refresh using the token the context already has.
-      const stored = currentAuthUser.token;
+      // Attempt a silent token refresh via cookie-based auth.
       try {
-        const res = await fetch(`${API}/api/refresh-token`, {
-          headers: { Authorization: `Bearer ${stored}` },
-        });
-        if (res.ok) {
-          const data = await res.json() as { token?: string };
-          if (data.token && mounted) {
-            localStorage.setItem('levy_ai_token', data.token);
-            updateToken(data.token); // keep global context in sync
-          }
+        const res = await fetch(`${API}/api/refresh-token`, { credentials: 'include' });
+        if (res.ok && mounted) {
+          updateToken(); // keep global context in sync
         }
       } catch { /* server not yet up — fall back to stored token */ }
 
       // Guard navigated away before the async refresh completed — do nothing.
       if (!mounted) return;
 
-      const latest  = localStorage.getItem('levy_ai_token');
-      const payload = latest ? decodeJwtPayload(latest) : null;
-      if (!payload || (!payload.is_admin && payload.role !== 'admin')) {
+      const isAdminFlag = localStorage.getItem('levy_ai_is_admin') === 'true';
+      if (!isAdminFlag) {
         router.replace('/?login=true');
         return;
       }
@@ -751,7 +721,6 @@ export default function AdminPage() {
     );
   }
 
-  const currentToken = getToken();
 
   /* ── Main render ────────────────────────────────────────────────────────── */
   return (
@@ -774,7 +743,7 @@ export default function AdminPage() {
         </div>
 
         {/* ── Connection Status (always visible — shows live Flask health) ─── */}
-        <ServerStatus token={currentToken} />
+        <ServerStatus />
 
         {/* KPI row */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">

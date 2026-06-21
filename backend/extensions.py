@@ -81,33 +81,6 @@ SEARCH_TOOL = {
     },
 }
 
-CODE_INTERPRETER_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "code_interpreter",
-        "description": (
-            "Execute Python code for mathematical calculations, physics/engineering simulations, "
-            "numerical analysis, statistics, or data visualizations. Use proactively whenever "
-            "the user asks to calculate, simulate, plot, or analyse anything numerical. "
-            "Available libraries: numpy (as np), scipy (integrate, optimize, stats, linalg, fft), "
-            "matplotlib (as plt), math. Always use print() for text output. "
-            "Use plt.figure() / plt.plot() etc. for charts — do NOT call plt.show()."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "code": {
-                    "type": "string",
-                    "description": (
-                        "Well-commented Python code to execute. Use print() for every "
-                        "result you want to surface. Figures are captured automatically."
-                    ),
-                }
-            },
-            "required": ["code"],
-        },
-    },
-}
 
 # ── Rate limiter (bound to Flask app via limiter.init_app() in app.py) ────────
 def _rate_limit_key() -> str:

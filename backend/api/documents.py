@@ -16,7 +16,6 @@ from api.middleware import (
     token_required,
 )
 from extensions import (
-    CODE_INTERPRETER_TOOL,
     SEARCH_TOOL,
     client,
     embeddings_model,
@@ -26,7 +25,6 @@ from extensions import (
     TOP_K,
 )
 from models import ChatMessage, ChatSession, SessionLocal, UserDocument, sql_func
-from services.code_runner import execute_python_code
 from services.pdf import extract_pptx_slides
 from services.rag import get_chunks_for_files, get_user_collection, get_user_images, rebuild_user_bm25, hybrid_search
 from services.security import (
@@ -826,17 +824,12 @@ def ask(user_id: int):
                     "[Short Label](URL) links at the very end of your response."
                 )
 
-            code_interpreter_instruction = (
-                "\n\nCODE INTERPRETER — STRICT RULES:"
-                "\n• NEVER write Python code blocks (```python ... ```) anywhere in your response text."
-                "\n• ALWAYS call the code_interpreter tool whenever you would write or execute Python."
-                "\n• You MUST call the tool for ANY of: math, physics, chemistry, engineering,"
-                " statistics, numerical analysis, simulations, graphs, or plots."
-                "\n• After the tool runs, explain the results in natural language — do not re-print the code."
-                "\n• Writing code as plain markdown instead of calling the tool is STRICTLY FORBIDDEN."
-                "\n• HEBREW STRINGS: If Python code includes Hebrew text, ALWAYS use double-quotes (\") "
-                "for those strings — never single-quotes — to prevent syntax errors from the Hebrew "
-                "apostrophe character (e.g., write \"ג'ול\" not 'ג\\'ול')."
+            no_execution_instruction = (
+                "\n\nCODE EXECUTION POLICY: You are an AI academic assistant. You can write "
+                "code snippets in your answers to help students understand concepts, but you "
+                "DO NOT have the ability to run, execute, or test any code. Do not attempt "
+                "to use any tools to run code. If a student asks you to execute or run code, "
+                "explain that you can only provide code examples for them to run themselves."
             )
 
             image_instruction = ""
@@ -879,7 +872,7 @@ def ask(user_id: int):
                 "execute Python code to display or typeset formulas. You MUST use LaTeX "
                 "formatting directly in your response — $$ for display equations, $ for inline."
                 + web_search_instruction
-                + code_interpreter_instruction
+                + no_execution_instruction
                 + image_instruction
                 + _crm_block
             )
@@ -912,17 +905,20 @@ def ask(user_id: int):
                 + [{"role": "user", "content": current_user_message}]
             )
 
-            tools_list: list[dict] = [CODE_INTERPRETER_TOOL]
+            tools_list: list[dict] = []
             if tavily_client:
                 tools_list.append(SEARCH_TOOL)
 
-            first_resp    = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=messages_for_llm,
-                tools=tools_list,
-                tool_choice="auto",
-                temperature=0,
-            )
+            call_kwargs: dict = {
+                "model": "gpt-4o-mini",
+                "messages": messages_for_llm,
+                "temperature": 0,
+            }
+            if tools_list:
+                call_kwargs["tools"] = tools_list
+                call_kwargs["tool_choice"] = "auto"
+
+            first_resp = client.chat.completions.create(**call_kwargs)
             assistant_msg = first_resp.choices[0].message
 
             web_results:   list[dict] = []
@@ -950,30 +946,7 @@ def ask(user_id: int):
                 for tc, tc_dict in zip(assistant_msg.tool_calls, tool_calls_dict):
                     tool_content: str
 
-                    if tc.function.name == "code_interpreter":
-                        yield f"data: {json.dumps({'type': 'status', 'phase': 'running_code'})}\n\n"
-                        try:
-                            args      = json.loads(tc.function.arguments)
-                            code_str  = args.get("code", "")
-                            executed_code = code_str
-                            exec_result   = execute_python_code(code_str)
-                            code_output   = exec_result["output"]
-                            if exec_result.get("error"):
-                                code_output += f"\n[Error]:\n{exec_result['error']}"
-                            all_images.extend(exec_result.get("images", []))
-                            parts = []
-                            if exec_result["output"]:
-                                parts.append(f"STDOUT:\n{exec_result['output']}")
-                            if exec_result.get("error"):
-                                parts.append(f"ERROR:\n{exec_result['error']}")
-                            if exec_result.get("images"):
-                                n = len(exec_result["images"])
-                                parts.append(f"[{n} matplotlib figure(s) rendered and shown to the user]")
-                            tool_content = "\n\n".join(parts) if parts else "(code ran — no output)"
-                        except Exception as exc:
-                            tool_content = json.dumps({"error": str(exc)})
-
-                    elif tc.function.name == "search_web" and tavily_client:
+                    if tc.function.name == "search_web" and tavily_client:
                         searched_web = True
                         yield f"data: {json.dumps({'type': 'status', 'phase': 'searching_web'})}\n\n"
                         try:
@@ -1005,22 +978,7 @@ def ask(user_id: int):
                 )
                 answer = second_resp.choices[0].message.content
             else:
-                raw_content  = assistant_msg.content or ""
-                _code_blocks = re.findall(r"```(?:python|py)?\s*\n(.*?)```", raw_content, re.DOTALL)
-                if _code_blocks:
-                    yield f"data: {json.dumps({'type': 'status', 'phase': 'running_code'})}\n\n"
-                    combined_code = "\n\n".join(cb.strip() for cb in _code_blocks)
-                    executed_code = combined_code
-                    exec_result   = execute_python_code(combined_code)
-                    code_output   = exec_result["output"]
-                    if exec_result.get("error"):
-                        code_output += f"\n[Error]:\n{exec_result['error']}"
-                    all_images.extend(exec_result.get("images", []))
-                    answer = re.sub(
-                        r"```(?:python|py)?\s*\n.*?```", "", raw_content, flags=re.DOTALL
-                    ).strip()
-                else:
-                    answer = raw_content
+                answer = assistant_msg.content or ""
 
             web_sources = [
                 {"title": r.get("title", ""), "url": r.get("url", "")}

@@ -2,19 +2,13 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Settings as IconSettings, Home, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, LogOut, Folder } from 'lucide-react';
 import { useAuth }     from '../providers/auth';
 import { useLanguage } from '../providers/language';
 import { useCourse, COURSES, type Course } from '../providers/course';
 import CoursePill        from '../../components/CoursePill';
 
-/* ── Auth helpers ─────────────────────────────────────────────────────────── */
-function decodeJwtPayload(token: string): Record<string, unknown> | null {
-  try {
-    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    return JSON.parse(atob(b64));
-  } catch { return null; }
-}
 
 /* ── Design tokens — Matcha theme ────────────────────────────────────────── */
 const D = {
@@ -80,6 +74,54 @@ function LogoutConfirmModal({ onConfirm, onCancel }: { onConfirm: () => void; on
         </div>
       </div>
     </div>
+  );
+}
+
+/* ── Course Switch Ceremony ───────────────────────────────────────────────── */
+function CourseSwitchLoader({ course, he }: { course: Course; he: boolean }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.2, ease: 'easeOut' }}
+      className="absolute inset-0 flex flex-col items-center justify-center gap-5 pointer-events-none"
+      style={{ zIndex: 10 }}
+    >
+      <motion.div
+        animate={{ scale: [1, 1.09, 1], opacity: [0.82, 1, 0.82] }}
+        transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+        style={{
+          width: 80, height: 80, borderRadius: 26,
+          background: `${course.color}1A`,
+          border: `2.5px solid ${course.color}45`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 36,
+        }}
+      >
+        {course.icon}
+      </motion.div>
+
+      <motion.div
+        animate={{ rotate: 360 }}
+        transition={{ duration: 0.85, repeat: Infinity, ease: 'linear' }}
+        style={{
+          width: 34, height: 34,
+          border: '3px solid rgba(81,123,62,0.18)',
+          borderTopColor: '#517B3E',
+          borderRadius: '50%',
+        }}
+      />
+
+      <div className="text-center">
+        <p style={{ color: '#2C4A3B', fontWeight: 700, fontSize: '1rem', letterSpacing: '-0.01em' }}>
+          {course.name}
+        </p>
+        <p style={{ color: 'rgba(44,74,59,0.52)', fontSize: '0.74rem', marginTop: 3 }}>
+          {he ? 'טוען סביבת לימוד...' : 'Loading learning environment...'}
+        </p>
+      </div>
+    </motion.div>
   );
 }
 
@@ -328,11 +370,17 @@ export default function DashboardPage() {
   const [headerScrolled,     setHeaderScrolled]     = useState(false);
   const profilePopoverRef = useRef<HTMLDivElement>(null);
 
+  /* ── Course switch ceremony ─────────────────────────────────────────────── */
+  const [displayedCourse, setDisplayedCourse] = useState<Course | null>(null);
+  const [isSwitching,     setIsSwitching]     = useState(false);
+  const prevCourseIdRef = useRef<string | null | undefined>(undefined);
+  // While displayedCourse syncs on the first render, fall back to selectedCourse
+  // so the content never flickers to the empty "course selector" state.
+  const renderedCourse = displayedCourse ?? selectedCourse;
+
   const [isAdmin] = useState(() => {
     if (typeof window === 'undefined') return false;
-    const t = localStorage.getItem('levy_ai_token');
-    if (!t) return false;
-    return decodeJwtPayload(t)?.is_admin === true;
+    return localStorage.getItem('levy_ai_is_admin') === 'true';
   });
   const [userEmail]     = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_email')      ?? '') : '');
   const [userFirstName] = useState(() => typeof window !== 'undefined' ? (localStorage.getItem('levy_ai_first_name') ?? '') : '');
@@ -357,6 +405,33 @@ export default function DashboardPage() {
     if (!selectedCourse) router.replace('/course-picker');
   }, [authLoading, authUser, courseHydrated, selectedCourse, router]);
 
+  // Ceremony: fade out → swap data → fade in whenever the active course changes.
+  useEffect(() => {
+    const prevId = prevCourseIdRef.current;
+    const newId  = selectedCourse?.id ?? null;
+    prevCourseIdRef.current = newId;
+
+    // First run (undefined) or initial hydration (null → id) — no animation.
+    if (prevId === undefined || !prevId) {
+      setDisplayedCourse(selectedCourse);
+      return;
+    }
+    // No real change.
+    if (!selectedCourse || newId === prevId) {
+      setDisplayedCourse(selectedCourse);
+      return;
+    }
+
+    // Actual course-to-course switch → run the ceremony.
+    setIsSwitching(true);
+    const incoming = selectedCourse;
+
+    const swap = setTimeout(() => { setDisplayedCourse(incoming); }, 340);
+    const done = setTimeout(() => { setIsSwitching(false); },       395);
+
+    return () => { clearTimeout(swap); clearTimeout(done); };
+  }, [selectedCourse]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     const h = (e: MouseEvent) => {
       if (profilePopoverRef.current && !profilePopoverRef.current.contains(e.target as Node))
@@ -376,19 +451,25 @@ export default function DashboardPage() {
 
   const handleLogout = useCallback(() => {
     setSelectedCourse(null);
-    ['levy_ai_token', 'levy_ai_email', 'levy_ai_first_name', 'levy_ai_last_name',
+    ['levy_ai_email', 'levy_ai_first_name', 'levy_ai_last_name',
      'levy_ai_institution', 'levy_ai_primary_major', 'levy_ai_degree_type',
      'levy_ai_country', 'levy_ai_secondary_major', 'levy_ai_gender',
     ].forEach(k => localStorage.removeItem(k));
     document.cookie = 'levy_ai_session=; path=/; SameSite=Lax; max-age=0';
-    document.cookie = 'levy_ai_token=; path=/; SameSite=Lax; max-age=0';
     window.location.href = '/';
   }, [setSelectedCourse]);
 
   if (!selectedCourse) return null;
 
   return (
-    <div dir={he ? 'rtl' : 'ltr'} className="min-h-screen flex flex-col overflow-x-hidden" style={{ background: D.pageBg }}>
+    <motion.div
+      initial={{ opacity: 0, y: 14 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.40, ease: [0.25, 0.46, 0.45, 0.94] }}
+      dir={he ? 'rtl' : 'ltr'}
+      className="min-h-screen flex flex-col overflow-x-hidden"
+      style={{ background: D.pageBg }}
+    >
 
       {/* Subtle leaf watermarks */}
       <div className="fixed inset-0 pointer-events-none select-none overflow-hidden" style={{ zIndex: 0 }}>
@@ -474,7 +555,24 @@ export default function DashboardPage() {
 
       {/* Main */}
       <main className="flex-1 flex flex-col py-8 px-6 md:px-12 relative" style={{ zIndex: 1 }}>
-        <div className="w-full max-w-[1400px] mx-auto flex flex-col gap-8">
+
+        {/* ── Course switch ceremony overlay ──────────────────────────────── */}
+        <AnimatePresence>
+          {isSwitching && selectedCourse && (
+            <CourseSwitchLoader course={selectedCourse} he={he} />
+          )}
+        </AnimatePresence>
+
+        {/* ── Page content (fades during ceremony) ───────────────────────── */}
+        <div
+          className="w-full max-w-[1400px] mx-auto flex flex-col gap-8"
+          style={{
+            opacity:        isSwitching ? 0 : 1,
+            transform:      isSwitching ? 'translateY(12px)' : 'translateY(0px)',
+            transition:     'opacity 0.28s cubic-bezier(0.4,0,0.2,1), transform 0.28s cubic-bezier(0.4,0,0.2,1)',
+            pointerEvents:  isSwitching ? 'none' : 'auto',
+          }}
+        >
 
           {/* ── Greeting hero ─────────────────────────────────────────── */}
           <div className="flex items-center gap-8 md:gap-10 px-4 bg-transparent shadow-none">
@@ -498,16 +596,16 @@ export default function DashboardPage() {
                   : `Hello, ${userFirstName || 'Student'}!`}
               </h1>
               <p className="text-sm font-medium" style={{ color: 'rgba(26,46,38,0.65)' }}>
-                {selectedCourse
+                {renderedCourse
                   ? he
-                    ? <>{'לומד עכשיו: '}<span dir="rtl">{selectedCourse.name}{'‏'}</span></>
-                    : `Studying: ${selectedCourse.name}`
+                    ? <>{'לומד עכשיו: '}<span dir="rtl">{renderedCourse.name}{'‏'}</span></>
+                    : `Studying: ${renderedCourse.name}`
                   : (he ? 'בחר קורס כדי להתחיל' : 'Select a course to get started')}
               </p>
             </div>
           </div>
 
-          {selectedCourse ? (
+          {renderedCourse ? (
             <>
               {/* Action cards */}
               <div>
@@ -520,7 +618,7 @@ export default function DashboardPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <CrystalCard title={he ? 'מרחב לימוד'      : 'StudyLab'}         subtitle={he ? 'שאל על החומר'                    : 'Ask about material'}           onClick={() => router.push('/workspace')} />
                   <CrystalCard title={he ? 'הראש של המרצה'   : "Prof's Brain"}     subtitle={he ? 'סימולציית מבחן'                  : 'Exam simulation'}              onClick={() => router.push('/workspace/professor-simulator')} />
-                  <CrystalCard title={he ? 'שליטה בחומר'     : 'Mastery'}          subtitle={he ? 'חידונים ומעקב'                   : 'Quizzes & tracking'}           onClick={() => router.push(`/mastery?course=${selectedCourse.id}`)} />
+                  <CrystalCard title={he ? 'שליטה בחומר'     : 'Mastery'}          subtitle={he ? 'חידונים ומעקב'                   : 'Quizzes & tracking'}           onClick={() => router.push(`/mastery?course=${renderedCourse.id}`)} />
                   <CrystalCard title={he ? 'כתיבה אקדמית'    : 'Academic Writing'} subtitle={he ? 'כתיבת עבודות בסגנון האישי שלך'  : 'Write papers in your style'}   onClick={() => router.push('/academic-writing')} />
                   <CrystalCard title={he ? 'צור מצגת'        : 'Create Presentation'} subtitle={he ? 'מצגת מקצועית מהחומר שלך'      : 'A professional deck from your materials'} onClick={() => router.push('/presentation-generator')} />
                   <CrystalCard title={he ? 'המסמכים שלי'     : 'My Documents'}     subtitle={he ? 'ניהול הקבצים שהעלית'             : 'Manage your uploaded files'}   onClick={() => router.push('/my-documents')} />
@@ -546,6 +644,6 @@ export default function DashboardPage() {
         </div>
       </main>
 
-    </div>
+    </motion.div>
   );
 }
