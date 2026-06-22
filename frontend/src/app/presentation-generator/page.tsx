@@ -3,7 +3,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { useDropzone } from 'react-dropzone';
-import { Settings as IconSettings, Home, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, Monitor, LogOut, Folder, CheckSquare, Square, FileText, BookOpen as DocIcon } from 'lucide-react';
+import { Settings as IconSettings, Home, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, Monitor, LogOut, Folder, Check, FileText, BookOpen as DocIcon } from 'lucide-react';
 import { useAuth }     from '../providers/auth';
 import { useLanguage } from '../providers/language';
 import { useCourse }   from '../providers/course';
@@ -675,7 +675,7 @@ export default function PresentationGeneratorPage() {
 
       {/* ── Main ── */}
       <main className="flex-1 overflow-y-auto relative" style={{ zIndex: 1 }}>
-        <div className={`${step === 3 ? 'max-w-lg' : 'max-w-3xl'} mx-auto px-4 py-8 flex flex-col gap-5`}>
+        <div className={`${step === 3 ? 'max-w-5xl' : 'max-w-3xl'} mx-auto px-4 py-8 flex flex-col gap-5`}>
 
           {!slides && (
             <>
@@ -817,7 +817,7 @@ export default function PresentationGeneratorPage() {
 
                   {/* Sub-content: Existing docs */}
                   {sourceTab === 'existing' && (
-                    <div className="rounded-2xl p-5" style={{ background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(12px)', border: '1px solid rgba(157,192,139,0.25)' }}>
+                    <div className="flex flex-col gap-3">
                       {docsLoading ? (
                         <div className="py-10 flex justify-center"><Spinner large /></div>
                       ) : existingDocs.length === 0 ? (
@@ -846,18 +846,23 @@ export default function PresentationGeneratorPage() {
                               )}
                             </div>
                           </div>
-                          <div className="flex flex-col gap-2 max-h-64 overflow-y-auto">
+                          <div className="flex flex-col gap-1.5 max-h-52 overflow-y-auto">
                             {existingDocs.map(doc => {
                               const selected = selectedFileIds.includes(doc.file_id);
                               const displayName = doc.name ?? '';
+                              const ext = displayName.split('.').pop()?.toUpperCase() ?? '';
                               return (
                                 <button key={doc.file_id} onClick={() => toggleDocSelection(doc.file_id)} disabled={loading}
-                                  className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-start transition-all"
-                                  style={{ background: selected ? 'rgba(81,123,62,0.1)' : 'rgba(255,255,255,0.5)', border: `1px solid ${selected ? 'rgba(81,123,62,0.4)' : 'rgba(157,192,139,0.3)'}` }}>
-                                  {selected ? <CheckSquare className="w-4 h-4 shrink-0" style={{ color: '#517B3E' }} /> : <Square className="w-4 h-4 shrink-0" style={{ color: '#9DC08B' }} />}
-                                  <FileTypeIcon name={displayName} />
-                                  <span className="text-sm font-medium truncate flex-1" style={{ color: '#2A3B22' }}>{displayName || '—'}</span>
-                                  {doc.chunk_count !== undefined && <span className="text-[10px] shrink-0" style={{ color: '#7a9268' }}>{doc.chunk_count} {he ? 'קטעים' : 'chunks'}</span>}
+                                  className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-start transition-all"
+                                  style={selected
+                                    ? { background: '#EAF5EC', border: '1.5px solid rgba(81,123,62,0.55)', boxShadow: '0 4px 16px rgba(81,123,62,0.12)', transition: 'all 0.18s ease' }
+                                    : { background: 'rgba(255,255,255,0.55)', border: '1px solid rgba(255,255,255,0.45)', transition: 'all 0.18s ease' }
+                                  }>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-medium truncate" style={{ color: selected ? '#183025' : '#2C4A3B' }}>{displayName || '—'}</p>
+                                    {ext && <p className="text-[11px] mt-0.5" style={{ color: '#7BA08A' }}>{ext}</p>}
+                                  </div>
+                                  {selected && <Check className="w-4 h-4 shrink-0" style={{ color: '#517B3E' }} />}
                                 </button>
                               );
                             })}
@@ -979,9 +984,11 @@ export default function PresentationGeneratorPage() {
                 </>
               )}
 
-              {/* ── Navigation row — dir="ltr" keeps Back on left / Next on right
-                    regardless of RTL page direction, matching browser convention ── */}
-              <div dir="ltr" className="flex items-center justify-between w-full mt-2">
+              {/* ── Navigation row — inherits page dir so RTL/LTR placement is automatic.
+                    Back/Cancel is first DOM child (visual right in RTL, visual left in LTR).
+                    Next is last DOM child (visual left in RTL, visual right in LTR).
+                    Arrow SVG paths are conditionally flipped per language to match direction. ── */}
+              <div className="flex items-center justify-between w-full mt-2">
                 <button
                   onClick={handleBack}
                   className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all"
@@ -989,8 +996,10 @@ export default function PresentationGeneratorPage() {
                   onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.35)'}
                   onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.2)'}
                 >
+                  {/* ← in LTR (back = leftward); → in RTL (back = rightward) */}
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d='M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18' />
+                    <path strokeLinecap="round" strokeLinejoin="round"
+                      d={he ? 'M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3' : 'M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18'} />
                   </svg>
                   {step === 1 ? (he ? 'ביטול' : 'Cancel') : (he ? 'הקודם' : 'Back')}
                 </button>
@@ -1005,8 +1014,10 @@ export default function PresentationGeneratorPage() {
                       : { background: 'rgba(255,255,255,0.3)', color: 'rgba(28,51,41,0.4)' }}
                   >
                     {he ? 'הבא' : 'Next'}
+                    {/* → in LTR (forward = rightward); ← in RTL (forward = leftward) */}
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d='M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3' />
+                      <path strokeLinecap="round" strokeLinejoin="round"
+                        d={he ? 'M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18' : 'M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3'} />
                     </svg>
                   </button>
                 ) : (

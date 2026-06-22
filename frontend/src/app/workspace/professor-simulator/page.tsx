@@ -2,10 +2,12 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { Settings as IconSettings, CheckCircle2, X as IconX, Home, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, Monitor, LogOut, GraduationCap, Folder, Sparkles } from 'lucide-react';
-import { useAuth }     from '../../providers/auth';
-import { useLanguage } from '../../providers/language';
-import { useCourse }   from '../../providers/course';
+import { Settings as IconSettings, CheckCircle2, X as IconX, Home, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, Monitor, LogOut, GraduationCap, Folder, Sparkles, Check as IconCheck } from 'lucide-react';
+import { useAuth }        from '../../providers/auth';
+import { useLanguage }    from '../../providers/language';
+import { useCourse }      from '../../providers/course';
+import { useDocuments }   from '../../providers/documents';
+import type { DocInfo }   from '../../providers/documents';
 import CoursePill      from '../../../components/CoursePill';
 import { useDropzone } from 'react-dropzone';
 import ReactMarkdown from 'react-markdown';
@@ -488,9 +490,18 @@ export default function ProfessorSimulatorPage() {
   const topics       = selectedCourse?.name ?? '';
 
   // ── Files ────────────────────────────────────────────────────────────────────
-  const [files,     setFiles]     = useState<UploadedFile[]>([]);
-  const [uploading, setUploading] = useState(false);
-  const [uploadErr, setUploadErr] = useState<string | null>(null);
+  const [files,               setFiles]               = useState<UploadedFile[]>([]);
+  const [uploading,           setUploading]           = useState(false);
+  const [uploadErr,           setUploadErr]           = useState<string | null>(null);
+  const [studyTab,            setStudyTab]            = useState<'upload' | 'existing'>('upload');
+  const [selectedExistingIds, setSelectedExistingIds] = useState<string[]>([]);
+
+  // ── Existing course documents (for "existing files" tab) ─────────────────
+  const { docs: allDocs } = useDocuments();
+  const courseDocs = allDocs.filter((d: DocInfo) => {
+    const name = (d.name ?? d.file_name ?? d.filename ?? '').toLowerCase();
+    return !name.includes('syllabus') && !name.includes('מפתחי קורס');
+  });
 
   // ── Chat ─────────────────────────────────────────────────────────────────────
   const [messages, setMessages] = useState<ProfMsg[]>([]);
@@ -499,6 +510,18 @@ export default function ProfessorSimulatorPage() {
   const [chatErr,  setChatErr]  = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+
+  // ── Evaluation Agent state ────────────────────────────────────────────────
+  const [evalLoading, setEvalLoading] = useState(false);
+  const [evalError,   setEvalError]   = useState<string | null>(null);
+  const [evalResult,  setEvalResult]  = useState<{
+    overall_mastery: number;
+    coverage_pct:    number;
+    topics: { topic: string; mastery_pct: number | null; quiz_count: number; status: string; is_gap: boolean }[];
+    strengths:       string[];
+    gaps:            string[];
+    recommendations: string[];
+  } | null>(null);
 
   // ── Header / sidebar / profile state ──────────────────────────────────────
   const [sidebarOpen,        setSidebarOpen]        = useState(false);
@@ -595,6 +618,24 @@ export default function ProfessorSimulatorPage() {
   const [sampleExam,           setSampleExam]           = useState<UploadedFile | null>(null);
   const [sampleExamUploading,  setSampleExamUploading]  = useState(false);
   const [sampleExamErr,        setSampleExamErr]        = useState<string | null>(null);
+  const [examTab,              setExamTab]              = useState<'upload' | 'library'>('upload');
+  const [pastExams,            setPastExams]            = useState<{ file_id: string; name: string; course_name: string }[]>([]);
+  const [pastExamsLoading,     setPastExamsLoading]     = useState(false);
+
+  // Fetch the user's past-exam library for the active course
+  const fetchPastExams = useCallback(() => {
+    if (!selectedCourse) return;
+    setPastExamsLoading(true);
+    authFetch(`${API}/api/professor-simulator/past-exams?course_name=${encodeURIComponent(selectedCourse.name)}`)
+      .then(r => r.ok ? r.json() : { exams: [] })
+      .then((d: { exams: { file_id: string; name: string; course_name: string }[] }) => {
+        setPastExams(Array.isArray(d.exams) ? d.exams : []);
+      })
+      .catch(() => setPastExams([]))
+      .finally(() => setPastExamsLoading(false));
+  }, [selectedCourse]);
+
+  useEffect(() => { fetchPastExams(); }, [fetchPastExams]);
 
   const onDropSampleExam = useCallback(async (accepted: File[]) => {
     const file = accepted[0];
@@ -610,13 +651,16 @@ export default function ProfessorSimulatorPage() {
       const data = await safeJson(res);
       if (!res.ok) { setSampleExamErr((data.error as string) ?? 'שגיאה בהעלאת הקובץ'); return; }
       const uploaded = ((data.files ?? []) as { source: string; file_id: string; size: number }[])[0];
-      if (uploaded) setSampleExam({ name: uploaded.source, file_id: uploaded.file_id, size: uploaded.size });
+      if (uploaded) {
+        setSampleExam({ name: uploaded.source, file_id: uploaded.file_id, size: uploaded.size });
+        fetchPastExams(); // refresh library so the new upload appears immediately
+      }
     } catch (err) {
       console.error('[professor-simulator] sample-exam upload failed:', err);
       setSampleExamErr('לא ניתן להתחבר לשרת');
     }
     finally { setSampleExamUploading(false); }
-  }, [selectedCourse]);
+  }, [selectedCourse, fetchPastExams]);
 
   const {
     getRootProps:  getSampleExamRootProps,
@@ -641,7 +685,11 @@ export default function ProfessorSimulatorPage() {
     try {
       const fileIds = mode === 'predict_exam'
         ? (sampleExam ? [sampleExam.file_id] : [])
-        : [...files.map(f => f.file_id), ...(sampleExam ? [sampleExam.file_id] : [])];
+        : [
+            ...files.map(f => f.file_id),
+            ...selectedExistingIds,
+            ...(sampleExam ? [sampleExam.file_id] : []),
+          ];
 
       const res  = await authFetch(`${API}/api/professor-simulator/ask`, {
         method:  'POST',
@@ -690,12 +738,39 @@ export default function ProfessorSimulatorPage() {
     send('חזה את המבחן הקרוב שלי על סמך המבחנים הקודמים שהעליתי — אילו נושאים צפויים להיבחן?', 'predict_exam');
   };
 
+  // ── Evaluation Agent ─────────────────────────────────────────────────────────
+  const runEvaluation = async () => {
+    if (!selectedCourse || evalLoading) return;
+    setEvalLoading(true);
+    setEvalError(null);
+    setEvalResult(null);
+    try {
+      const res  = await authFetch(`${API}/api/evaluation/run`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ course_name: selectedCourse.name }),
+      });
+      const data = await safeJson(res);
+      if (!res.ok || data.error) {
+        setEvalError((data.error as string) ?? 'שגיאה בהפעלת הסוכן');
+      } else {
+        setEvalResult(data as typeof evalResult);
+      }
+    } catch (err) {
+      setEvalError(String(err));
+    } finally {
+      setEvalLoading(false);
+    }
+  };
+
   // ── Shared card style ─────────────────────────────────────────────────────────
   const card = {
-    background:   '#ffffff',
-    border:       '1px solid rgba(157,192,139,0.2)',
-    boxShadow:    '0 2px 16px rgba(60,90,40,0.06)',
-    borderRadius: '1.25rem',
+    background:           'rgba(255,255,255,0.55)',
+    backdropFilter:       'blur(12px)',
+    WebkitBackdropFilter: 'blur(12px)',
+    border:               '1px solid rgba(255,255,255,0.60)',
+    boxShadow:            '0 2px 16px rgba(20,42,16,0.07)',
+    borderRadius:         '1.5rem',
   } as const;
 
   const inputStyle = {
@@ -869,11 +944,10 @@ export default function ProfessorSimulatorPage() {
       {/* ── Main single-column dashboard ── */}
       <main className="flex-1 overflow-y-auto relative" style={{ zIndex: 1 }}>
 
-        <div className="max-w-5xl mx-auto w-full px-4 py-6 flex flex-col gap-6">
+        <div className="max-w-5xl mx-auto w-full px-4 py-8 flex flex-col gap-8">
 
           {/* ════ TOP CARD: Lecturer Settings ════ */}
-          <div className="rounded-2xl p-6 md:p-8"
-            style={{ background: '#ffffff', border: '1px solid rgba(157,192,139,0.2)', boxShadow: '0 2px 16px rgba(60,90,40,0.06)' }}>
+          <div className="rounded-2xl p-6 md:p-8" style={card}>
             <div className="flex flex-wrap items-center gap-3 mb-5">
               <p className="font-bold text-[#2A3B22] text-base">הגדרות מרצה וסגנון</p>
               {topics && (
@@ -889,7 +963,7 @@ export default function ProfessorSimulatorPage() {
               <div className="flex flex-col gap-2">
                 <p className="text-[11px] font-bold uppercase tracking-widest" style={{ color: '#7a9268' }}>מי כותב את המבחן</p>
                 {hasTaOption ? (
-                  <div className="flex rounded-xl overflow-hidden" style={{ border: '1px solid rgba(157,192,139,0.35)' }}>
+                  <div className="flex rounded-xl overflow-hidden" style={{ border: '1px solid rgba(209,230,217,0.9)', boxShadow: '0 1px 4px rgba(60,90,40,0.04)' }}>
                     {([
                       { key: 'lecturer', label: lecturerName },
                       { key: 'ta',       label: taName },
@@ -946,7 +1020,7 @@ export default function ProfessorSimulatorPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
             {/* ── Sample exam (required) ── */}
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-3">
               <div className="flex items-center gap-2">
                 <p className="text-[11px] font-bold uppercase tracking-widest" style={{ color: 'rgba(28,51,41,0.6)' }}>מבחן לדוגמא</p>
                 <span className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold"
@@ -954,9 +1028,11 @@ export default function ProfessorSimulatorPage() {
                   {sampleExam ? '✓ הועלה' : 'חובה'}
                 </span>
               </div>
-              {sampleExam ? (
+
+              {/* Active selection chip */}
+              {sampleExam && (
                 <div className="rounded-2xl px-4 py-3 flex items-center justify-between gap-3 text-sm"
-                  style={{ background: '#fff', border: '1px solid rgba(81,123,62,0.22)', boxShadow: '0 1px 6px rgba(60,90,40,0.06)' }}>
+                  style={{ background: 'rgba(255,255,255,0.55)', border: '1px solid rgba(81,123,62,0.22)' }}>
                   <div className="flex items-center gap-2 min-w-0">
                     <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: '#517B3E' }} strokeWidth={2.2} />
                     <span className="truncate font-medium text-[#2A3B22]">{sampleExam.name}</span>
@@ -968,94 +1044,228 @@ export default function ProfessorSimulatorPage() {
                     <span>החלף</span>
                   </button>
                 </div>
-              ) : (
-                <div {...getSampleExamRootProps()}
-                  className="cursor-pointer rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-2.5 py-12 text-center transition-all"
-                  style={{
-                    borderColor: isSampleExamDragActive ? '#517B3E' : '#6ee7b7',
-                    backgroundColor: isSampleExamDragActive ? 'rgba(81,123,62,0.07)' : '#ffffff',
-                  }}>
-                  <input {...getSampleExamInputProps()} />
-                  {sampleExamUploading ? (
-                    <><Spinner size="sm" /><p className="text-sm font-medium" style={{ color: '#517B3E' }}>מעלה...</p></>
-                  ) : isSampleExamDragActive ? (
-                    <p className="text-sm font-bold" style={{ color: '#517B3E' }}>שחרר כאן!</p>
-                  ) : (
-                    <>
-                      <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(81,123,62,0.08)' }}>
-                        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="#517B3E" strokeWidth={1.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
-                        </svg>
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold" style={{ color: '#2A3B22' }}>העלאת מבחן לדוגמא</p>
-                        <p className="text-xs mt-0.5" style={{ color: '#7a9268' }}>גרור לכאן · PDF</p>
-                      </div>
-                    </>
-                  )}
-                </div>
               )}
+
+              {/* Tab toggle — only show when no exam is active */}
+              {!sampleExam && (
+                <>
+                  <div className="flex rounded-xl overflow-hidden"
+                    style={{ border: '1px solid rgba(209,230,217,0.9)', boxShadow: '0 1px 4px rgba(60,90,40,0.04)' }}>
+                    {(['upload', 'library'] as const).map((tab, i) => (
+                      <button key={tab} type="button" onClick={() => setExamTab(tab)}
+                        className="flex-1 px-3 py-2 text-xs font-semibold transition-all"
+                        style={{
+                          background: examTab === tab ? 'rgba(81,123,62,0.12)' : 'rgba(255,255,255,0.6)',
+                          color:      examTab === tab ? '#2A3B22' : '#7a9268',
+                          fontWeight: examTab === tab ? 700 : 500,
+                          borderInlineStart: i === 1 ? '1px solid rgba(209,230,217,0.9)' : undefined,
+                        }}>
+                        {tab === 'upload'
+                          ? 'העלאה חדשה'
+                          : `ספריית מבחנים${pastExams.length > 0 ? ` · ${pastExams.length}` : ''}`}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Tab A — Upload new */}
+                  {examTab === 'upload' && (
+                    <div {...getSampleExamRootProps()}
+                      className="cursor-pointer rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-2.5 py-10 text-center transition-all"
+                      style={{
+                        borderColor:     isSampleExamDragActive ? '#517B3E' : 'rgba(157,192,139,0.35)',
+                        backgroundColor: isSampleExamDragActive ? 'rgba(81,123,62,0.07)' : '#F4F9F5',
+                      }}>
+                      <input {...getSampleExamInputProps()} />
+                      {sampleExamUploading ? (
+                        <><Spinner size="sm" /><p className="text-sm font-medium" style={{ color: '#517B3E' }}>מעלה...</p></>
+                      ) : isSampleExamDragActive ? (
+                        <p className="text-sm font-bold" style={{ color: '#517B3E' }}>שחרר כאן!</p>
+                      ) : (
+                        <>
+                          <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(81,123,62,0.08)' }}>
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="#517B3E" strokeWidth={1.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+                            </svg>
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold" style={{ color: '#2A3B22' }}>העלאת מבחן לדוגמא</p>
+                            <p className="text-xs mt-0.5" style={{ color: '#7a9268' }}>גרור לכאן · PDF</p>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Tab B — Past-exam library */}
+                  {examTab === 'library' && (
+                    pastExamsLoading ? (
+                      <div className="flex justify-center py-4"><Spinner /></div>
+                    ) : pastExams.length === 0 ? (
+                      <p className="text-xs text-center py-5" style={{ color: '#9aaf8a' }}>
+                        עדיין לא הועלו מבחני עבר לקורס זה. העלה מבחן חדש כדי שישמר בספרייה.
+                      </p>
+                    ) : (
+                      <div className="flex flex-col gap-1.5 max-h-52 overflow-y-auto">
+                        {pastExams.map(pe => (
+                          <button key={pe.file_id} type="button"
+                            onClick={() => setSampleExam({ name: pe.name, file_id: pe.file_id, size: 0 })}
+                            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-start transition-all"
+                            style={{ background: 'rgba(255,255,255,0.55)', border: '1px solid rgba(255,255,255,0.45)', transition: 'all 0.18s ease' }}
+                            onMouseEnter={e => { e.currentTarget.style.background = '#EAF5EC'; e.currentTarget.style.border = '1.5px solid rgba(81,123,62,0.55)'; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.55)'; e.currentTarget.style.border = '1px solid rgba(255,255,255,0.45)'; }}
+                          >
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium truncate" style={{ color: '#2C4A3B' }}>{pe.name}</p>
+                              <p className="text-[11px] mt-0.5" style={{ color: '#7BA08A' }}>PDF</p>
+                            </div>
+                            <span className="text-xs font-semibold shrink-0 px-2.5 py-1 rounded-full"
+                              style={{ background: 'rgba(81,123,62,0.1)', color: '#517B3E' }}>
+                              בחר
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )
+                  )}
+                </>
+              )}
+
               {sampleExamErr && <p className="text-xs text-red-500 px-1">{sampleExamErr}</p>}
             </div>
 
             {/* ── Study materials ── */}
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-3">
+
+              {/* Section label + selection badge */}
               <div className="flex items-center gap-2">
                 <p className="text-[11px] font-bold uppercase tracking-widest" style={{ color: 'rgba(28,51,41,0.6)' }}>חומר לימוד</p>
-                {files.length > 0 && (
+                {(files.length + selectedExistingIds.length) > 0 && (
                   <span className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold"
                     style={{ background: 'rgba(81,123,62,0.15)', color: '#517B3E' }}>
-                    {files.length} קבצים
+                    {files.length + selectedExistingIds.length} קבצים
                   </span>
                 )}
               </div>
-              {files.length > 0 && (
-                <div className="flex flex-col gap-1.5">
-                  {files.map(f => (
-                    <div key={f.file_id} className="flex items-center gap-2.5 rounded-xl px-3.5 py-2.5"
-                      style={{ background: '#fff', border: '1px solid rgba(157,192,139,0.25)', boxShadow: '0 1px 4px rgba(60,90,40,0.04)' }}>
-                      <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="#517B3E" strokeWidth={1.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
-                      </svg>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium truncate" style={{ color: '#2d3b25' }}>{f.name}</p>
-                        <p className="text-[10px]" style={{ color: '#7a9268' }}>{formatBytes(f.size)}</p>
-                      </div>
-                      <button onClick={() => setFiles(prev => prev.filter(x => x.file_id !== f.file_id))}
-                        className="w-6 h-6 rounded-full flex items-center justify-center hover:bg-red-100/60 transition-colors shrink-0">
-                        <span style={{ color: '#7a9268' }}><TrashIcon /></span>
-                      </button>
+
+              {/* Tab toggle */}
+              <div className="flex rounded-xl overflow-hidden"
+                style={{ border: '1px solid rgba(209,230,217,0.9)', boxShadow: '0 1px 4px rgba(60,90,40,0.04)' }}>
+                {(['upload', 'existing'] as const).map((tab, i) => (
+                  <button key={tab} type="button" onClick={() => setStudyTab(tab)}
+                    className="flex-1 px-3 py-2 text-xs font-semibold transition-all"
+                    style={{
+                      background: studyTab === tab ? 'rgba(81,123,62,0.12)' : 'rgba(255,255,255,0.6)',
+                      color:      studyTab === tab ? '#2A3B22' : '#7a9268',
+                      fontWeight: studyTab === tab ? 700 : 500,
+                      borderInlineStart: i === 1 ? '1px solid rgba(209,230,217,0.9)' : undefined,
+                    }}>
+                    {tab === 'upload' ? 'העלאה חדשה' : `מסמכים קיימים${courseDocs.length > 0 ? ` · ${courseDocs.length}` : ''}`}
+                  </button>
+                ))}
+              </div>
+
+              {/* Tab A — Upload new */}
+              {studyTab === 'upload' && (
+                <>
+                  {files.length > 0 && (
+                    <div className="flex flex-col gap-1.5">
+                      {files.map(f => (
+                        <div key={f.file_id} className="flex items-center gap-2.5 rounded-xl px-3.5 py-2.5"
+                          style={{ background: 'rgba(255,255,255,0.55)', border: '1px solid rgba(157,192,139,0.25)' }}>
+                          <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="#517B3E" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                          </svg>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium truncate" style={{ color: '#2d3b25' }}>{f.name}</p>
+                            <p className="text-[10px]" style={{ color: '#7a9268' }}>{formatBytes(f.size)}</p>
+                          </div>
+                          <button onClick={() => setFiles(prev => prev.filter(x => x.file_id !== f.file_id))}
+                            className="w-6 h-6 rounded-full flex items-center justify-center hover:bg-red-100/60 transition-colors shrink-0">
+                            <span style={{ color: '#7a9268' }}><TrashIcon /></span>
+                          </button>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  )}
+                  <div {...getRootProps()}
+                    className="rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-2.5 py-10 cursor-pointer text-center transition-all"
+                    style={{
+                      borderColor:     isDragActive ? '#517B3E' : 'rgba(157,192,139,0.35)',
+                      backgroundColor: isDragActive ? 'rgba(81,123,62,0.07)' : '#F4F9F5',
+                      opacity: uploading ? 0.6 : 1,
+                    }}>
+                    <input {...getInputProps()} />
+                    {uploading ? (
+                      <><Spinner /><p className="text-sm font-medium" style={{ color: '#517B3E' }}>מעלה...</p></>
+                    ) : isDragActive ? (
+                      <p className="text-sm font-bold" style={{ color: '#517B3E' }}>שחרר כאן!</p>
+                    ) : (
+                      <>
+                        <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(81,123,62,0.08)' }}>
+                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="#517B3E" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+                          </svg>
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold" style={{ color: '#2A3B22' }}>גרור קבצים לכאן</p>
+                          <p className="text-xs mt-0.5" style={{ color: '#7a9268' }}>PDF · PPTX · עד 50 MB</p>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  {uploadErr && <p className="text-xs px-1 flex items-center gap-1.5" style={{ color: '#dc2626' }}><span>⚠️</span>{uploadErr}</p>}
+                </>
               )}
-              <div {...getRootProps()}
-                className="rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-2.5 py-12 cursor-pointer text-center transition-all"
-                style={{
-                  borderColor: isDragActive ? '#517B3E' : '#6ee7b7',
-                  backgroundColor: isDragActive ? 'rgba(81,123,62,0.07)' : '#ffffff',
-                  opacity: uploading ? 0.6 : 1,
-                }}>
-                <input {...getInputProps()} />
-                {uploading ? (
-                  <><Spinner /><p className="text-sm font-medium" style={{ color: '#517B3E' }}>מעלה...</p></>
-                ) : isDragActive ? (
-                  <p className="text-sm font-bold" style={{ color: '#517B3E' }}>שחרר כאן!</p>
+
+              {/* Tab B — Existing course documents */}
+              {studyTab === 'existing' && (
+                courseDocs.length === 0 ? (
+                  <p className="text-xs text-center py-6" style={{ color: '#9aaf8a' }}>
+                    אין מסמכים מועלים לקורס זה עדיין.
+                  </p>
                 ) : (
                   <>
-                    <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(81,123,62,0.08)' }}>
-                      <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="#517B3E" strokeWidth={1.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
-                      </svg>
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold" style={{ color: '#2A3B22' }}>גרור קבצים לכאן</p>
-                      <p className="text-xs mt-0.5" style={{ color: '#7a9268' }}>PDF · PPTX · עד 50 MB</p>
+                    {selectedExistingIds.length > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-semibold" style={{ color: '#517B3E' }}>
+                          {selectedExistingIds.length} נבחרו
+                        </span>
+                        <button onClick={() => setSelectedExistingIds([])}
+                          className="text-[10px] font-semibold px-2 py-0.5 rounded-lg transition-colors"
+                          style={{ color: '#7a9268', background: 'rgba(157,192,139,0.15)' }}>
+                          נקה
+                        </button>
+                      </div>
+                    )}
+                    <div className="flex flex-col gap-1.5 max-h-52 overflow-y-auto">
+                      {courseDocs.map((d: DocInfo) => {
+                        const key      = d.file_id;
+                        const active   = selectedExistingIds.includes(key);
+                        const label    = d.name ?? d.file_name ?? d.filename ?? '';
+                        const ext      = label.split('.').pop()?.toUpperCase() ?? '';
+                        return (
+                          <button key={key} type="button"
+                            onClick={() => setSelectedExistingIds(prev =>
+                              active ? prev.filter(id => id !== key) : [...prev, key]
+                            )}
+                            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-start transition-all"
+                            style={active
+                              ? { background: '#EAF5EC', border: '1.5px solid rgba(81,123,62,0.55)', boxShadow: '0 4px 16px rgba(81,123,62,0.12)', transition: 'all 0.18s ease' }
+                              : { background: 'rgba(255,255,255,0.55)', border: '1px solid rgba(255,255,255,0.45)', transition: 'all 0.18s ease' }
+                            }>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium truncate" style={{ color: active ? '#183025' : '#2C4A3B' }}>{label}</p>
+                              {ext && <p className="text-[11px] mt-0.5" style={{ color: '#7BA08A' }}>{ext}</p>}
+                            </div>
+                            {active && <IconCheck className="w-4 h-4 shrink-0" style={{ color: '#517B3E' }} />}
+                          </button>
+                        );
+                      })}
                     </div>
                   </>
-                )}
-              </div>
-              {uploadErr && <p className="text-xs px-1 flex items-center gap-1.5" style={{ color: '#dc2626' }}><span>⚠️</span>{uploadErr}</p>}
+                )
+              )}
+
             </div>
 
           </div>
@@ -1064,10 +1274,9 @@ export default function ProfessorSimulatorPage() {
           {(messages.length === 0 && !sending) ? (
 
             /* ── Action area (pre-chat setup) ── */
-            <div className="rounded-2xl p-8 flex flex-col items-center text-center gap-5"
-              style={{ background: '#ffffff', border: '1px solid rgba(157,192,139,0.2)', boxShadow: '0 2px 16px rgba(60,90,40,0.06)' }}>
+            <div className="rounded-2xl p-8 flex flex-col items-center text-center gap-5" style={card}>
               <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
-                style={{ background: 'rgba(81,123,62,0.08)', border: '1px solid rgba(81,123,62,0.12)' }}>
+                style={{ background: 'rgba(81,123,62,0.07)' }}>
                 <Brain className="w-8 h-8" style={{ color: '#517B3E' }} />
               </div>
               <div>
@@ -1204,6 +1413,143 @@ export default function ProfessorSimulatorPage() {
             </div>
 
           )}
+
+          {/* ════ EVALUATION DASHBOARD ════ */}
+          <div className="rounded-2xl p-6" style={card}>
+
+            {/* Header row */}
+            <div className="flex items-center justify-between flex-wrap gap-3 mb-5">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
+                  style={{ background: 'rgba(81,123,62,0.09)' }}>
+                  <GraduationCap className="w-4 h-4" style={{ color: '#517B3E' }} />
+                </div>
+                <div>
+                  <p className="font-bold text-[#2A3B22] text-base">הערכת שליטה — ניתוח אקדמי</p>
+                  <p className="text-[11px]" style={{ color: '#7a9268' }}>
+                    סוכן מעריך ברמת PhD · מבוסס סילבוס + ציוני חידון
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={runEvaluation}
+                disabled={evalLoading}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{
+                  background: evalLoading
+                    ? 'rgba(157,192,139,0.5)'
+                    : 'linear-gradient(135deg,#517B3E,#2A3B22)',
+                  boxShadow: evalLoading ? 'none' : '0 3px 12px rgba(81,123,62,0.28)',
+                }}
+              >
+                {evalLoading ? <Spinner size="sm" /> : <Sparkles className="w-4 h-4" />}
+                <span>{evalLoading ? 'מעריך...' : 'הפעל הערכת שליטה'}</span>
+              </button>
+            </div>
+
+            {/* Error */}
+            {evalError && (
+              <div className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm mb-4"
+                style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#dc2626' }}>
+                <span>⚠️</span>{evalError}
+              </div>
+            )}
+
+            {/* Empty state */}
+            {!evalResult && !evalLoading && !evalError && (
+              <p className="text-sm text-center py-4" style={{ color: '#9aaf8a' }}>
+                לחץ "הפעל הערכת שליטה" כדי לקבל דוח מפורט על מצב הידע שלך בקורס זה.
+                <br />
+                <span className="text-[11px]">הסוכן ישתמש בסילבוס הקורס ובציוני החידונים שלך.</span>
+              </p>
+            )}
+
+            {/* Results */}
+            {evalResult && (
+              <div className="flex flex-col gap-5">
+
+                {/* KPI row */}
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { label: 'שליטה כוללת', value: `${Math.round(evalResult.overall_mastery)}%`, color: evalResult.overall_mastery >= 80 ? '#517B3E' : evalResult.overall_mastery >= 60 ? '#f97316' : '#ef4444' },
+                    { label: 'כיסוי נושאים', value: `${Math.round(evalResult.coverage_pct)}%`, color: '#2A3B22' },
+                  ].map(kpi => (
+                    <div key={kpi.label} className="rounded-2xl px-5 py-4 flex flex-col gap-1"
+                      style={{ background: 'rgba(244,249,245,0.9)', border: '1px solid rgba(157,192,139,0.25)' }}>
+                      <p className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: '#7a9268' }}>{kpi.label}</p>
+                      <p className="text-3xl font-extrabold" style={{ color: kpi.color }}>{kpi.value}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Topic breakdown */}
+                <div className="flex flex-col gap-1.5">
+                  <p className="text-[11px] font-bold uppercase tracking-widest mb-1" style={{ color: '#7a9268' }}>פירוט נושאים</p>
+                  {evalResult.topics.map((t, i) => {
+                    const pct     = t.mastery_pct ?? 0;
+                    const barColor = t.status === 'mastered' ? '#517B3E' : t.status === 'in_progress' ? '#f97316' : t.status === 'needs_work' ? '#ef4444' : '#94a3b8';
+                    const statusLabel = t.status === 'mastered' ? 'שולט' : t.status === 'in_progress' ? 'בתהליך' : t.status === 'needs_work' ? 'פער' : 'טרם נבחן';
+                    return (
+                      <div key={i} className="flex items-center gap-3 px-4 py-2.5 rounded-xl"
+                        style={{ background: t.is_gap ? 'rgba(239,68,68,0.04)' : 'rgba(255,255,255,0.55)', border: `1px solid ${t.is_gap ? 'rgba(239,68,68,0.18)' : 'rgba(157,192,139,0.2)'}` }}>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate" style={{ color: '#2A3B22' }}>{t.topic}</p>
+                        </div>
+                        {/* Bar */}
+                        <div className="w-24 h-1.5 rounded-full overflow-hidden shrink-0" style={{ background: 'rgba(157,192,139,0.2)' }}>
+                          <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: barColor }} />
+                        </div>
+                        <span className="text-[11px] font-bold w-14 text-end shrink-0" style={{ color: barColor }}>
+                          {t.mastery_pct !== null ? `${Math.round(t.mastery_pct)}%` : '—'} · {statusLabel}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Gaps & Strengths */}
+                {(evalResult.gaps.length > 0 || evalResult.strengths.length > 0) && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {evalResult.gaps.length > 0 && (
+                      <div className="rounded-xl px-4 py-3" style={{ background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.2)' }}>
+                        <p className="text-[11px] font-bold uppercase tracking-widest mb-2" style={{ color: '#ef4444' }}>פערי ידע</p>
+                        <ul className="flex flex-col gap-1">
+                          {evalResult.gaps.map((g, i) => <li key={i} className="text-xs" style={{ color: '#2A3B22' }}>• {g}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                    {evalResult.strengths.length > 0 && (
+                      <div className="rounded-xl px-4 py-3" style={{ background: 'rgba(81,123,62,0.05)', border: '1px solid rgba(81,123,62,0.2)' }}>
+                        <p className="text-[11px] font-bold uppercase tracking-widest mb-2" style={{ color: '#517B3E' }}>חוזקות</p>
+                        <ul className="flex flex-col gap-1">
+                          {evalResult.strengths.map((s, i) => <li key={i} className="text-xs" style={{ color: '#2A3B22' }}>✓ {s}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Recommendations */}
+                {evalResult.recommendations.length > 0 && (
+                  <div className="rounded-xl px-4 py-4"
+                    style={{ background: 'rgba(81,123,62,0.04)', border: '1px solid rgba(81,123,62,0.15)' }}>
+                    <p className="text-[11px] font-bold uppercase tracking-widest mb-3" style={{ color: '#7a9268' }}>המלצות ללמידה</p>
+                    <ol className="flex flex-col gap-2">
+                      {evalResult.recommendations.map((r, i) => (
+                        <li key={i} className="flex gap-2 text-sm" style={{ color: '#2A3B22' }}>
+                          <span className="shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white"
+                            style={{ background: '#517B3E' }}>{i + 1}</span>
+                          <span>{r}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+
+              </div>
+            )}
+
+          </div>
 
         </div>
 

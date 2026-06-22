@@ -8,6 +8,8 @@ import { useLanguage }       from '../providers/language';
 import { useCourse }         from '../providers/course';
 import { useDocuments }      from '../providers/documents';
 import type { DocInfo }      from '../providers/documents';
+import { uploadAndIndexFile }         from '../../lib/uploadFile';
+import { eventBus, EVT_DOCUMENTS_UPDATED } from '../../lib/eventBus';
 import CoursePill      from '../../components/CoursePill';
 import { CodeBlockPre, InlineCode } from '../../components/CodeBlock';
 import { useDropzone } from 'react-dropzone';
@@ -521,7 +523,7 @@ function Wizard({
   t, he,
   sessions, docs, docsLoading, sessionsLoading,
   selectedSessionId, onSelectSession,
-  selectedDocId, onSelectDoc,
+  selectedDocIds, onSelectDoc,
   writingType, onSelectType,
   uploadedFiles, uploading, uploadError, onDrop, onRemoveFile,
   hasDoc, onSourceTypeChange, onStart,
@@ -532,7 +534,7 @@ function Wizard({
   t: TType; he: boolean;
   sessions: SessionInfo[]; docs: DocInfo[]; docsLoading: boolean; sessionsLoading: boolean;
   selectedSessionId: number | null; onSelectSession: (id: number | null) => void;
-  selectedDocId: string | null; onSelectDoc: (id: string | null) => void;
+  selectedDocIds: string[]; onSelectDoc: (ids: string[]) => void;
   writingType: WritingTypeId | null; onSelectType: (id: WritingTypeId) => void;
   uploadedFiles: UploadedFile[]; uploading: boolean; uploadError: string | null; onDrop: (files: File[]) => void; onRemoveFile: (file: UploadedFile) => void;
   hasDoc: boolean; onSourceTypeChange?: (st: SourceType | null) => void;
@@ -638,7 +640,7 @@ function Wizard({
   // whole-store RAG search that surfaces documents from previous sessions.
   const step2Ready =
     (sourceType === 'upload'    && uploadedFiles.length > 0) ||
-    (sourceType === 'documents' && selectedDocId !== null) ||
+    (sourceType === 'documents' && selectedDocIds.length > 0) ||
     (sourceType === 'sessions'  && selectedSessionId !== null);
 
   const step3Ready = topic.trim().length > 0;
@@ -673,7 +675,7 @@ function Wizard({
   function SourceTile({ id, emoji, title, subtitle }: { id: SourceType; emoji: string; title: string; subtitle: string }) {
     const active = sourceType === id;
     return (
-      <button onClick={() => { setSourceType(id); onSourceTypeChange?.(id); onSelectSession(null); onSelectDoc(null); }}
+      <button onClick={() => { setSourceType(id); onSourceTypeChange?.(id); onSelectSession(null); onSelectDoc([]); }}
         className="flex flex-col items-center justify-center gap-3 px-4 rounded-2xl text-center transition-all active:scale-[0.97] w-full"
         style={{ minHeight: '160px', ...(active ? tileActive : tileBase) }}
         onMouseEnter={e => { if (!active) Object.assign((e.currentTarget as HTMLButtonElement).style, { background: 'rgba(255,255,255,0.75)', borderColor: 'rgba(255,255,255,0.65)' }); }}
@@ -735,7 +737,11 @@ function Wizard({
   /* ── Source label for confirmation ── */
   const sourceLabel = () => {
     if (sourceType === 'upload')    return uploadedFiles.length > 0 ? uploadedFiles.map(f => f.name).join(', ') : (he ? 'מסמכים קיימים' : 'Existing documents');
-    if (sourceType === 'documents') return docs.find(d => d.file_id === selectedDocId)?.name ?? '';
+    if (sourceType === 'documents') {
+      if (selectedDocIds.length === 0) return '';
+      if (selectedDocIds.length === 1) return docs.find(d => d.file_id === selectedDocIds[0])?.name ?? '';
+      return `${selectedDocIds.length} ${he ? 'מסמכים' : 'documents'}`;
+    }
     if (sourceType === 'sessions')  return sessions.find(s => String(s.id) === String(selectedSessionId))?.title ?? `Session ${selectedSessionId}`;
     return '';
   };
@@ -898,11 +904,38 @@ function Wizard({
             )}
 
             {sourceType === 'documents' && (
-              <SelectList
-                items={visibleDocs} loading={docsLoading} empty={t.noDocs}
-                keyFn={d => d.file_id} label={d => d.name ?? d.file_name ?? d.filename ?? ''} subLabel={d => (d.name ?? d.file_name ?? d.filename ?? '').split('.').pop()?.toUpperCase() ?? ''}
-                selected={selectedDocId} onSelect={key => { onSelectDoc(key || null); onSelectSession(null); }}
-              />
+              docsLoading ? (
+                <p className="text-xs py-3 text-center" style={{ color: '#7BA08A' }}>{t.loading}</p>
+              ) : visibleDocs.length === 0 ? (
+                <p className="text-xs py-3 text-center" style={{ color: '#7BA08A' }}>{t.noDocs}</p>
+              ) : (
+                <div className="flex flex-col gap-1.5 max-h-52 overflow-y-auto">
+                  {visibleDocs.map(doc => {
+                    const k   = doc.file_id;
+                    const active = selectedDocIds.includes(k);
+                    const lbl = doc.name ?? doc.file_name ?? doc.filename ?? '';
+                    const sub = lbl.split('.').pop()?.toUpperCase() ?? '';
+                    return (
+                      <button key={k}
+                        onClick={() => {
+                          const next = active
+                            ? selectedDocIds.filter(id => id !== k)
+                            : [...selectedDocIds, k];
+                          onSelectDoc(next);
+                          onSelectSession(null);
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-start transition-all"
+                        style={active ? tileActive : tileBase}>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate" style={{ color: active ? '#183025' : '#2C4A3B' }}>{lbl}</p>
+                          {sub && <p className="text-[11px] mt-0.5" style={{ color: '#7BA08A' }}>{sub}</p>}
+                        </div>
+                        {active && <IconCheck className="w-4 h-4 shrink-0" style={{ color: '#517B3E' } as React.CSSProperties} />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )
             )}
 
             {sourceType === 'sessions' && (
@@ -910,7 +943,7 @@ function Wizard({
                 items={sessions} loading={sessionsLoading} empty={t.noSessions}
                 keyFn={s => String(s.id)} label={s => s.title || `Session ${s.id}`}
                 selected={selectedSessionId !== null ? String(selectedSessionId) : null}
-                onSelect={key => { onSelectSession(key ? Number(key) : null); onSelectDoc(null); }}
+                onSelect={key => { onSelectSession(key ? Number(key) : null); onSelectDoc([]); }}
               />
             )}
           </>
@@ -1234,7 +1267,7 @@ const countWords = (text: string) => (text.trim() ? text.trim().split(/\s+/).len
 function WritingPanel({
   t, he, hasDoc, writingType, onBack, wizardInstructions, usePersonalStyle, includeSources, pageCount,
   userFirstName, userLastName, userInstitution,
-  sourceType, sourceDocId, sourceUploadFileIds,
+  sourceType, sourceDocIds, sourceUploadFileIds,
   initialTopic,
 }: {
   t: TType; he: boolean; hasDoc: boolean;
@@ -1248,7 +1281,7 @@ function WritingPanel({
   userLastName: string;
   userInstitution: string;
   sourceType: SourceType | null;
-  sourceDocId: string | null;
+  sourceDocIds: string[];
   sourceUploadFileIds: string[];
   initialTopic?: string;
 }) {
@@ -1354,8 +1387,8 @@ function WritingPanel({
     // Restrict RAG retrieval to the exact document(s) the user selected in Step 1.
     // This prevents context leakage from other documents in the user's collection.
     const fileIds: string[] = [];
-    if (sourceType === 'documents' && sourceDocId) {
-      fileIds.push(sourceDocId);
+    if (sourceType === 'documents') {
+      fileIds.push(...sourceDocIds);
     } else if (sourceType === 'upload') {
       fileIds.push(...sourceUploadFileIds);
     }
@@ -1486,7 +1519,7 @@ function WritingPanel({
       setWaitingForFeedback(false);
     }
     finally { setLoading(false); setIsStreamingDraft(false); }
-  }, [topic, hasDoc, writingType, wtLabel, he, usePersonalStyle, includeSources, wizardInstructions, pageCount, selectedCourse, t, userFirstName, userLastName, sourceType, sourceDocId, sourceUploadFileIds]);
+  }, [topic, hasDoc, writingType, wtLabel, he, usePersonalStyle, includeSources, wizardInstructions, pageCount, selectedCourse, t, userFirstName, userLastName, sourceType, sourceDocIds, sourceUploadFileIds]);
 
   // Kick off the first generation immediately when WritingPanel mounts — the topic
   // was already chosen in wizard step 3, so there is no entry screen to show.
@@ -1985,10 +2018,13 @@ export default function AcademicWritingPage() {
   const [wizardIncludeSources, setWizardIncludeSources] = useState(false);
   const [wizardPageCount,      setWizardPageCount]      = useState(1);
   const [wizardSourceType,     setWizardSourceType]     = useState<SourceType | null>(null);
+  /* Global document list — shared with every other page via DocumentProvider */
+  const { docs, docsLoading, refetchDocs: fetchDocs } = useDocuments();
+
   const [sessions,          setSessions]           = useState<SessionInfo[]>([]);
   const [sessionsLoading,   setSessionsLoading]    = useState(true);
   const [selectedSessionId, setSelectedSessionId]  = useState<number | null>(null);
-  const [selectedDocId,     setSelectedDocId]      = useState<string | null>(null);
+  const [selectedDocIds,    setSelectedDocIds]     = useState<string[]>([]);
   const [writingType,       setWritingType]        = useState<WritingTypeId | null>(null);
   const [wizardTopic,       setWizardTopic]        = useState('');
   const [uploadedFiles,     setUploadedFiles]      = useState<UploadedFile[]>([]);
@@ -2058,28 +2094,19 @@ export default function AcademicWritingPage() {
       .finally(() => setSessionsLoading(false));
   }, [authUser]);
 
-  /* Fetch documents scoped to the active course.
-     Extracted into a useCallback so it can also be called after upload/delete
-     to keep the document library in sync without a full page refresh. */
-  const fetchDocs = useCallback(() => {
-    if (!authUser || !selectedCourse) return;
-    setDocsLoading(true);
-    const url = `${API}/documents?course_name=${encodeURIComponent(selectedCourse.name)}`;
-    authFetch(url)
-      .then(r => r.ok ? r.json() : { documents: [] })
-      .then((data: { documents: DocInfo[] }) => {
-        const arr = Array.isArray(data.documents) ? data.documents : [];
-        setDocs(arr);
-        // Use OR so restoring uploadedFiles from storage isn't clobbered
-        // by an empty docs response arriving after the load effect runs.
-        setHasDoc(prev => prev || arr.length > 0);
-      })
-      .catch(() => { setDocs([]); })
-      .finally(() => setDocsLoading(false));
-  }, [authUser, selectedCourse]);
+  /* Sync hasDoc from the global document list.
+     The fetch and course-change handling live in DocumentProvider — this page
+     only needs to know whether any docs exist so it can enable the chat UI. */
+  useEffect(() => {
+    if (docs.length > 0) setHasDoc(prev => prev || true);
+  }, [docs]);
 
-  /* Run on mount and whenever the active course changes */
-  useEffect(() => { fetchDocs(); }, [fetchDocs]);
+  /* Subscribe to the global documents-updated event so ANY upload (wizard,
+     My Documents, or a future entry point) refreshes the list here without
+     the caller needing to manually call fetchDocs. */
+  useEffect(() => {
+    return eventBus.on(EVT_DOCUMENTS_UPDATED, fetchDocs);
+  }, [fetchDocs]);
 
   /* Fetch fresh profile data so attribution headers never show stale localStorage values */
   useEffect(() => {
@@ -2131,8 +2158,15 @@ export default function AcademicWritingPage() {
       if (st === 'upload' || st === 'documents' || st === 'sessions') {
         setWizardSourceType(st as SourceType);
       }
-      const docId = localStorage.getItem(WIZARD_DOC_ID_STORAGE_KEY);
-      if (docId) setSelectedDocId(docId);
+      const docIdsRaw = localStorage.getItem(WIZARD_DOC_ID_STORAGE_KEY);
+      if (docIdsRaw) {
+        try {
+          const parsed = JSON.parse(docIdsRaw);
+          if (Array.isArray(parsed) && parsed.every(v => typeof v === 'string')) {
+            setSelectedDocIds(parsed);
+          }
+        } catch { /* ignore corrupt data */ }
+      }
     });
   }, []);
 
@@ -2142,11 +2176,11 @@ export default function AcademicWritingPage() {
     else localStorage.removeItem(WIZARD_SOURCE_STORAGE_KEY);
   }, [wizardSourceType]);
 
-  /* Persist selected document ID whenever it changes */
+  /* Persist selected document IDs (array) whenever they change */
   useEffect(() => {
-    if (selectedDocId) localStorage.setItem(WIZARD_DOC_ID_STORAGE_KEY, selectedDocId);
+    if (selectedDocIds.length > 0) localStorage.setItem(WIZARD_DOC_ID_STORAGE_KEY, JSON.stringify(selectedDocIds));
     else localStorage.removeItem(WIZARD_DOC_ID_STORAGE_KEY);
-  }, [selectedDocId]);
+  }, [selectedDocIds]);
 
   /* Purge session-RESTORED files whose server record no longer exists.
      Runs after every docs refresh so stale localStorage entries don't survive
@@ -2178,20 +2212,19 @@ export default function AcademicWritingPage() {
     if (!files.length || uploading) return;
     setUploading(true);
     try {
-      // Send all files in one multipart request — backend expects field name "files" (plural)
-      const fd = new FormData();
-      for (const file of files) fd.append('files', file);
-      if (selectedCourse) fd.append('course_name', selectedCourse.name);
-      fd.append('is_session_only', '1');
-      const res  = await authFetch(`${API}/upload-pdf`, { method: 'POST', body: fd });
-      const data = await res.json();
-      if (!res.ok) {
-        console.error('[Academic Writing] upload failed:', data.error ?? res.status);
-        setUploadError(data.error ?? (he ? 'שגיאה בהעלאת הקובץ' : 'Upload failed'));
+      // Shared pipeline: uploadAndIndexFile → /upload-pdf → FAISS + SQLite
+      const result = await uploadAndIndexFile(files, {
+        courseName: selectedCourse?.name,
+        // isSessionOnly removed: wizard uploads are now permanent documents
+        // that appear in My Documents and the global library like any other file.
+      });
+      if (!result.ok) {
+        console.error('[Academic Writing] upload failed:', result.error);
+        setUploadError(result.error ?? (he ? 'שגיאה בהעלאת הקובץ' : 'Upload failed'));
         return;
       }
       // Backend returns { files: [{source, file_id, chunks_stored, status?, ...}] }
-      const uploaded: UploadedFile[] = (data.files ?? []).map((f: { source: string; file_id: string }) => {
+      const uploaded: UploadedFile[] = result.files.map((f: { source: string; file_id: string }) => {
         const original = files.find(file => file.name === f.source) ?? files[0];
         return { name: f.source, size: original?.size ?? 0, fileId: f.file_id ?? '' };
       });
@@ -2295,7 +2328,7 @@ export default function AcademicWritingPage() {
             sessions={sessions} docs={docs}
             docsLoading={docsLoading} sessionsLoading={sessionsLoading}
             selectedSessionId={selectedSessionId} onSelectSession={setSelectedSessionId}
-            selectedDocId={selectedDocId} onSelectDoc={setSelectedDocId}
+            selectedDocIds={selectedDocIds} onSelectDoc={setSelectedDocIds}
             writingType={writingType} onSelectType={setWritingType}
             uploadedFiles={uploadedFiles} uploading={uploading} uploadError={uploadError} onDrop={handleDrop} onRemoveFile={handleRemoveFile}
             hasDoc={hasDoc} onSourceTypeChange={setWizardSourceType}
@@ -2323,7 +2356,7 @@ export default function AcademicWritingPage() {
             userLastName={userLastName}
             userInstitution={userInstitution}
             sourceType={wizardSourceType}
-            sourceDocId={selectedDocId}
+            sourceDocIds={selectedDocIds}
             sourceUploadFileIds={activeSourceFileIds}
             initialTopic={wizardTopic}
           />

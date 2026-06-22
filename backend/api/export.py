@@ -1208,9 +1208,10 @@ def mastery_generate_quiz(user_id: int):
             _owns = _gate.query(UserDocument).filter(
                 UserDocument.user_id == user_id,
                 UserDocument.file_id == file_id,
+                UserDocument.is_syllabus == False,   # noqa: E712 — syllabus describes course structure, not study material
             ).first()
             if not _owns:
-                return jsonify({"error": "Forbidden — document not found or not yours."}), 403
+                return jsonify({"error": "Forbidden — document not found, not yours, or is a syllabus file."}), 403
         finally:
             _gate.close()
     elif course_name:
@@ -1231,9 +1232,22 @@ def mastery_generate_quiz(user_id: int):
     sources: list[str] = []
 
     if doc_count > 0:
-        chunks, metadatas = hybrid_search(
+        _raw_chunks, _raw_metas = hybrid_search(
             user_id, topic, min(8, doc_count), file_id=file_id, course_name=course_name,
         )
+        # Strip syllabus chunks — they describe course structure (topics, schedule,
+        # grading), not study content, so questions derived from them would test
+        # meta-knowledge rather than actual subject mastery.
+        _filtered = [
+            (c, m) for c, m in zip(_raw_chunks, _raw_metas)
+            if "syllabus" not in (m.get("source") or "").lower()
+            and "מפתחי קורס" not in (m.get("source") or "").lower()
+            and not m.get("is_syllabus", False)
+        ]
+        chunks    = [c for c, _ in _filtered]
+        metadatas = [m for _, m in _filtered]
+        if len(_raw_chunks) != len(chunks):
+            print(f"[mastery/generate-quiz] Filtered out {len(_raw_chunks) - len(chunks)} syllabus chunk(s).")
         context_section = (
             "חומר לימוד רלוונטי מהמאגר:\n---\n"
             + "\n\n".join(chunks)
@@ -1531,6 +1545,65 @@ def mastery_skill_tree(user_id: int):
         return jsonify({"has_syllabus": True, "course_name": course_name, "topics": result}), 200
     finally:
         db.close()
+
+
+# ── Professor Evaluation Agent ────────────────────────────────────────────────
+
+@export_bp.route("/api/evaluation/run", methods=["POST"])
+@limiter.limit("5 per minute")
+@token_required
+def run_mastery_evaluation(user_id: int):
+    """PhD-level Pedagogical Evaluator agent.
+
+    Reads Source A (syllabus from CustomCourse.full_syllabus_text) and
+    Source C (SyllabusTopicMastery quiz records) for the requested course,
+    then calls the evaluation agent and returns a structured mastery report.
+    """
+    from agents.evaluation_agent import run_evaluation as _run_eval
+
+    req_data    = request.get_json(silent=True) or {}
+    course_name = strip_html((req_data.get("course_name") or "").strip())
+    if not course_name:
+        return jsonify({"error": "course_name is required"}), 400
+
+    db = SessionLocal()
+    try:
+        course = db.query(CustomCourse).filter(
+            CustomCourse.user_id     == user_id,
+            CustomCourse.course_name == course_name,
+        ).first()
+        if not course:
+            return jsonify({"error": "Course not found or not yours."}), 404
+
+        syllabus_text = course.full_syllabus_text or ""
+
+        mastery_rows = (
+            db.query(SyllabusTopicMastery)
+            .filter(
+                SyllabusTopicMastery.user_id     == user_id,
+                SyllabusTopicMastery.course_name == course_name,
+            )
+            .order_by(SyllabusTopicMastery.topic_order)
+            .all()
+        )
+        mastery_records = [
+            {
+                "topic":       r.topic,
+                "mastery_pct": r.mastery_pct,
+                "quiz_count":  r.quiz_count,
+            }
+            for r in mastery_rows
+        ]
+    finally:
+        db.close()
+
+    if not syllabus_text and not mastery_records:
+        return jsonify({"error": "No syllabus or quiz data found for this course."}), 400
+
+    result = _run_eval(client, syllabus_text, mastery_records, course_name)
+    if "error" in result:
+        return jsonify(result), 500
+    return jsonify(result), 200
 
 
 @export_bp.route("/export-pdf", methods=["POST"])

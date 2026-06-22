@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { Settings as IconSettings, Home, BookOpen, PenTool, Presentation, Brain, Target, Monitor, LogOut, Lock, Folder } from 'lucide-react';
+import { Settings as IconSettings, Home, BookOpen, PenTool, Presentation, Brain, Target, Monitor, LogOut, Lock, Folder, X as IconX } from 'lucide-react';
 import { useAuth }       from '../providers/auth';
 import { useLanguage }   from '../providers/language';
 import { useCourse }     from '../providers/course';
@@ -135,16 +135,29 @@ function MasteryQuizModal({
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center p-4"
       style={{ backgroundColor: 'rgba(42,59,34,0.52)', backdropFilter: 'blur(6px)' }}
+      onClick={onClose}
     >
       <div
-        className="w-full max-w-lg rounded-3xl flex flex-col overflow-hidden"
+        className="relative w-full max-w-lg rounded-3xl flex flex-col overflow-hidden"
         style={{
           background: 'rgba(255,255,255,0.98)',
           border: '1px solid rgba(157,192,139,0.3)',
           boxShadow: '0 32px 80px rgba(20,40,15,0.28)',
           maxHeight: '90vh',
         }}
+        onClick={e => e.stopPropagation()}
       >
+        {/* Close button — visible in all states */}
+        <button
+          onClick={onClose}
+          aria-label={he ? 'סגור' : 'Close'}
+          className="absolute top-4 end-4 z-10 p-1.5 rounded-full transition-all"
+          style={{ color: '#9aaf8a' }}
+          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#EEF5F0'; (e.currentTarget as HTMLButtonElement).style.color = '#2A3B22'; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = '#9aaf8a'; }}
+        >
+          <IconX className="w-4 h-4" />
+        </button>
 
         {/* ── Loading ────────────────────────────────────────────────────────── */}
         {state === 'loading' && (
@@ -185,7 +198,7 @@ function MasteryQuizModal({
         {state === 'active' && q && (
           <>
             {/* Header */}
-            <div className="px-6 py-4 flex items-center justify-between shrink-0"
+            <div className="px-6 pe-10 py-4 flex items-center justify-between shrink-0"
               style={{ borderBottom: '1px solid rgba(157,192,139,0.2)' }}>
               <div>
                 <p className="text-[11px] font-semibold text-[#7a9268] uppercase tracking-widest">
@@ -389,135 +402,119 @@ function GapCardUI({ card, he, onTest }: {
 
   return (
     <div
-      className="w-full flex flex-col gap-5 p-6"
+      className="w-full flex flex-col p-6"
       style={{
-        background: '#DCE8D6',
-        borderRadius: '20px',
-        borderTop: '1px solid #BCCAB5',
-        borderBottom: '1px solid #BCCAB5',
-        borderInlineEnd: '1px solid #BCCAB5',
-        borderInlineStart: `4px solid ${color}`,
-        boxShadow: '0 6px 24px rgba(20,42,16,0.14), 0 1px 4px rgba(20,42,16,0.06)',
-        transition: 'transform 0.18s ease, box-shadow 0.18s ease, border-inline-start-color 0.7s ease',
+        background: 'rgba(255,255,255,0.97)',
+        borderRadius: '1.25rem',
+        border: '1px solid rgba(209,230,217,0.7)',
+        boxShadow: '0 4px 20px rgba(60,90,40,0.07), 0 1px 4px rgba(60,90,40,0.04)',
+        transition: 'transform 0.18s ease, box-shadow 0.18s ease',
       }}
       onMouseEnter={e => {
-        e.currentTarget.style.boxShadow = '0 12px 36px rgba(20,42,16,0.22)';
+        e.currentTarget.style.boxShadow = '0 8px 32px rgba(60,90,40,0.13), 0 2px 8px rgba(60,90,40,0.06)';
         e.currentTarget.style.transform = 'translateY(-2px)';
       }}
       onMouseLeave={e => {
-        e.currentTarget.style.boxShadow = '0 6px 24px rgba(20,42,16,0.14), 0 1px 4px rgba(20,42,16,0.06)';
+        e.currentTarget.style.boxShadow = '0 4px 20px rgba(60,90,40,0.07), 0 1px 4px rgba(60,90,40,0.04)';
         e.currentTarget.style.transform = 'translateY(0)';
       }}
     >
-      {/* Header */}
+      {/* ── Header: icon + title on start side, status badge on end ── */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
           <div
-            className="shrink-0 w-11 h-11 rounded-2xl flex items-center justify-center text-xl leading-none"
-            style={{ background: `${color}12`, border: `1px solid ${color}22` }}
+            className="shrink-0 w-10 h-10 rounded-xl flex items-center justify-center text-lg leading-none"
+            style={{ background: 'rgba(81,123,62,0.07)' }}
           >
             {card.icon}
           </div>
-          <div className="min-w-0 flex flex-col gap-1">
-            <h3 className="text-base font-bold text-[#1a2e14] leading-snug">{card.topic}</h3>
+          <div className="min-w-0">
+            <h3 className="text-base font-bold leading-snug truncate" style={{ color: '#1C3329' }}>
+              {card.topic}
+            </h3>
             <span
-              className="inline-flex items-center gap-1 self-start text-[10px] font-bold px-2.5 py-0.5 rounded-full"
-              style={{ background: 'rgba(81,123,62,0.10)', color: '#2A3B22', border: '1px solid rgba(81,123,62,0.15)' }}
+              className="inline-flex items-center gap-1 mt-1 text-[10px] font-medium px-2.5 py-0.5 rounded-full"
+              style={{ background: 'rgba(157,192,139,0.15)', color: '#527061' }}
             >
-              📚 {he ? 'חומר לימוד' : 'Study material'}
+              {he ? 'חומר לימוד' : 'Study material'}
             </span>
           </div>
         </div>
+        {/* Status badge */}
         <span
-          className="shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full"
-          style={{ background: `${color}14`, color, border: `1px solid ${color}28`, boxShadow: `0 2px 10px ${color}1A` }}
+          className="shrink-0 text-[11px] font-semibold px-3 py-1 rounded-full"
+          style={{ background: `${color}14`, color }}
         >
           {label}
         </span>
       </div>
 
-      {/* Gradient mastery bar */}
-      <div className="flex flex-col gap-1.5">
-        <div className="flex justify-between items-center text-xs">
-          <span className="font-medium text-[#7a9268]">{he ? 'שליטה בנושא' : 'Topic mastery'}</span>
-          <span className="font-bold tabular-nums text-sm" style={{ color }}>
+      {/* ── Progress bar ── */}
+      <div className="mt-5 flex flex-col gap-1.5">
+        <div className="flex justify-between items-center">
+          <span className="text-xs font-medium" style={{ color: '#7a9268' }}>
+            {he ? 'שליטה בנושא' : 'Topic mastery'}
+          </span>
+          <span className="text-xs font-bold tabular-nums" style={{ color }}>
             {card.mastery !== null ? `${card.mastery}%` : '—'}
           </span>
         </div>
-        <div
-          className="h-3 rounded-full overflow-hidden relative"
-          style={{ background: 'rgba(81,123,62,0.07)', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.05)' }}
-        >
+        <div className="h-2 rounded-full overflow-hidden" style={{ background: 'rgba(157,192,139,0.2)' }}>
           {card.mastery !== null && card.mastery > 0 && (
-            <>
-              <div style={{
-                position: 'absolute', inset: 0,
+            <div
+              style={{
+                height: '100%',
                 width: `${card.mastery}%`,
-                background: 'linear-gradient(90deg,#ef4444,#f97316 32%,#eab308 58%,#84cc16 80%,#517B3E)',
-                filter: 'blur(6px)',
-                opacity: 0.38,
-                transition: 'width 0.85s cubic-bezier(0.4,0,0.2,1)',
-              }} />
-              <div
-                className="animate-mastery-pulse"
-                style={{
-                  position: 'absolute', inset: 0,
-                  width: `${card.mastery}%`,
-                  background: 'linear-gradient(90deg,#ef4444,#f97316 32%,#eab308 58%,#84cc16 80%,#517B3E)',
-                  borderRadius: '9999px',
-                  transition: 'width 0.85s cubic-bezier(0.4,0,0.2,1)',
-                }}
-              />
-            </>
+                background: color,
+                borderRadius: '9999px',
+                transition: 'width 0.75s cubic-bezier(0.4,0,0.2,1)',
+              }}
+            />
           )}
         </div>
-        {card.quiz_count > 0 ? (
-          <p className="text-[11px] font-medium" style={{ color: '#9aaf8a' }}>
-            {he
-              ? `✓ ${card.quiz_count} חידון${card.quiz_count !== 1 ? 'ים' : ''} הושלמ${card.quiz_count !== 1 ? 'ו' : ''}`
-              : `✓ ${card.quiz_count} quiz${card.quiz_count !== 1 ? 'zes' : ''} completed`}
-          </p>
-        ) : (
-          <p className="text-[11px] font-medium" style={{ color: '#b0c4a5' }}>
-            {he ? '◦ עדיין לא נבדקת — לחץ להתחלה' : '◦ Never tested — press to begin'}
-          </p>
-        )}
       </div>
 
-      {/* Gamified CTA */}
-      <div className="flex flex-col items-start gap-1.5 mt-1">
+      {/* ── Footer: subtext on start, button on end ── */}
+      <div
+        className="flex items-end justify-between gap-3 mt-5 pt-4"
+        style={{ borderTop: '1px solid rgba(209,230,217,0.5)' }}
+      >
+        {/* Subtext — start side (right in RTL) */}
+        <p className="text-xs" style={{ color: '#9aaf8a' }}>
+          {card.quiz_count > 0
+            ? (he
+                ? `✓ ${card.quiz_count} חידון${card.quiz_count !== 1 ? 'ים' : ''} הושלמ${card.quiz_count !== 1 ? 'ו' : ''}`
+                : `✓ ${card.quiz_count} quiz${card.quiz_count !== 1 ? 'zes' : ''} completed`)
+            : (he ? 'עדיין לא נבדקת' : 'Never tested')}
+        </p>
+
+        {/* Button — end side (left in RTL) */}
         <button
           onClick={() => onTest(card.topic, card.id)}
-          className="animate-jewel-glow flex items-center gap-2.5 px-5 py-3 rounded-2xl text-sm font-bold text-white active:scale-95 transition-transform duration-150"
+          className="shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all active:scale-[0.97]"
           style={{
-            background: 'linear-gradient(135deg, #517B3E 0%, #2A3B22 100%)',
-            boxShadow: '0 4px 20px rgba(81,123,62,0.38)',
+            background: 'linear-gradient(135deg,#517B3E,#2A3B22)',
+            boxShadow: '0 3px 12px rgba(81,123,62,0.28)',
             transition: 'box-shadow 0.18s ease, transform 0.12s ease',
           }}
           onMouseEnter={e => {
-            e.currentTarget.style.boxShadow = '0 8px 32px rgba(81,123,62,0.58)';
+            e.currentTarget.style.boxShadow = '0 6px 20px rgba(81,123,62,0.44)';
             e.currentTarget.style.transform = 'scale(1.03)';
           }}
           onMouseLeave={e => {
-            e.currentTarget.style.boxShadow = '0 4px 20px rgba(81,123,62,0.38)';
+            e.currentTarget.style.boxShadow = '0 3px 12px rgba(81,123,62,0.28)';
             e.currentTarget.style.transform = 'scale(1)';
           }}
-          onMouseDown={e => { e.currentTarget.style.transform = 'scale(0.97)'; }}
-          onMouseUp={e => { e.currentTarget.style.transform = 'scale(1.03)'; }}
         >
-          <span className="text-base leading-none">🤖</span>
           {he ? 'בדוק אותי בנושא' : 'Quiz me on this'}
         </button>
-        <p className="text-[11px] ps-1" style={{ color: '#9aaf8a' }}>
-          {he ? '🤖 הבינה המלאה-100.' : '🤖 AI-powered mastery to 100.'}
-        </p>
       </div>
     </div>
   );
 }
 
 /* ── Skill Tree (syllabus-derived progress path) ─────────────────────────────── */
-const UNLOCK_THRESHOLD = 50;
+const UNLOCK_THRESHOLD = 80;
 
 interface SkillTreeTopic {
   topic_id: number;
@@ -866,6 +863,12 @@ export default function MasteryPage() {
   // ── Topics state (dynamic, from backend) ──────────────────────────────────
   const [topics,        setTopics]        = useState<GapCard[]>([]);
   const [topicsLoading, setTopicsLoading] = useState(true);
+  // Overall mastery: mean of all quizzed topics; 0 when none have been attempted.
+  const overallMastery = useMemo(() => {
+    const quizzed = topics.filter(t => t.mastery !== null);
+    if (quizzed.length === 0) return 0;
+    return Math.round(quizzed.reduce((sum, t) => sum + (t.mastery ?? 0), 0) / quizzed.length);
+  }, [topics]);
 
   // ── Skill Tree state (syllabus-derived, from backend) ──────────────────────
   const [skillTree,        setSkillTree]        = useState<SkillTreeTopic[]>([]);
@@ -950,13 +953,20 @@ export default function MasteryPage() {
     request
       .then(r => (r && r.ok) ? r.json() : [])
       .then((data: { file_id: string; topic: string; icon: string; mastery_pct: number | null; quiz_count: number }[]) => {
-        setTopics((data ?? []).map(d => ({
-          id:         d.file_id,
-          icon:       d.icon,
-          topic:      d.topic,
-          mastery:    d.mastery_pct !== null ? Math.round(d.mastery_pct) : null,
-          quiz_count: d.quiz_count,
-        })));
+        setTopics(
+          (data ?? [])
+            .filter(d => {
+              const name = (d.topic || '').toLowerCase();
+              return !name.includes('syllabus') && !name.includes('מפתחי קורס');
+            })
+            .map(d => ({
+              id:         d.file_id,
+              icon:       d.icon,
+              topic:      d.topic,
+              mastery:    d.mastery_pct !== null ? Math.round(d.mastery_pct) : null,
+              quiz_count: d.quiz_count,
+            }))
+        );
         setTopicsLoading(false);
       })
       .catch(() => { setTopicsLoading(false); });
@@ -1333,29 +1343,106 @@ export default function MasteryPage() {
         <div className="w-full max-w-2xl mx-auto flex flex-col gap-6">
 
           {/* Hero */}
+          {/* ── Course header — milky glass card ── */}
           <div
-            className="rounded-3xl px-8 py-10 text-center flex flex-col items-center gap-4"
+            className="relative rounded-3xl px-8 py-10 flex items-center justify-between gap-6 overflow-hidden"
             style={{
-              background: '#DCE8D6',
-              border: '1px solid #BCCAB5',
-              boxShadow: '0 6px 24px rgba(20,42,16,0.14), 0 1px 4px rgba(20,42,16,0.06)',
+              background: 'rgba(255,255,255,0.55)',
+              backdropFilter: 'blur(12px)',
+              WebkitBackdropFilter: 'blur(12px)',
+              border: '1px solid rgba(255,255,255,0.60)',
+              boxShadow: '0 2px 16px rgba(20,42,16,0.07)',
             }}
           >
-            {/* Icon with glow ring */}
-            <div className="relative flex items-center justify-center w-20 h-20">
-              <div className="absolute inset-0 rounded-full" style={{ background: 'radial-gradient(circle, rgba(81,123,62,0.18) 0%, transparent 70%)' }} />
-              <Target className="w-10 h-10 relative" style={{ color: '#517B3E' }} />
-            </div>
-            <div className="space-y-2">
-              <h2 className="text-2xl font-extrabold text-[#1a2e14]">
-                {he ? 'שליטה בחומר' : 'Mastery'}
-              </h2>
-              <p className="text-[#4a5e3a] text-sm leading-relaxed max-w-md">
-                {he
-                  ? 'הבינה המלאכותית סרקה את הביצועים שלך ומיפתה את נקודות התורפה. הנה הנקודות המדויקות שיש לחדד כדי להבטיח את ה-100.'
-                  : 'The AI scanned your performance and mapped your weak points. Here are the exact topics to refine to ensure your 100.'}
+            {/* Ambient side-light — soft white bloom on the start edge */}
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-y-0 start-0 w-40"
+              style={{
+                background: 'radial-gradient(ellipse 100% 100% at 0% 50%, rgba(255,255,255,0.10) 0%, transparent 70%)',
+              }}
+            />
+
+            {/* Start side: course name + subtitle */}
+            <div className="relative flex-1 min-w-0">
+              <p className="text-[10px] font-bold uppercase tracking-[0.18em] mb-3" style={{ color: 'rgba(255,255,255,0.60)' }}>
+                {he ? 'קורס פעיל' : 'Active course'}
               </p>
+              <h2
+                className="text-4xl font-extrabold leading-tight tracking-tight"
+                style={{
+                  color: '#1C3329',
+                  textShadow: '0 1px 8px rgba(255,255,255,0.25)',
+                }}
+              >
+                {selectedCourse.icon}&nbsp;{selectedCourse.name}
+              </h2>
+              <p className="text-sm mt-3 leading-relaxed max-w-xs" style={{ color: 'rgba(28,51,41,0.70)' }}>
+                {he
+                  ? 'התקדמות השליטה שלך בחומר, מבוססת על ניתוח AI של ביצועיך.'
+                  : 'Your mastery progress, based on AI analysis of your performance.'}
+              </p>
+              {topics.length > 0 && (
+                <p className="text-xs mt-3 font-medium" style={{ color: 'rgba(28,51,41,0.50)' }}>
+                  {he
+                    ? `${topics.filter(t => t.mastery !== null).length} מתוך ${topics.length} נושאים נבחנו`
+                    : `${topics.filter(t => t.mastery !== null).length} of ${topics.length} topics tested`}
+                </p>
+              )}
             </div>
+
+            {/* End side: high-end circular mastery gauge */}
+            {(() => {
+              const r = 46;
+              const circ = 2 * Math.PI * r;
+              const offset = circ * (1 - overallMastery / 100);
+              const gaugeColor = overallMastery >= 80 ? '#517B3E' : overallMastery >= 60 ? '#f97316' : overallMastery > 0 ? '#ef4444' : '#9DC08B';
+              const glowColor  = overallMastery >= 80 ? 'rgba(81,123,62,0.55)' : overallMastery >= 60 ? 'rgba(249,115,22,0.45)' : overallMastery > 0 ? 'rgba(239,68,68,0.40)' : 'rgba(157,192,139,0.30)';
+              return (
+                <div
+                  className="relative shrink-0 flex items-center justify-center"
+                  style={{
+                    width: 132, height: 132,
+                    /* Jewel outer glow */
+                    filter: `drop-shadow(0 0 18px ${glowColor}) drop-shadow(0 0 6px ${glowColor})`,
+                  }}
+                >
+                  <svg width={132} height={132} style={{ transform: 'rotate(-90deg)' }}>
+                    <defs>
+                      <linearGradient id="masteryGaugeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor={gaugeColor} stopOpacity="0.55" />
+                        <stop offset="50%" stopColor={gaugeColor} stopOpacity="0.9" />
+                        <stop offset="100%" stopColor={gaugeColor} />
+                      </linearGradient>
+                    </defs>
+                    {/* Track — very subtle */}
+                    <circle cx={66} cy={66} r={r} fill="none"
+                      stroke="rgba(255,255,255,0.15)" strokeWidth={9} />
+                    {/* Progress arc */}
+                    <circle cx={66} cy={66} r={r} fill="none"
+                      stroke="url(#masteryGaugeGrad)" strokeWidth={9}
+                      strokeLinecap="round"
+                      strokeDasharray={circ}
+                      strokeDashoffset={offset}
+                      style={{ transition: 'stroke-dashoffset 1s cubic-bezier(0.4,0,0.2,1)' }}
+                    />
+                  </svg>
+                  {/* Center content */}
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <span
+                      className="text-3xl font-extrabold leading-none tabular-nums"
+                      style={{ color: '#1C3329', textShadow: '0 1px 6px rgba(255,255,255,0.4)' }}
+                    >
+                      {overallMastery}
+                    </span>
+                    <span className="text-[11px] font-bold mt-0.5" style={{ color: 'rgba(28,51,41,0.60)' }}>%</span>
+                    <span className="text-[8px] font-semibold uppercase tracking-widest mt-1.5" style={{ color: 'rgba(28,51,41,0.45)' }}>
+                      {he ? 'שליטה' : 'mastery'}
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           {/* Skill Tree — syllabus-derived progress path (shown when the active course has a syllabus) */}
@@ -1474,53 +1561,15 @@ export default function MasteryPage() {
                 </span>
               </div>
 
-              {/* Topic cards */}
+              {/* Topic cards — syllabus files filtered out at both state-set and render */}
               <div className="flex flex-col gap-5">
-                {topics.map(card => (
-                  <GapCardUI key={card.id} card={card} he={he} onTest={startQuiz} />
-                ))}
+                {topics
+                  .filter(card => !card.topic.toLowerCase().includes('syllabus'))
+                  .map(card => (
+                    <GapCardUI key={card.id} card={card} he={he} onTest={startQuiz} />
+                  ))}
               </div>
 
-              {/* CTA banner */}
-              <div
-                className="rounded-2xl px-6 py-5 flex items-center justify-between gap-4"
-                style={{
-                  background: '#DCE8D6',
-                  border: '1px solid #BCCAB5',
-                  boxShadow: '0 4px 20px rgba(20,42,16,0.12)',
-                }}
-              >
-                <div>
-                  <p className="text-sm font-semibold text-[#1a2e14]">
-                    {he ? 'רוצה לגלות פערים נוספים?' : 'Want to uncover more gaps?'}
-                  </p>
-                  <p className="text-xs text-[#7a9268] mt-0.5">
-                    {he
-                      ? 'הפעל את סימולטור המרצה לחשיפת נושאים נוספים'
-                      : 'Run the professor simulator to surface additional topics'}
-                  </p>
-                </div>
-                <button
-                  onClick={() => router.push('/workspace/professor-simulator')}
-                  className="shrink-0 flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm font-bold text-white"
-                  style={{
-                    background: 'linear-gradient(135deg, #517B3E, #2A3B22)',
-                    boxShadow: '0 4px 16px rgba(81,123,62,0.35)',
-                    transition: 'box-shadow 0.18s ease, transform 0.12s ease',
-                  }}
-                  onMouseEnter={e => {
-                    e.currentTarget.style.boxShadow = '0 6px 22px rgba(81,123,62,0.52)';
-                    e.currentTarget.style.transform = 'scale(1.03)';
-                  }}
-                  onMouseLeave={e => {
-                    e.currentTarget.style.boxShadow = '0 4px 16px rgba(81,123,62,0.35)';
-                    e.currentTarget.style.transform = 'scale(1)';
-                  }}
-                >
-                  <span>🧠</span>
-                  {he ? 'לסימולטור' : 'Go to Simulator'}
-                </button>
-              </div>
             </>
           )}
         </div>

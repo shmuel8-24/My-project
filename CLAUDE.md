@@ -32,6 +32,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 │   │   ├── code_runner.py  # DISABLED stub — exec() removed for security; always returns error string
 │   │   ├── slides.py       # Slide-deck generation: generate_slide_deck (RAG) + generate_deck_via_agent (agent)
 │   │   └── startup.py      # Background backfill threads + orphan session migration
+│   ├── agents/
+│   │   └── evaluation_agent.py  # PhD Pedagogical Evaluator — run_evaluation(client, syllabus_text, mastery_records, course_name) → structured JSON mastery report (gpt-4o, json_object mode)
 │   ├── data/               # gitignored persistent storage
 │   │   ├── faiss/          # FAISS vector store — one subdirectory per user (user_{id}/)
 │   │   ├── uploads/        # Binary file copies — one subdirectory per user (user_{id}/); keyed {file_id}{ext}
@@ -59,9 +61,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     │   │   └── ui/Skeleton.tsx         # Loading skeleton
     │   ├── context/
     │   │   └── CourseContext.tsx        # Re-export shim for providers/course.tsx
+    │   ├── lib/
+    │   │   ├── uploadFile.ts            # uploadAndIndexFile(files, {courseName}) → UploadFileResult; emits EVT_DOCUMENTS_UPDATED on success
+    │   │   └── eventBus.ts             # Singleton event bus; EVT_DOCUMENTS_UPDATED constant; eventBus.on() returns unsubscribe fn (use as useEffect cleanup)
     │   └── app/
     │       ├── page.tsx                        # Landing page + auth modal
-    │       ├── layout.tsx                      # Root layout: LanguageProvider → CourseProvider → AuthProvider
+    │       ├── layout.tsx                      # Root layout: LanguageProvider → CourseProvider → AuthProvider → DocumentProvider → PresentationProvider
     │       ├── globals.css                     # Tailwind v4 entry + keyframes + matcha design tokens
     │       ├── error.tsx                       # Route-segment error boundary (matcha-themed, RTL)
     │       ├── global-error.tsx                # Root-layout error boundary (owns <html>/<body>)
@@ -94,7 +99,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     │       └── providers/
     │           ├── auth.tsx
     │           ├── language.tsx
-    │           └── course.tsx
+    │           ├── course.tsx
+    │           ├── documents.tsx   # Global doc list: useDocuments() → {docs, docsLoading, refetchDocs}; fetches GET /documents?course_name=... for active course; must be inside AuthProvider + CourseProvider
+    │           └── presentation.tsx
 ```
 
 ## Setup
@@ -269,6 +276,8 @@ Subsequent frontend chunk calls (index 1, 2, …) after Path B hit the single-ch
 
 Both entry points share `_sanitize()` and the 10-slide McKinsey/BCG-style system prompt convention, but `_validate_slides`/`VALID_SLIDE_LAYOUTS` (RAG shape) and `_validate_deck_slides`/`DECK_LAYOUTS` (agent shape) are separate validators — the two slide shapes are intentionally different and rendered by different frontend components (`SlideLayouts.tsx` vs `SlideViewer.tsx`). Don't conflate them.
 
+**`presentation-generator/page.tsx` layout**: step 1/2 use `max-w-3xl` container; step 3 (preview) uses `max-w-5xl` — the wider container is required so `SlideViewer` (designed for up to 1280px canvas) is not squished. Do not change step 3 back to `max-w-lg` or `max-w-3xl`. The slide counter in `SlideViewer` uses `dir="ltr"` and `מתוך` / `of` instead of `/` to avoid Unicode bidi algorithm reversing the numbers in RTL context.
+
 **`SlideViewer.tsx` rendering — "Matcha Executive Light" deck theme:**
 `SlideViewer.tsx` renders each slide rectangle in a bright, high-contrast, consulting-style theme (`EXEC` palette: `#F8FAF5` background, `#8BAF84` accent for borders/icons/decorative fills, `#517B3E` accentDark for high-contrast accent text like metric values and timeline dates, `#1C3329` primary text, `#527061` secondary/cream text) — close to, but distinct from, the rest of the app's light Creamy Matcha UI. It loads its own fonts via `next/font/google` (`Urbanist` for headings, `Assistant` for Hebrew/Latin body) — independent of the global `Heebo` font set in `layout.tsx`. Since the backend always generates slide text in Hebrew, the slide rect and print pages are hardcoded `dir="rtl" lang="he"` regardless of the UI `lang` prop (only the surrounding controls — nav buttons, export buttons — respect `lang`). `TILE_ICONS` (lucide-react) maps `tileGrid` `iconName` strings to icon components and **must stay in sync with `TILE_ICON_NAMES` in `backend/services/slides.py`**. `ArchitectureLayout` lays nodes out per-layer in a CSS grid and draws `connections` as SVG lines between computed node-center percentages; its diagram area is forced `dir="ltr"` because the connector-line math assumes left-to-right x positions. The `barChart` layout renders via `ChartSlide.tsx` (recharts horizontal bar + donut, RTL-mirrored axes). Export controls offer both `downloadPdf` (`window.print()`, styled via `globals.css` `@media print`) and `downloadPptx` (`exportToPPTX` from `pptxExport.ts`, which dynamic-imports `pptxgenjs` so it never loads during SSR).
 
@@ -279,9 +288,11 @@ Both entry points share `_sanitize()` and the 10-slide McKinsey/BCG-style system
 - `POST /api/mastery/generate-quiz` — accepts `topic` + either `file_id` (document mode) or `course_name` (syllabus mode — validates `CustomCourse` ownership, 403 if not found). Calls `gpt-4o`, retrieving via `hybrid_search(..., file_id=file_id, course_name=course_name)`. Returns 3 `{question, options[4], correct_answer}` objects.
 - `POST /api/mastery/submit-results` — weighted update formula: `new = existing * 0.4 + (score/total*100) * 0.6`. Branches on `course_name` (updates/creates the matching `SyllabusTopicMastery` row, 404 if topic not found, 403 if course not owned) vs. `file_id` (original `TopicMastery` logic, seeded from neutral 50% on first quiz).
 - `GET /api/mastery/scores` — raw `TopicMastery` records for the user.
-- `GET /api/mastery/skill-tree?course_name=...` — powers the Mastery page's syllabus-derived "Skill Tree". Validates `CustomCourse` ownership (404 if not found/no syllabus). On first call, lazily extracts topics from `full_syllabus_text` via `services/mastery.py::extract_syllabus_topics()` (gpt-4o-mini, JSON mode) and persists them as ordered `SyllabusTopicMastery` rows; subsequent calls reuse the persisted rows. Computes `is_unlocked` sequentially — topic 0 is always unlocked, topic N unlocks once topic N-1's `mastery_pct >= UNLOCK_THRESHOLD` (50.0). Returns `{has_syllabus, course_name, topics: [{topic_id, topic, topic_order, mastery_pct, quiz_count, is_unlocked}]}`.
+- `GET /api/mastery/skill-tree?course_name=...` — powers the Mastery page's syllabus-derived "Skill Tree". Validates `CustomCourse` ownership (404 if not found/no syllabus). On first call, lazily extracts topics from `full_syllabus_text` via `services/mastery.py::extract_syllabus_topics()` (gpt-4o-mini, JSON mode) and persists them as ordered `SyllabusTopicMastery` rows; subsequent calls reuse the persisted rows. Computes `is_unlocked` sequentially — topic 0 is always unlocked, topic N unlocks once topic N-1's `mastery_pct >= UNLOCK_THRESHOLD` (**80.0** — defined in `services/mastery.py`; same constant imported by `export.py` and mirrored as `const UNLOCK_THRESHOLD = 80` in `mastery/page.tsx`). Returns `{has_syllabus, course_name, topics: [{topic_id, topic, topic_order, mastery_pct, quiz_count, is_unlocked}]}`.
 
-**Mastery page Skill Tree UI (`mastery/page.tsx`):** When `selectedCourse` has a syllabus, a vertical "Skill Tree" / progress-path section renders above the existing per-document topic cards. Each `SkillTreeCard` shows the topic name, a circular/horizontal mastery progress indicator, and quiz-count, styled with the "Matcha Executive Light" palette; locked topics (`is_unlocked === false`, below `UNLOCK_THRESHOLD = 50`) render dimmed with a `Lock` icon and are not clickable. Starting a quiz from a `SkillTreeCard` calls `startQuiz(topic, undefined, courseName)` / `submitResults(..., courseName)` — the same `QuizModal` and submit flow as the per-document cards, just routed through the `course_name` branch of `generate-quiz`/`submit-results` instead of `file_id`.
+**Mastery page header:** A premium white card (`rgba(255,255,255,0.97)`) with `flex justify-between` layout — course icon+name on the start side, a 120×120 SVG circular mastery gauge on the end side. `overallMastery` is a `useMemo` (mean of all non-null `topics[].mastery` values). Gauge arc uses `stroke-dashoffset` driven by `overallMastery`; color adapts (green ≥80%, orange 60–79%, red <60%). Syllabus files (`filename.includes('syllabus')`) are filtered from the topics list both at `setTopics` time and at render. The quiz modal (`MasteryQuizModal`) has a backdrop-click-to-close and an absolute X button (`top-4 end-4`); the active-state header adds `pe-10` padding to clear the X.
+
+**Mastery page Skill Tree UI (`mastery/page.tsx`):** When `selectedCourse` has a syllabus, a vertical "Skill Tree" / progress-path section renders above the existing per-document topic cards. Each `SkillTreeCard` shows the topic name, a circular/horizontal mastery progress indicator, and quiz-count, styled with the "Matcha Executive Light" palette; locked topics (`is_unlocked === false`, below `UNLOCK_THRESHOLD = 80`) render dimmed with a `Lock` icon and are not clickable. Starting a quiz from a `SkillTreeCard` calls `startQuiz(topic, undefined, courseName)` / `submitResults(..., courseName)` — the same `QuizModal` and submit flow as the per-document cards, just routed through the `course_name` branch of `generate-quiz`/`submit-results` instead of `file_id`.
 
 **Professor Brain Simulator (`api/professor.py`):**
 `POST /api/professor-simulator/ask` — uses `gpt-4o` (not `gpt-4o-mini`). Rate limited to 2 simulations/month for basic plan. File ownership validated before RAG retrieval. Accepts an optional `mode` field, `"simulate"` (default) or `"predict_exam"`, and an optional `course_name` (scopes the past-exam lookup below to one course):
@@ -294,7 +305,11 @@ Both entry points share `_sanitize()` and the 10-slide McKinsey/BCG-style system
 
 In `professor-simulator/page.tsx`, the "מבחן לדוגמא" single-PDF dropzone (`sampleExam` state) doubles as the "past exam" source for `predict_exam` mode: the "חזה את המבחן שלי" button calls `send(text, 'predict_exam')`, which sends `file_ids: [sampleExam.file_id]` and `mode: 'predict_exam'`. The sample-exam upload is sent with `is_past_exam: '1'`, and every chat request additionally sends `course_name: selectedCourse?.name ?? ''`.
 
-**Professor Simulator layout** (`professor-simulator/page.tsx`): single-column dashboard (`max-w-5xl mx-auto`), NOT a 2-column layout. Three sections: (1) white `rounded-2xl` Lecturer Settings card (`grid-cols-2`: exam-writer toggle left, style chips right); (2) 2-column Data Sources grid (sample exam dropzone left, study materials dropzone right); (3) Action Area when `messages.length === 0 && !sending` (centered Brain icon + two action buttons in `dir="ltr"` flex), or Chat interface (`rounded-2xl` card, `minHeight: 480px, maxHeight: 65vh`) when messages exist.
+**Professor Simulator layout** (`professor-simulator/page.tsx`): single-column dashboard (`max-w-5xl mx-auto`), NOT a 2-column layout. Three sections: (1) milky-glass Lecturer Settings card (`grid-cols-2`: exam-writer toggle left, style chips right); (2) 2-column Data Sources grid; (3) Action Area or Chat interface; (4) Evaluation Dashboard ("הפעל הערכת שליטה" — calls `/api/evaluation/run`). All major cards share the `card` constant (`rgba(255,255,255,0.55)` + `blur(12px)` + white border).
+
+**Data Sources — Sample Exam section** (`examTab: 'upload' | 'library'`): tab toggle between "העלאה חדשה" (drag-and-drop, uploads with `is_past_exam='1'`) and "ספריית מבחנים" (fetched from `GET /api/professor-simulator/past-exams`; clicking a card sets `sampleExam` state without re-uploading). `fetchPastExams` fires on mount, on course change, and after every successful upload.
+
+**Data Sources — Study Materials section** (`studyTab: 'upload' | 'existing'`): tab toggle between "העלאה חדשה" (existing drag-and-drop) and "מסמכים קיימים" (multi-select from `useDocuments()` course docs, stored in `selectedExistingIds: string[]`). Both `files.map(f => f.file_id)` and `selectedExistingIds` are merged into `fileIds` in the `send()` payload for simulate mode.
 
 **Admin / CFO features (`api/admin.py`):**
 - Agentic CFO (`/api/admin/ai-accountant/chat`) uses native OpenAI function calling with four financial tools; returns `chartData` for inline chart rendering.
@@ -320,7 +335,7 @@ In `professor-simulator/page.tsx`, the "מבחן לדוגמא" single-PDF dropzo
 | `/api/stats` | GET | user | Aggregate usage stats |
 | `/api/transcribe` | POST | user | Audio → text (Whisper) |
 | `/upload-pdf` | POST | user | Upload PDF / PPTX / images |
-| `/documents` | GET | user | List user's indexed files |
+| `/documents` | GET | user | List user's indexed files (filters `is_syllabus=False`; `is_session_only` filter **removed** — wizard uploads now appear alongside My Documents uploads) |
 | `/documents/<file_id>` | DELETE | user | Delete a document |
 | `/ask` | POST | user | RAG Q&A, SSE stream |
 | `/sessions` | GET | user | List chat sessions |
@@ -334,6 +349,7 @@ In `professor-simulator/page.tsx`, the "מבחן לדוגמא" single-PDF dropzo
 | `/api/mastery/submit-results` | POST | user | Save quiz score; weighted mastery update |
 | `/api/mastery/scores` | GET | user | Raw mastery records |
 | `/api/mastery/skill-tree` | GET | user | Syllabus-derived Skill Tree (topics + per-topic mastery + unlock state) for a course |
+| `/api/evaluation/run` | POST | user | Professor Evaluation Agent — accepts `{course_name}`, reads `CustomCourse.full_syllabus_text` + `SyllabusTopicMastery`, calls `agents/evaluation_agent.run_evaluation()` (gpt-4o), returns `{overall_mastery, coverage_pct, topics[], strengths[], gaps[], recommendations[]}` |
 | `/api/writing/suggest-titles` | POST | user | AI-suggested paper titles: empty `topic` triggers broad FAISS scan (top-10 chunks from course materials); non-empty `topic` grounds suggestions in topic + RAG. Both modes require `course_id`. |
 | `/api/courses/parse-syllabus` | POST | user | Parse PDF → LLM metadata + full text (multipart) |
 | `/api/courses` | POST | user | Save CustomCourse + index syllabus to FAISS |
@@ -351,6 +367,7 @@ In `professor-simulator/page.tsx`, the "מבחן לדוגמא" single-PDF dropzo
 | `/api/admin/notifications/<id>/read` | POST | admin | Mark notification read |
 | `/api/admin/notifications/read-all` | POST | admin | Mark all notifications read |
 | `/api/professor-simulator/ask` | POST | user | Professor Brain Simulator (gpt-4o, RAG-grounded) |
+| `/api/professor-simulator/past-exams` | GET | user | List `UserDocument` rows with `is_past_exam=True` for the user; optional `?course_name=` filter; ordered by `uploaded_at DESC` |
 
 ### Frontend — `frontend/`
 
@@ -369,9 +386,9 @@ Next.js 16 · React 19 · TypeScript · Tailwind CSS v4 · `react-dropzone` v15 
 
 **Provider tree** (`layout.tsx`):
 ```
-LanguageProvider → CourseProvider → AuthProvider → {children}
+LanguageProvider → CourseProvider → AuthProvider → DocumentProvider → PresentationProvider → {children}
 ```
-All three providers must remain in this order.
+Order is required: `DocumentProvider` needs both `useAuth()` and `useCourse()`; it must live inside both. Any page that calls `useDocuments()` gets the same live doc list. After upload/delete, call `refetchDocs()` from `useDocuments()` AND emit `eventBus.emit(EVT_DOCUMENTS_UPDATED)` (handled automatically by `uploadAndIndexFile`). My Documents and academic-writing wizard both subscribe to `EVT_DOCUMENTS_UPDATED` via `useEffect(() => eventBus.on(...), [handler])` — the return value of `on()` is the unsubscribe function used as cleanup.
 
 **API call patterns — two approaches exist:**
 
@@ -426,7 +443,9 @@ URL param `[id]` is the localStorage Course ID (string like `custom_${Date.now()
 
 The **WritingPanel entry screen** (shown when `!isStarted`) is a **Title Selection UI**: the user enters a topic in an `dir="rtl" text-right` input field. An inline `<Sparkles>` button (purple, physically `left-3 top-1/2 -translate-y-1/2`, `z-50`, `pointer-events-auto`) sits inside the input on the left. The input has `pl-12 pr-4` physical padding to keep text clear of the icon. Clicking Sparkles calls `POST /api/writing/suggest-titles` with `{ topic, course_name, course_id }` — topic may be empty, in which case the backend does a broad RAG scan. Suggested titles render as clickable chips below the input; clicking a chip sets the topic AND clears the chips (`setSuggestedTitles([])`), without auto-submitting. The static `t.topicChips` section below offers quick generic topic starters.
 
-**Wizard step order** (URL `?step=N`): Step 1 = Writing Type selection (essay/research/summary tiles); Step 2 = Source selection (upload/documents/sessions with sub-content dropzone); Step 3 = Confirmation. `step1Ready = writingType !== null`; `step2Ready`: for `'upload'` source type requires `uploadedFiles.length > 0` (NOT `|| hasDoc` — that fallback was removed to prevent ghost-file references sending empty `fileIds` to the backend); for `'documents'` requires `selectedDocId !== null`; for `'sessions'` requires `selectedSessionId !== null`. The wizard nav row inherits the page's `dir` — in Hebrew (RTL) the Back button (first DOM child) lands on the RIGHT and Next (second DOM child) lands on the LEFT, matching Hebrew reading flow. Arrow SVG paths are conditionally flipped per language.
+**Wizard step order** (URL `?step=N`): Step 1 = Writing Type selection (essay/research/summary tiles); Step 2 = Source selection (upload/documents/sessions with sub-content dropzone); Step 3 = Confirmation. `step1Ready = writingType !== null`; `step2Ready`: for `'upload'` source type requires `uploadedFiles.length > 0` (NOT `|| hasDoc` — that fallback was removed to prevent ghost-file references); for `'documents'` requires `selectedDocIds.length > 0` (**multi-select** — `selectedDocIds: string[]` in parent state, toggled per-card with `includes`+filter; all IDs spread into `fileIds` at generation time); for `'sessions'` requires `selectedSessionId !== null`. The wizard nav row inherits the page's `dir`. Arrow SVG paths are conditionally flipped per language.
+
+**Upload race-condition guard**: `sessionUploadedIds` (`useRef<Set<string>>`) tracks file IDs returned by the server in the current session. The purge-stale-files effect (which runs after every `fetchDocs` to remove deleted localStorage entries) skips any ID in this set — preventing a concurrent stale GET response from wiping a just-uploaded file.
 
 **Wizard source/doc persistence**: `sourceType` (local Wizard state) is synced to the parent's `wizardSourceType` on every tile click via `onSourceTypeChange` callback. Both `wizardSourceType` (key `unote_wizard_source_type`) and `selectedDocId` (key `unote_wizard_doc_id`) are persisted to localStorage and restored on mount, so the user's source selection survives navigating away from the page and returning. `fetchDocs` is a `useCallback` called both on mount/course-change and after every successful upload or delete, ensuring the document list in the wizard is always current without a full page reload.
 
@@ -517,7 +536,7 @@ Promise.resolve(localStorage.getItem('key'))
 | Custom courses | `localStorage('levy_ai_custom_courses')` | `Course[]` JSON | `removeCustomCourse` or manual clear |
 | Academic writing uploads | `localStorage('unote_academic_uploads')` | `UploadedFile[]` JSON — files uploaded in the wizard | `handleRemoveFile` (last file) or `_clearAuth()` |
 | Wizard source type | `localStorage('unote_wizard_source_type')` | `'upload'`\|`'documents'`\|`'sessions'` string | Source tile change → null clears it; `_clearAuth()` |
-| Wizard doc selection | `localStorage('unote_wizard_doc_id')` | Selected `file_id` string | Doc deselect → null clears it; `_clearAuth()` |
+| Wizard doc selection | `localStorage('unote_wizard_doc_id')` | `JSON.stringify(string[])` — array of selected `file_id`s | Array empties → key removed; `_clearAuth()` |
 
 To fully wipe all data: delete `backend/data/` then recreate `backend/data/faiss/` (empty directory). The app recreates `chat.db` and per-user FAISS stores on next startup.
 

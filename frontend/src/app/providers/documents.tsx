@@ -56,10 +56,10 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     setDocsLoading(true);
-    fetch(
-      `${API}/documents?course_name=${encodeURIComponent(selectedCourse.name)}`,
-      { credentials: 'include' }
-    )
+    // _t cache-buster forces the browser past any cached response so every
+    // call to refetchDocs() always reaches the Flask server.
+    const url = `${API}/documents?course_name=${encodeURIComponent(selectedCourse.name)}&_t=${Date.now()}`;
+    fetch(url, { credentials: 'include' })
       .then(r => {
         if (r.status === 401) {
           // Mirror the per-page authFetch 401 behaviour.

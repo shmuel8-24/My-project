@@ -606,11 +606,16 @@ def get_profile_documents(user_id: int):
     try:
         query = db.query(UserDocument).filter(
             UserDocument.user_id == user_id,
-            UserDocument.is_session_only == False,  # noqa: E712
+            # is_session_only filter removed: all user documents are now returned
+            # regardless of upload origin (wizard vs. My Documents).
         )
         if course_name:
             query = query.filter(UserDocument.course_name == course_name)
         records = query.order_by(UserDocument.uploaded_at.desc()).all()
+        print(
+            f"[DEBUG /api/profile/documents] user_id={user_id} "
+            f"→ DB file count: {len(records)}"
+        )
         chunk_map: dict = {}
         try:
             col = _get_col(user_id)

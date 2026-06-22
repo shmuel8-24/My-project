@@ -779,8 +779,8 @@ function SlideViewerInner({ slides, lang, theme, onShuffleTheme }: SlideViewerPr
           </button>
         </div>
 
-        <p className="text-center text-sm font-medium" style={{ color: theme.text }}>
-          {current + 1} / {slides.length}
+        <p className="text-center text-sm font-medium" dir="ltr" style={{ color: theme.text }}>
+          {current + 1} {he ? 'מתוך' : 'of'} {slides.length}
         </p>
 
         {/* Export + theme */}

@@ -4,7 +4,7 @@ import json
 from extensions import client
 
 # Mastery threshold a topic must reach before the *next* syllabus topic unlocks.
-UNLOCK_THRESHOLD = 50.0
+UNLOCK_THRESHOLD = 80.0
 
 _TOPIC_EXTRACTION_SYSTEM = (
     "You are an expert curriculum designer. Analyze the following university course syllabus "

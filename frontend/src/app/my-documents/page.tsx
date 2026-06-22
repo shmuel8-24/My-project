@@ -7,11 +7,14 @@ import {
   Settings as IconSettings, Home, BookOpen, PenTool, Presentation, Brain, Target, Monitor, LogOut,
   Folder, FolderPlus, FileText, Image as ImageIcon, File as FileIcon, Upload, Download, Trash2,
 } from 'lucide-react';
-import { useAuth }     from '../providers/auth';
-import { useLanguage } from '../providers/language';
-import { useCourse }   from '../providers/course';
-import CoursePill      from '../../components/CoursePill';
-import Skeleton        from '../../components/ui/Skeleton';
+import { useAuth }                from '../providers/auth';
+import { useLanguage }            from '../providers/language';
+import { useCourse }              from '../providers/course';
+import { useDocuments }                   from '../providers/documents';
+import { uploadAndIndexFile }             from '../../lib/uploadFile';
+import { eventBus, EVT_DOCUMENTS_UPDATED } from '../../lib/eventBus';
+import CoursePill                 from '../../components/CoursePill';
+import Skeleton                   from '../../components/ui/Skeleton';
 
 const API = 'http://localhost:5003';
 
@@ -504,6 +507,7 @@ export default function MyDocumentsPage() {
   const { user: authUser, isLoading: authLoading } = useAuth();
   const { lang, toggleLanguage } = useLanguage();
   const { selectedCourse, courseHydrated } = useCourse();
+  const { refetchDocs } = useDocuments(); // keeps the global DocumentProvider in sync
   const he = lang === 'he';
 
   // ── Shell state ────────────────────────────────────────────────────────────
@@ -580,7 +584,8 @@ export default function MyDocumentsPage() {
   const fetchDocuments = useCallback(() => {
     const request = Promise.resolve()
       .then(() => { setDocsLoading(true); })
-      .then(() => fetch(`${API}/api/profile/documents`, { credentials: 'include' }));
+      // _t cache-buster forces the browser past any cached GET response.
+      .then(() => fetch(`${API}/api/profile/documents?_t=${Date.now()}`, { credentials: 'include' }));
     request
       .then(r => (r && r.ok) ? r.json() : { documents: [] })
       .then((data: { documents: DocItem[] }) => setDocuments(data.documents ?? []))
@@ -609,6 +614,12 @@ export default function MyDocumentsPage() {
     };
   }, [authUser, courseHydrated, fetchDocuments]);
 
+  // Subscribe to the global event bus so uploads from the wizard (or any
+  // other entry point) refresh this page's full-library list automatically.
+  useEffect(() => {
+    return eventBus.on(EVT_DOCUMENTS_UPDATED, fetchDocuments);
+  }, [fetchDocuments]);
+
   // ── Upload a new document for the active course ───────────────────────────
   const handleFileChange = useCallback(async (e: ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -617,32 +628,27 @@ export default function MyDocumentsPage() {
     setUploading(true);
     setUploadError(null);
     try {
-      const fd = new FormData();
-      Array.from(files).forEach(f => fd.append('files', f));
-      fd.append('course_name', selectedCourse.name);
-      const res  = await fetch(`${API}/upload-pdf`, {
-        method: 'POST',
-        credentials: 'include',
-        body: fd,
+      const result = await uploadAndIndexFile(Array.from(files), {
+        courseName: selectedCourse.name,
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setUploadError(data.error ?? (he ? 'העלאת הקובץ נכשלה' : 'Upload failed'));
+      if (!result.ok) {
+        setUploadError(result.error ?? (he ? 'העלאת הקובץ נכשלה' : 'Upload failed'));
         return;
       }
-      if (data.status === 'already_exists') {
+      if (result.files.some(f => f.status === 'already_exists')) {
         setUploadError(he ? 'הקובץ כבר קיים במערכת' : 'This file already exists in the system');
-        fetchDocuments();
-        return;
       }
+      // Refresh both the local full-library list and the global course-scoped
+      // DocumentProvider so the wizard reflects the new file immediately.
       fetchDocuments();
+      refetchDocs();
     } catch {
       setUploadError(he ? 'שגיאת שרת בעת ההעלאה' : 'Server error during upload');
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
-  }, [selectedCourse, fetchDocuments, he]);
+  }, [selectedCourse, fetchDocuments, refetchDocs, he]);
 
   // ── Download a document ────────────────────────────────────────────────────
   const handleDownload = useCallback(async (doc: DocItem) => {
@@ -698,12 +704,15 @@ export default function MyDocumentsPage() {
       } catch { /* non-critical */ }
       setDocuments(prev => prev.filter(d => d.file_id !== docToDelete.file_id));
       setDocToDelete(null);
+      // Keep the global course-scoped list in sync so the wizard no longer
+      // shows this file without requiring navigation.
+      refetchDocs();
     } catch {
       setDeleteError(he ? 'שגיאה במחיקת המסמך.' : 'Error deleting document.');
     } finally {
       setDeletingId(null);
     }
-  }, [docToDelete, he]);
+  }, [docToDelete, refetchDocs, he]);
 
   const handleLogout = useCallback(() => {
     ['levy_ai_email','levy_ai_first_name','levy_ai_last_name',

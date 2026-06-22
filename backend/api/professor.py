@@ -405,3 +405,40 @@ def professor_ask(user_id: int):
             "error": "שגיאה לא צפויה — נסה שוב.",
             "status": "error",
         }), 500
+
+
+# ── Past-exam library ─────────────────────────────────────────────────────────
+
+@professor_bp.route("/api/professor-simulator/past-exams", methods=["GET"])
+@limiter.limit("30 per minute")
+@token_required
+def list_past_exams(user_id: int):
+    """Return all UserDocument rows tagged is_past_exam=True for the user.
+
+    Optional ?course_name= scopes the result to a single course.
+    Response: { "exams": [{file_id, name, course_name, uploaded_at}] }
+    """
+    course_name = (request.args.get("course_name") or "").strip() or None
+
+    db = SessionLocal()
+    try:
+        q = db.query(UserDocument).filter(
+            UserDocument.user_id      == user_id,
+            UserDocument.is_past_exam == True,   # noqa: E712
+        )
+        if course_name:
+            q = q.filter(UserDocument.course_name == course_name)
+        records = q.order_by(UserDocument.uploaded_at.desc()).all()
+    finally:
+        db.close()
+
+    exams = [
+        {
+            "file_id":     r.file_id,
+            "name":        r.filename,
+            "course_name": r.course_name,
+            "uploaded_at": r.uploaded_at.isoformat() if r.uploaded_at else None,
+        }
+        for r in records
+    ]
+    return jsonify({"exams": exams}), 200

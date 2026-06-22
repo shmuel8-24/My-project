@@ -1056,14 +1056,21 @@ def list_documents(user_id: int):
     try:
         query = db.query(UserDocument).filter(
             UserDocument.user_id == user_id,
-            UserDocument.is_session_only == False,  # noqa: E712
-            UserDocument.is_syllabus == False,       # noqa: E712 — syllabi managed via course settings, not workspace
+            # is_session_only filter removed: wizard uploads are permanent documents
+            # and must appear in the global library alongside My Documents uploads.
+            # The flag is kept as metadata on the row but no longer hides records.
+            UserDocument.is_syllabus == False,  # noqa: E712 — syllabi managed via course settings, not workspace
         )
         if course_name_filter:
             query = query.filter(UserDocument.course_name == course_name_filter)
         records = query.order_by(UserDocument.uploaded_at.desc()).all()
     finally:
         db.close()
+
+    print(
+        f"[DEBUG /documents] user_id={user_id} course_filter={course_name_filter!r} "
+        f"→ DB file count: {len(records)}"
+    )
 
     if not records:
         return jsonify({"documents": [], "total_chunks": 0}), 200
