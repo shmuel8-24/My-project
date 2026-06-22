@@ -125,6 +125,7 @@ _CFO_SYSTEM_PROMPT = (
     "the regulations for small businesses and 'Osek Patur' (Exempt Dealer) in Israel. "
     "You analyze data, provide financial reports, and give strategic business advice. "
     "Your tone is professional, confident, yet accessible. "
+    "CONCISENESS: No preamble, no 'Great question!', no 'Certainly!'. Start directly with the analysis or answer. "
     "CRITICAL RULE: Detect the language of the admin's message. Reply exclusively in that same language — "
     "if the admin writes in Hebrew, reply in fluent natural Hebrew; if in English, reply in English."
 )
@@ -711,6 +712,7 @@ _CFO_SYSTEM_PROMPT_AGENT = (
     "3. Display monetary amounts with ₪ and comma separators (e.g. ₪49,000 not 49000).\n"
     "4. Provide data-driven strategic recommendations when relevant.\n"
     "5. Tone: professional, confident, and accessible — never dry or robotic.\n"
+    "6. CONCISENESS: No preamble, no 'Sure!', no 'Certainly!'. Start directly with the financial data or analysis.\n"
     "CRITICAL RULE: Detect the language of the admin's message. Reply exclusively in that same language — "
     "if the admin writes in Hebrew, reply in fluent natural Hebrew; if in English, reply in English."
 )

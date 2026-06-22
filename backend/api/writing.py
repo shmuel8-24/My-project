@@ -12,48 +12,54 @@ writing_bp = Blueprint("writing", __name__)
 # pulls a representative sample of course materials from FAISS.
 _BROAD_SCAN_QUERY = "נושאים מרכזיים מושגים חשובים תיאוריות ממצאים ומסקנות"
 
-# Scan mode: no user topic — derive titles purely from the course materials.
+# Scan mode: no user topic — derive the best title purely from the course materials.
 _SUGGEST_SYSTEM_SCAN = (
     "You are an expert academic assistant. "
     "Read the following excerpts from the user's selected course materials. "
-    "Based STRICTLY on these materials, suggest exactly 3 highly engaging, specific, "
-    "and academic research paper titles that could be written about this content. "
+    "Based STRICTLY on these materials, generate exactly ONE highly engaging, specific, "
+    "and academic research paper title that best captures the core content. "
+    "CRITICAL CONSTRAINT: The title MUST contain a STRICT MAXIMUM of 4 words. "
+    "Count every word before returning — do not exceed 4 words under any circumstances. "
     "CRITICAL: You must reply in native, natural Hebrew. "
     'Return ONLY a valid JSON object in this exact format: '
-    '{"titles": ["כותרת 1", "כותרת 2", "כותרת 3"]}. '
+    '{"title": "הכותרת שלך כאן"}. '
     "No additional text, no markdown formatting, no preamble."
 )
 
-# Topic mode: user provided a topic — ground titles in both topic and RAG.
+# Topic mode: user provided a topic — ground the title in both topic and RAG.
 _SUGGEST_SYSTEM_TOPIC = (
     "You are an expert academic writing assistant. Based on the provided course learning materials "
-    "and the user's stated topic, suggest exactly 3 distinct, focused, and engaging academic research "
-    "paper titles. "
-    'Return ONLY a JSON object in the format: {"titles": ["First title", "Second title", "Third title"]}. '
+    "and the user's stated topic, generate exactly ONE definitive, focused, and engaging academic "
+    "research paper title. "
+    "CRITICAL CONSTRAINT: The title MUST contain a STRICT MAXIMUM of 4 words. "
+    "Count every word before returning — do not exceed 4 words under any circumstances. "
+    'Return ONLY a JSON object in the format: {"title": "Your title here"}. '
     "No preamble, no numbering, no extra text. "
-    "CRITICAL RULE: Generate the titles in Hebrew by default. "
-    "If the user's topic is clearly written in English, generate the titles in English instead."
+    "CRITICAL RULE: Generate the title in Hebrew by default. "
+    "If the user's topic is clearly written in English, generate the title in English instead."
 )
 
 # Pure fallback: no RAG context at all, topic provided.
 _SUGGEST_SYSTEM_FALLBACK = (
     "You are an expert academic writing assistant. "
-    "Suggest exactly 3 distinct, focused, and engaging academic research paper titles for the given topic. "
-    'Return ONLY a JSON object in the format: {"titles": ["First title", "Second title", "Third title"]}. '
+    "Generate exactly ONE definitive, focused, and engaging academic research paper title for the given topic. "
+    "CRITICAL CONSTRAINT: The title MUST contain a STRICT MAXIMUM of 4 words. "
+    "Count every word before returning — do not exceed 4 words under any circumstances. "
+    'Return ONLY a JSON object in the format: {"title": "Your title here"}. '
     "No preamble, no numbering, no extra text. "
-    "CRITICAL RULE: Generate the titles in Hebrew by default. "
-    "If the user's topic is clearly written in English, generate the titles in English instead."
+    "CRITICAL RULE: Generate the title in Hebrew by default. "
+    "If the user's topic is clearly written in English, generate the title in English instead."
 )
 
 
 @writing_bp.route("/api/writing/suggest-titles", methods=["POST"])
 @token_required
 def suggest_titles(user_id: int):
-    """Return 3 AI-suggested paper titles grounded in the user's course RAG context.
+    """Return one AI-suggested paper title grounded in the user's course RAG context.
 
     When `topic` is empty the endpoint scans the course materials autonomously
-    (broad FAISS query, top-10 chunks) and derives titles from what it finds.
-    When `topic` is provided it grounds the suggestions in both the topic and RAG.
+    (broad FAISS query, top-10 chunks) and derives a title from what it finds.
+    When `topic` is provided it grounds the suggestion in both the topic and RAG.
     """
     data        = request.get_json(silent=True) or {}
     print("✨ Suggest Titles Route Hit. Payload:", data)
@@ -82,14 +88,14 @@ def suggest_titles(user_id: int):
         system_prompt = _SUGGEST_SYSTEM_SCAN
         user_content  = (
             f"חומרי הלמידה שנסרקו:\n\n{rag_context}\n\n"
-            "בהתבסס אך ורק על חומרים אלו, הצע 3 כותרות אקדמיות ספציפיות ומרתקות."
+            "בהתבסס אך ורק על חומרים אלו, הצע כותרת אקדמית אחת ספציפית ומרתקת."
         )
     elif rag_context and topic:
         system_prompt = _SUGGEST_SYSTEM_TOPIC
         user_content  = (
             f"חומרי הלמידה הרלוונטיים:\n\n{rag_context}\n\n"
             f"הנושא שהמשתמש רוצה לכתוב עליו: {topic}\n\n"
-            "הצע 3 כותרות אקדמיות ממוקדות ומרתקות המבוססות על חומרי הלמידה הנ\"ל."
+            "הצע כותרת אקדמית אחת ממוקדת ומרתקת המבוססת על חומרי הלמידה הנ\"ל."
         )
     elif topic:
         # No RAG — topic only
@@ -100,7 +106,7 @@ def suggest_titles(user_id: int):
         return jsonify({"error": "לא נמצאו מסמכים בקורס. אנא העלה חומרי לימוד תחילה."}), 400
 
     # --- LLM call ------------------------------------------------
-    titles: list[str] = []
+    title: str = ""
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -109,44 +115,25 @@ def suggest_titles(user_id: int):
                 {"role": "user",   "content": user_content},
             ],
             temperature=0.8,
-            max_tokens=300,
+            max_tokens=150,
             response_format={"type": "json_object"},
         )
         raw    = response.choices[0].message.content or "{}"
         parsed = json.loads(raw)
-        if isinstance(parsed, list):
-            titles = parsed
-        elif isinstance(parsed, dict):
-            for key in ("titles", "suggestions", "כותרות", "results"):
-                if isinstance(parsed.get(key), list):
-                    titles = parsed[key]
-                    break
-            else:
-                titles = next(
-                    (v for v in parsed.values() if isinstance(v, list)), []
-                )
-        titles = [str(t).strip() for t in titles if str(t).strip()][:3]
+        if isinstance(parsed, dict):
+            val = parsed.get("title") or parsed.get("כותרת") or next(
+                (v for v in parsed.values() if isinstance(v, str) and v.strip()), ""
+            )
+            title = str(val).strip()
     except Exception:
         pass
 
     # --- Deterministic fallback (topic-only path) ----------------
-    # Only meaningful when a topic was provided; scan-mode failures
-    # return an error instead of generic gibberish.
-    if not titles and topic:
-        base = topic.rstrip(".")
-        if course_name:
-            titles = [
-                f"{base}: ניתוח תיאורטי ויישומי",
-                f"השפעת {base} על {course_name} — סקירה ביקורתית",
-                f"{base}: גישות עכשוויות, אתגרים וכיוונים עתידיים",
-            ]
-        else:
-            titles = [
-                f"{base}: ניתוח תיאורטי ויישומי",
-                f"{base} — סקירה ביקורתית של הספרות",
-                f"{base}: אתגרים, מגמות וכיוונים עתידיים",
-            ]
-    elif not titles:
-        return jsonify({"error": "לא הצלחנו לייצר כותרות מהחומרים הקיימים."}), 500
+    # Keep fallback within 4 words: take only the first 4 words of the topic.
+    if not title and topic:
+        words = topic.rstrip(".").split()
+        title = " ".join(words[:4])
+    elif not title:
+        return jsonify({"error": "לא הצלחנו לייצר כותרת מהחומרים הקיימים."}), 500
 
-    return jsonify({"titles": titles}), 200
+    return jsonify({"title": title}), 200

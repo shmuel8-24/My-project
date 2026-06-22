@@ -5,6 +5,7 @@ import "@uiw/react-md-editor/markdown-editor.css";
 import { LanguageProvider }        from "./providers/language";
 import { AuthProvider }            from "./providers/auth";
 import { CourseProvider }          from "./providers/course";
+import { DocumentProvider }        from "./providers/documents";
 import { PresentationProvider }    from "./providers/presentation";
 import GenerationStatusBadge       from "../components/GenerationStatusBadge";
 
@@ -68,10 +69,12 @@ export default function RootLayout({
         <LanguageProvider>
           <CourseProvider>
             <AuthProvider>
-              <PresentationProvider>
-                {children}
-                <GenerationStatusBadge />
-              </PresentationProvider>
+              <DocumentProvider>
+                <PresentationProvider>
+                  {children}
+                  <GenerationStatusBadge />
+                </PresentationProvider>
+              </DocumentProvider>
             </AuthProvider>
           </CourseProvider>
         </LanguageProvider>

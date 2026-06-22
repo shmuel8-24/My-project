@@ -3,9 +3,11 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { Settings as IconSettings, Minus, Plus, Home, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, LogOut, Folder, Sparkles } from 'lucide-react';
-import { useAuth }     from '../providers/auth';
-import { useLanguage } from '../providers/language';
-import { useCourse }   from '../providers/course';
+import { useAuth }          from '../providers/auth';
+import { useLanguage }       from '../providers/language';
+import { useCourse }         from '../providers/course';
+import { useDocuments }      from '../providers/documents';
+import type { DocInfo }      from '../providers/documents';
 import CoursePill      from '../../components/CoursePill';
 import { CodeBlockPre, InlineCode } from '../../components/CodeBlock';
 import { useDropzone } from 'react-dropzone';
@@ -24,13 +26,15 @@ const AcademicRichEditor = dynamic(
 const API = 'http://localhost:5003';
 
 /* ─── Auth helpers ───────────────────────────────────────────────────────── */
-const UPLOADS_STORAGE_KEY = 'unote_academic_uploads';
+const UPLOADS_STORAGE_KEY      = 'unote_academic_uploads';
+const WIZARD_SOURCE_STORAGE_KEY = 'unote_wizard_source_type';
+const WIZARD_DOC_ID_STORAGE_KEY = 'unote_wizard_doc_id';
 
 function _clearAuth() {
   ['levy_ai_email','levy_ai_first_name','levy_ai_last_name',
    'levy_ai_institution','levy_ai_primary_major','levy_ai_degree_type',
    'levy_ai_country','levy_ai_secondary_major','levy_ai_gender',
-   UPLOADS_STORAGE_KEY,
+   UPLOADS_STORAGE_KEY, WIZARD_SOURCE_STORAGE_KEY, WIZARD_DOC_ID_STORAGE_KEY,
   ].forEach(k => localStorage.removeItem(k));
   document.cookie = 'levy_ai_session=; path=/; SameSite=Lax; max-age=0';
 }
@@ -107,7 +111,7 @@ function fmtBytes(b: number) {
 }
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
-interface DocInfo { file_id: string; name?: string; file_name?: string; filename?: string; chunks: number; }
+// DocInfo is imported from providers/documents
 interface SessionInfo { id: number; title: string; updated_at: string; }
 interface UploadedFile { name: string; size: number; fileId: string; }
 
@@ -520,7 +524,8 @@ function Wizard({
   selectedDocId, onSelectDoc,
   writingType, onSelectType,
   uploadedFiles, uploading, uploadError, onDrop, onRemoveFile,
-  hasDoc, onStart,
+  hasDoc, onSourceTypeChange, onStart,
+  topic, onTopicChange,
   initialStep, initialSourceType, initialCustomInstructions,
   initialUsePersonalStyle, initialIncludeSources, initialPageCount,
 }: {
@@ -530,8 +535,10 @@ function Wizard({
   selectedDocId: string | null; onSelectDoc: (id: string | null) => void;
   writingType: WritingTypeId | null; onSelectType: (id: WritingTypeId) => void;
   uploadedFiles: UploadedFile[]; uploading: boolean; uploadError: string | null; onDrop: (files: File[]) => void; onRemoveFile: (file: UploadedFile) => void;
-  hasDoc: boolean; onStart: (customInstructions: string, usePersonalStyle: boolean, includeSources: boolean, pageCount: number, sourceType: SourceType | null) => void;
-  initialStep?: 1 | 2 | 3;
+  hasDoc: boolean; onSourceTypeChange?: (st: SourceType | null) => void;
+  onStart: (customInstructions: string, usePersonalStyle: boolean, includeSources: boolean, pageCount: number, sourceType: SourceType | null) => void;
+  topic: string; onTopicChange: (t: string) => void;
+  initialStep?: 1 | 2 | 3 | 4;
   initialSourceType?: SourceType | null;
   initialCustomInstructions?: string;
   initialUsePersonalStyle?: boolean;
@@ -540,6 +547,32 @@ function Wizard({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { selectedCourse } = useCourse();
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  const handleGenerateTitles = async () => {
+    if (isGenerating) return;
+    setIsGenerating(true);
+    const payload = {
+      topic:       topic.trim(),
+      course_name: selectedCourse?.name ?? null,
+      course_id:   selectedCourse?.id   || 'default_test_course',
+    };
+    try {
+      const res = await authFetch(`${API}/api/writing/suggest-titles`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      const data = await res.json() as { title?: string };
+      if (data.title) onTopicChange(data.title);
+    } catch {
+      alert('שגיאה בחיבור לשרת');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   // Hard filter: never surface syllabus files in the document-selection list.
   const visibleDocs = docs.filter(d => {
@@ -550,7 +583,7 @@ function Wizard({
 
   // Derive step from URL so browser Back/Forward work natively.
   const _urlStepNum = parseInt(searchParams.get('step') ?? '', 10);
-  const step: 1 | 2 | 3 = (_urlStepNum === 1 || _urlStepNum === 2 || _urlStepNum === 3)
+  const step: 1 | 2 | 3 | 4 = (_urlStepNum === 1 || _urlStepNum === 2 || _urlStepNum === 3 || _urlStepNum === 4)
     ? _urlStepNum
     : (initialStep ?? 1);
   const [sourceType,         setSourceType]         = useState<SourceType | null>(initialSourceType ?? null);
@@ -587,17 +620,34 @@ function Wizard({
     }
   }, [uploading]);
 
+  // Safety check: if the user removes all uploaded files while on the upload
+  // step, ensure no ghost scanning entries survive a deletion.
+  useEffect(() => {
+    if (step !== 2 || sourceType !== 'upload') return;
+    if (uploadedFiles.length === 0) {
+      Promise.resolve().then(() => setScanningFileNames([]));
+    }
+  }, [step, sourceType, uploadedFiles.length]);
+
   const step1Ready = writingType !== null;
 
+  // Upload type is only ready when files are actually present — do NOT fall
+  // back to `hasDoc` here. If `hasDoc` were used as a fallback, a user who
+  // deletes all their uploaded files would still see the Next button active,
+  // and generation would fire with an empty fileIds list, causing a
+  // whole-store RAG search that surfaces documents from previous sessions.
   const step2Ready =
-    (sourceType === 'upload'    && (uploadedFiles.length > 0 || hasDoc)) ||
+    (sourceType === 'upload'    && uploadedFiles.length > 0) ||
     (sourceType === 'documents' && selectedDocId !== null) ||
     (sourceType === 'sessions'  && selectedSessionId !== null);
 
+  const step3Ready = topic.trim().length > 0;
+
   const STEPS = [
-    { n: 1, he: 'סוג כתיבה',  en: 'Type' },
-    { n: 2, he: 'בחר מקור',   en: 'Source' },
-    { n: 3, he: 'אישור',       en: 'Confirm' },
+    { n: 1, he: 'סוג כתיבה',    en: 'Type' },
+    { n: 2, he: 'בחר מקור',     en: 'Source' },
+    { n: 3, he: 'בחירת כותרת',  en: 'Title' },
+    { n: 4, he: 'אישור',        en: 'Confirm' },
   ] as const;
 
   /* ── style tokens ── */
@@ -623,7 +673,7 @@ function Wizard({
   function SourceTile({ id, emoji, title, subtitle }: { id: SourceType; emoji: string; title: string; subtitle: string }) {
     const active = sourceType === id;
     return (
-      <button onClick={() => { setSourceType(id); onSelectSession(null); onSelectDoc(null); }}
+      <button onClick={() => { setSourceType(id); onSourceTypeChange?.(id); onSelectSession(null); onSelectDoc(null); }}
         className="flex flex-col items-center justify-center gap-3 px-4 rounded-2xl text-center transition-all active:scale-[0.97] w-full"
         style={{ minHeight: '160px', ...(active ? tileActive : tileBase) }}
         onMouseEnter={e => { if (!active) Object.assign((e.currentTarget as HTMLButtonElement).style, { background: 'rgba(255,255,255,0.75)', borderColor: 'rgba(255,255,255,0.65)' }); }}
@@ -820,7 +870,7 @@ function Wizard({
                   ))}
 
                 {uploadedFiles.map((f, i) => (
-                  <div key={i} className="flex items-center gap-2.5 px-4 py-3 rounded-xl"
+                  <div key={f.fileId || f.name || i} className="flex items-center gap-2.5 px-4 py-3 rounded-xl"
                     style={{ background: '#D1E6D9', border: '1px solid rgba(81,123,62,0.25)' }}>
                     <IconCheck className="w-4 h-4 shrink-0" style={{ color: '#517B3E' } as React.CSSProperties} />
                     <div className="flex-1 min-w-0">
@@ -895,8 +945,86 @@ function Wizard({
           </>
         )}
 
-        {/* ── Step 3: Confirmation ── */}
+        {/* ── Step 3: Title Selection ── */}
         {step === 3 && (
+          <>
+            {/* Heading + subtitle — bare on the background, identical to steps 1 & 2 */}
+            <div>
+              <h2 className="text-xl font-bold" style={{ color: '#1C3329' }}>{he ? 'בחירת כותרת' : 'Title Selection'}</h2>
+              <p className="text-sm mt-1" style={{ color: '#527061' }}>
+                {he
+                  ? 'הזן נושא לעבודה שלך, או תן ל-AI להציע לך כותרת ממוקדת המבוססת על חומרי הקורס שלך.'
+                  : 'Enter your paper topic, or let the AI suggest a focused title based on your course materials.'}
+              </p>
+            </div>
+
+            {/* Glassy container — input + sparkles + chips only */}
+            <div
+              className="flex flex-col items-center gap-6 rounded-2xl p-8"
+              style={{
+                background: 'rgba(255,255,255,0.40)',
+                border: '1px solid rgba(255,255,255,0.50)',
+                backdropFilter: 'blur(12px)',
+                WebkitBackdropFilter: 'blur(12px)',
+              }}
+            >
+              {/* Icon */}
+              <div className="w-20 h-20 rounded-3xl flex items-center justify-center" style={{ background: 'rgba(81,123,62,0.08)', border: '1px solid rgba(81,123,62,0.15)' }}>
+                <IconPen className="w-10 h-10 text-[#9DC08B]" />
+              </div>
+
+              {/* Input + Sparkles */}
+              <div className="w-full max-w-md">
+                <div className="relative w-full">
+                  <input
+                    type="text"
+                    value={topic}
+                    onChange={e => onTopicChange(e.target.value)}
+                    dir="rtl"
+                    placeholder={t.topicPh}
+                    className="w-full rounded-xl pr-4 pl-12 py-3 text-sm outline-none text-right"
+                    style={{ border: '1px solid rgba(255,255,255,0.60)', background: 'rgba(255,255,255,0.90)', color: '#2A3B22' }}
+                    onKeyDown={e => { if (e.key === 'Enter' && topic.trim()) router.push('?step=4'); }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleGenerateTitles}
+                    disabled={isGenerating}
+                    aria-label={he ? 'הצע כותרות באמצעות AI' : 'Suggest titles with AI'}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 z-50 flex items-center justify-center cursor-pointer rounded-lg p-1 transition-colors hover:bg-black/5 disabled:opacity-40"
+                    title={he ? 'הצע כותרות' : 'Suggest titles'}
+                  >
+                    {isGenerating ? (
+                      <svg className="w-4 h-4 animate-spin text-[#517B3E]" fill="none" viewBox="0 0 24 24">
+                        <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.25"/>
+                        <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round"/>
+                      </svg>
+                    ) : (
+                      <Sparkles className="w-4 h-4 text-[#7c5bb5]" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Suggestion chips */}
+              <div>
+                <p className="text-xs text-[#7a9268] mb-2">{t.suggestedTopics}</p>
+                <div className="flex flex-wrap gap-2 justify-center max-w-sm">
+                  {t.topicChips.map(chip => (
+                    <button key={chip} onClick={() => onTopicChange(chip)}
+                      className="px-4 py-2 text-xs rounded-full transition-all hover:scale-[1.02] active:scale-[0.98]"
+                      style={{ background: 'rgba(255,255,255,0.55)', border: '1px solid rgba(255,255,255,0.45)', color: '#2C4A3B' }}>
+                      {chip}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ── Step 4: Confirmation ── */}
+        {step === 4 && (
           <>
             <div>
               <h2 className="text-xl font-bold" style={{ color: '#1C3329' }}>{he ? 'אישור והתחלה' : 'Confirm & Start'}</h2>
@@ -1069,12 +1197,12 @@ function Wizard({
           {step === 1 ? (he ? 'ביטול' : 'Cancel') : (he ? 'הקודם' : 'Back')}
         </button>
 
-        {step < 3 && (
+        {step < 4 && (
           <button
             onClick={() => router.push(`?step=${step + 1}`)}
-            disabled={step === 1 ? !step1Ready : !step2Ready}
+            disabled={step === 1 ? !step1Ready : step === 2 ? !step2Ready : !step3Ready}
             className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold text-white transition-all active:scale-[0.98] disabled:cursor-not-allowed"
-            style={(step === 1 ? step1Ready : step2Ready)
+            style={(step === 1 ? step1Ready : step === 2 ? step2Ready : step3Ready)
               ? { background: 'linear-gradient(135deg,#517B3E,#2A3B22)', boxShadow: '0 4px 16px rgba(81,123,62,0.35)' }
               : { background: 'rgba(157,192,139,0.35)' }}>
             {he ? 'הבא' : 'Next'}
@@ -1090,14 +1218,16 @@ function Wizard({
   );
 }
 
-// maxChunks = pageCount * CHUNKS_PER_PAGE — a generous upper-bound safety net so the
-// loop always terminates; the real stopping condition is the word-count target below.
-const CHUNKS_PER_PAGE = 2;
+// maxChunks = pageCount * CHUNKS_PER_PAGE. One chunk per page keeps each API call
+// within its per-chunk word budget and prevents the chunk-count × chunk-minimum
+// arithmetic from doubling the total document length.
+const CHUNKS_PER_PAGE = 1;
 // Absolute word-count target — single source of truth for "how long is this document?".
 // targetWordCount = pageCount * WORDS_PER_PAGE is sent to the backend so both sides
 // agree, and drives isFinalSection in generateParagraph: the loop keeps fetching body
 // chunks until the accumulated word count reaches this target.
-const WORDS_PER_PAGE = 400;
+// 350 words/page matches Hebrew academic prose density (A4, 12pt, standard margins).
+const WORDS_PER_PAGE = 350;
 const countWords = (text: string) => (text.trim() ? text.trim().split(/\s+/).length : 0);
 
 /* ─── Writing panel — Co-Writer mode (paragraph-by-paragraph) ───────────── */
@@ -1105,6 +1235,7 @@ function WritingPanel({
   t, he, hasDoc, writingType, onBack, wizardInstructions, usePersonalStyle, includeSources, pageCount,
   userFirstName, userLastName, userInstitution,
   sourceType, sourceDocId, sourceUploadFileIds,
+  initialTopic,
 }: {
   t: TType; he: boolean; hasDoc: boolean;
   writingType: WritingTypeId | null;
@@ -1119,13 +1250,14 @@ function WritingPanel({
   sourceType: SourceType | null;
   sourceDocId: string | null;
   sourceUploadFileIds: string[];
+  initialTopic?: string;
 }) {
   const { selectedCourse } = useCourse();
   const formattedDate = useMemo(
     () => new Date().toLocaleDateString(he ? 'he-IL' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
     [he],
   );
-  const [topic,              setTopic]              = useState('');
+  const [topic]                                      = useState(initialTopic || '');
   const [loading,            setLoading]            = useState(false);
   const [isStreamingDraft,   setIsStreamingDraft]   = useState(false);
   const [error,              setError]              = useState<string | null>(null);
@@ -1150,6 +1282,8 @@ function WritingPanel({
   const [, setCurrentChunkIndex] = useState(1);
   const chunkIndexRef = useRef(1);
   const reviewRef = useRef<HTMLDivElement>(null);
+  // Guards the one-time auto-start effect so it never fires twice (e.g. strict-mode double-invoke).
+  const autoStartedRef = useRef(false);
   // Whether the currently-displayed draft was generated as the FINAL/conclusion
   // chunk — set inside generateParagraph from isFinalSection (word-count OR
   // chunk-count driven). Drives the "approve to finish" UI + handleNextStep.
@@ -1159,37 +1293,6 @@ function WritingPanel({
   // in the review card so the user has a sense of how much is left.
   const [wordsSoFar,  setWordsSoFar]  = useState(0);
   const [targetWords, setTargetWords] = useState(0);
-  const [isGenerating,    setIsGenerating]    = useState(false);
-  const [suggestedTitles, setSuggestedTitles] = useState<string[]>([]);
-
-  const handleGenerateTitles = async () => {
-    console.log("✨ BUTTON CLICKED!");
-    if (isGenerating) return;
-    setIsGenerating(true);
-    setSuggestedTitles([]);
-    const payload = {
-      topic:       topic.trim(),
-      course_name: selectedCourse?.name ?? null,
-      course_id:   selectedCourse?.id   || 'default_test_course',
-    };
-    console.log("Sparkles sending payload:", payload);
-    try {
-      const res = await authFetch(`${API}/api/writing/suggest-titles`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      const data = await res.json() as { titles?: string[] };
-      if (Array.isArray(data.titles)) setSuggestedTitles(data.titles);
-    } catch (error) {
-      console.error("Failed to fetch titles:", error);
-      alert('שגיאה בחיבור לשרת');
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
   const wtLabel = writingType
     ? (he ? WRITING_TYPES.find(w => w.id === writingType)?.he : WRITING_TYPES.find(w => w.id === writingType)?.en) ?? ''
     : '';
@@ -1198,8 +1301,6 @@ function WritingPanel({
   // True once the currently-reviewed draft was generated as the final/
   // conclusion chunk (see generateParagraph's isFinalSection derivation).
   const isLastChunk = draftIsFinal;
-
-  const isStarted = approvedParagraphs.length > 0 || waitingForFeedback || loading || isFinished;
 
   useEffect(() => {
     if (waitingForFeedback && reviewRef.current) {
@@ -1387,6 +1488,14 @@ function WritingPanel({
     finally { setLoading(false); setIsStreamingDraft(false); }
   }, [topic, hasDoc, writingType, wtLabel, he, usePersonalStyle, includeSources, wizardInstructions, pageCount, selectedCourse, t, userFirstName, userLastName, sourceType, sourceDocId, sourceUploadFileIds]);
 
+  // Kick off the first generation immediately when WritingPanel mounts — the topic
+  // was already chosen in wizard step 3, so there is no entry screen to show.
+  useEffect(() => {
+    if (autoStartedRef.current || !topic.trim() || !hasDoc) return;
+    autoStartedRef.current = true;
+    generateParagraph(0, [], '');
+  }, [generateParagraph, topic, hasDoc]);
+
   // Unified approve action — the ONLY entry point for advancing the generation loop.
   // Routing is decided programmatically: the document is finalized once EITHER
   // the just-approved draft was generated as the final/conclusion chunk
@@ -1506,8 +1615,8 @@ function WritingPanel({
   return (
     <div className="flex flex-col flex-1 min-h-[600px] w-full max-w-4xl mx-auto px-4 md:px-8 py-6 md:py-8">
       <div className="rounded-2xl flex flex-col flex-1" style={{
-        background: 'rgba(232,239,229,0.92)', border: '1px solid rgba(155,180,148,0.35)',
-        boxShadow: '0 8px 30px rgba(0,0,0,0.04)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+        background: 'rgba(255,255,255,0.90)', border: '1px solid #E8F0EB',
+        boxShadow: '0 4px 24px rgba(28,51,41,0.06)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
       }}>
 
         {/* ── Header ─────────────────────────────────────────────────────── */}
@@ -1530,7 +1639,7 @@ function WritingPanel({
                   ? (he ? 'סוקר טיוטה' : 'Reviewing draft')
                   : loading
                     ? (he ? 'כותב...' : 'Writing…')
-                    : he ? (isStarted ? 'מצב כתיבה משותפת' : 'בחירת כותרת') : (isStarted ? 'Co-Writer mode' : 'Title selection')}
+                    : he ? 'מצב כתיבה משותפת' : 'Co-Writer mode'}
             </p>
           </div>
           {isFinished && (
@@ -1573,93 +1682,6 @@ function WritingPanel({
 
         {/* ── Scrollable content ──────────────────────────────────────────── */}
         <div className="flex-1 overflow-y-auto px-5 py-4 min-h-0 flex flex-col gap-4">
-
-          {/* Empty / topic entry */}
-          {!isStarted && (
-            <div className="flex flex-col items-center justify-center gap-5 py-8 text-center flex-1">
-              <div className="w-20 h-20 rounded-3xl flex items-center justify-center" style={{ background: 'rgba(81,123,62,0.08)', border: '1px solid rgba(81,123,62,0.15)' }}>
-                <IconPen className="w-10 h-10 text-[#9DC08B]" />
-              </div>
-              <div>
-                <p className="font-semibold text-[#2d3b25]">{he ? 'בחירת כותרת' : 'Title Selection'}</p>
-                <p className="text-sm text-[#7a9268] mt-1 max-w-sm">
-                  {he
-                    ? 'הזן נושא לעבודה שלך, או תן ל-AI להציע לך כותרות ממוקדות המבוססות על חומרי הקורס שלך.'
-                    : 'Enter your topic, or let the AI suggest focused titles based on your course materials.'}
-                </p>
-              </div>
-              <div className="w-full max-w-md flex flex-col gap-3">
-                {/* Input + inline Sparkles button */}
-                <div className="relative w-full">
-                  <input type="text" value={topic} onChange={e => setTopic(e.target.value)} dir="rtl"
-                    placeholder={t.topicPh}
-                    className="w-full rounded-xl pr-4 pl-12 py-3 text-sm outline-none text-right"
-                    style={{ border: '1px solid rgba(157,192,139,0.4)', background: 'rgba(255,255,255,0.80)', color: '#2A3B22' }}
-                    onKeyDown={e => { if (e.key === 'Enter' && topic.trim() && hasDoc) generateParagraph(0, [], ''); }} />
-                  <button
-                    type="button"
-                    onClick={handleGenerateTitles}
-                    disabled={isGenerating}
-                    aria-label={he ? 'הצע כותרות באמצעות AI' : 'Suggest titles with AI'}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 z-50 flex items-center justify-center pointer-events-auto cursor-pointer rounded-lg p-1 transition-colors hover:bg-black/5 disabled:opacity-40"
-                    title={he ? 'הצע כותרות' : 'Suggest titles'}
-                  >
-                    {isGenerating ? (
-                      <svg className="w-4 h-4 animate-spin text-[#517B3E]" fill="none" viewBox="0 0 24 24">
-                        <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.25"/>
-                        <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round"/>
-                      </svg>
-                    ) : (
-                      <Sparkles className="w-4 h-4 text-[#7c5bb5] hover:text-[#6047a0]" />
-                    )}
-                  </button>
-                </div>
-
-                {/* AI-suggested title chips */}
-                {suggestedTitles.length > 0 && (
-                  <div className="flex flex-col gap-1.5">
-                    <p className="text-xs text-[#7a9268]">{he ? 'כותרות מוצעות — לחץ לבחירה:' : 'Suggested titles — click to select:'}</p>
-                    <div className="flex flex-col gap-1.5">
-                      {suggestedTitles.map((title, i) => (
-                        <button
-                          key={i}
-                          type="button"
-                          onClick={() => { setTopic(title); setSuggestedTitles([]); }}
-                          className="w-full text-start px-3 py-2 rounded-xl text-xs font-medium transition-all hover:scale-[1.01] active:scale-[0.99]"
-                          style={{
-                            background:   topic === title ? 'rgba(81,123,62,0.12)' : 'rgba(124,91,181,0.07)',
-                            border:       topic === title ? '1px solid rgba(81,123,62,0.35)' : '1px solid rgba(124,91,181,0.22)',
-                            color:        topic === title ? '#517B3E' : '#5a3fa0',
-                          }}
-                        >
-                          {title}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <button onClick={() => generateParagraph(0, [], '')} disabled={!topic.trim() || !hasDoc}
-                  className="w-full py-2.5 rounded-xl text-white text-sm font-bold transition-all active:scale-[0.99] disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                  style={{ backgroundColor: (topic.trim() && hasDoc) ? '#517B3E' : 'rgba(157,192,139,0.4)' }}>
-                  <IconPen className="w-4 h-4" />{he ? 'התחל לכתוב' : 'Start Writing'}
-                </button>
-                {!hasDoc && <p className="text-xs text-red-500 text-center">{he ? 'נדרש לפחות מסמך אחד מועלה' : 'At least one uploaded document is required'}</p>}
-              </div>
-              <div>
-                <p className="text-xs text-[#7a9268] mb-2">{t.suggestedTopics}</p>
-                <div className="flex flex-wrap gap-2 justify-center max-w-sm">
-                  {t.topicChips.map(chip => (
-                    <button key={chip} onClick={() => { setTopic(chip); generateParagraph(0, [], ''); }}
-                      className="px-4 py-2 text-xs rounded-full transition-all hover:scale-[1.02]"
-                      style={{ background: 'rgba(81,123,62,0.08)', border: '1px solid rgba(81,123,62,0.2)', color: '#517B3E' }}>
-                      {chip}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* Error */}
           {error && (
@@ -1964,18 +1986,22 @@ export default function AcademicWritingPage() {
   const [wizardPageCount,      setWizardPageCount]      = useState(1);
   const [wizardSourceType,     setWizardSourceType]     = useState<SourceType | null>(null);
   const [sessions,          setSessions]           = useState<SessionInfo[]>([]);
-  const [docs,              setDocs]               = useState<DocInfo[]>([]);
   const [sessionsLoading,   setSessionsLoading]    = useState(true);
-  const [docsLoading,       setDocsLoading]        = useState(true);
   const [selectedSessionId, setSelectedSessionId]  = useState<number | null>(null);
   const [selectedDocId,     setSelectedDocId]      = useState<string | null>(null);
   const [writingType,       setWritingType]        = useState<WritingTypeId | null>(null);
+  const [wizardTopic,       setWizardTopic]        = useState('');
   const [uploadedFiles,     setUploadedFiles]      = useState<UploadedFile[]>([]);
   const [uploading,         setUploading]          = useState(false);
   const [uploadError,       setUploadError]        = useState<string | null>(null);
   const [hasDoc,            setHasDoc]             = useState(false);
   // Stable reference — only recreated when the uploads list actually changes.
   const activeSourceFileIds = useMemo(() => uploadedFiles.map(f => f.fileId), [uploadedFiles]);
+  // Tracks file IDs explicitly uploaded in THIS browser session.
+  // The purge effect must NEVER remove these — they are confirmed to exist on the
+  // server (the server returned the file_id in the upload response).  Only
+  // stale localStorage-restored entries (not in this set) should be pruned.
+  const sessionUploadedIds = useRef<Set<string>>(new Set());
 
   /* User info */
   const [isAdmin]       = useState(() => typeof window !== 'undefined' ? localStorage.getItem('levy_ai_is_admin') === 'true' : false);
@@ -2002,6 +2028,14 @@ export default function AcademicWritingPage() {
     if (!selectedCourse) router.replace('/course-picker');
   }, [authLoading, authUser, courseHydrated, selectedCourse, router]);
 
+  // Hard refresh at ?step=writing loses all wizard state (topic, source, etc.).
+  // Without a topic the WritingPanel has nothing to auto-start — redirect to
+  // step 1 so the user re-enters the wizard cleanly.
+  useEffect(() => {
+    if (phase !== 'writing') return;
+    if (!wizardTopic.trim()) router.replace('?step=1');
+  }, [phase, wizardTopic, router]);
+
   useEffect(() => {
     function onScroll() { setHeaderScrolled(window.scrollY > 4); }
     window.addEventListener('scroll', onScroll, { passive: true });
@@ -2024,8 +2058,10 @@ export default function AcademicWritingPage() {
       .finally(() => setSessionsLoading(false));
   }, [authUser]);
 
-  /* Fetch documents scoped to the active course — re-runs on course switch */
-  useEffect(() => {
+  /* Fetch documents scoped to the active course.
+     Extracted into a useCallback so it can also be called after upload/delete
+     to keep the document library in sync without a full page refresh. */
+  const fetchDocs = useCallback(() => {
     if (!authUser || !selectedCourse) return;
     setDocsLoading(true);
     const url = `${API}/documents?course_name=${encodeURIComponent(selectedCourse.name)}`;
@@ -2041,6 +2077,9 @@ export default function AcademicWritingPage() {
       .catch(() => { setDocs([]); })
       .finally(() => setDocsLoading(false));
   }, [authUser, selectedCourse]);
+
+  /* Run on mount and whenever the active course changes */
+  useEffect(() => { fetchDocs(); }, [fetchDocs]);
 
   /* Fetch fresh profile data so attribution headers never show stale localStorage values */
   useEffect(() => {
@@ -2083,15 +2122,53 @@ export default function AcademicWritingPage() {
     }
   }, [uploadedFiles]);
 
-  /* Purge session-restored files whose server record no longer exists.
+  /* Restore wizard source-type + selected document on mount so the selection
+     survives navigating away from the page and coming back.
+     Promise.resolve defers to satisfy react-hooks/set-state-in-effect. */
+  useEffect(() => {
+    Promise.resolve().then(() => {
+      const st = localStorage.getItem(WIZARD_SOURCE_STORAGE_KEY);
+      if (st === 'upload' || st === 'documents' || st === 'sessions') {
+        setWizardSourceType(st as SourceType);
+      }
+      const docId = localStorage.getItem(WIZARD_DOC_ID_STORAGE_KEY);
+      if (docId) setSelectedDocId(docId);
+    });
+  }, []);
+
+  /* Persist wizard source-type whenever it changes */
+  useEffect(() => {
+    if (wizardSourceType) localStorage.setItem(WIZARD_SOURCE_STORAGE_KEY, wizardSourceType);
+    else localStorage.removeItem(WIZARD_SOURCE_STORAGE_KEY);
+  }, [wizardSourceType]);
+
+  /* Persist selected document ID whenever it changes */
+  useEffect(() => {
+    if (selectedDocId) localStorage.setItem(WIZARD_DOC_ID_STORAGE_KEY, selectedDocId);
+    else localStorage.removeItem(WIZARD_DOC_ID_STORAGE_KEY);
+  }, [selectedDocId]);
+
+  /* Purge session-RESTORED files whose server record no longer exists.
      Runs after every docs refresh so stale localStorage entries don't survive
-     server-side deletions (e.g. syllabus_AI.txt removed via My Documents). */
+     server-side deletions (e.g. syllabus_AI.txt removed via My Documents).
+     IMPORTANT: files in sessionUploadedIds are NEVER purged here — the server
+     confirmed their existence by returning their file_id in the upload response.
+     Only files that were restored from localStorage and are absent from the
+     freshly-fetched docs list are eligible for removal.  Without this exclusion
+     a race between a stale concurrent fetchDocs() response and setUploadedFiles()
+     can delete a file the user just uploaded. */
   useEffect(() => {
     if (docsLoading) return;
     setUploadedFiles(prev => {
       if (prev.length === 0) return prev;
       const validIds = new Set(docs.map(d => d.file_id));
-      const next = prev.filter(f => f.fileId && validIds.has(f.fileId));
+      const next = prev.filter(f => {
+        if (!f.fileId) return false;
+        if (sessionUploadedIds.current.has(f.fileId)) return true; // never auto-purge session uploads
+        const keep = validIds.has(f.fileId);
+        if (!keep) console.log('[Academic Writing] Purge: removing stale file', f.fileId, '(not in docs list)');
+        return keep;
+      });
       return next.length === prev.length ? prev : next;
     });
   }, [docs, docsLoading]);
@@ -2119,9 +2196,21 @@ export default function AcademicWritingPage() {
         return { name: f.source, size: original?.size ?? 0, fileId: f.file_id ?? '' };
       });
       if (uploaded.length) {
-        setUploadedFiles(prev => [...prev, ...uploaded]);
+        // Register IDs BEFORE state update so the purge effect can never race ahead
+        // and delete a file whose ID isn't in sessionUploadedIds yet.
+        uploaded.forEach(f => { if (f.fileId) sessionUploadedIds.current.add(f.fileId); });
+        console.log('[Academic Writing] Upload success — registered IDs:', [...sessionUploadedIds.current]);
+        // Immediate optimistic update — file cards appear instantly in the wizard.
+        setUploadedFiles(prev => {
+          const next = [...prev, ...uploaded];
+          console.log('[Academic Writing] uploadedFiles after upload:', next.map(f => f.fileId));
+          return next;
+        });
         setHasDoc(true);
         setUploadError(null);
+        // Refresh the document library so the new file is visible in the
+        // "My Documents" source tab without requiring a page reload.
+        fetchDocs();
       }
     } catch (err) {
       console.error('[Academic Writing] upload error:', err);
@@ -2129,17 +2218,22 @@ export default function AcademicWritingPage() {
     } finally {
       setUploading(false);
     }
-  }, [uploading, he, selectedCourse]);
+  }, [uploading, he, selectedCourse, fetchDocs]);
 
   const handleRemoveFile = useCallback((fileToRemove: UploadedFile) => {
     const remaining = uploadedFiles.filter(f => f.fileId !== fileToRemove.fileId);
     setUploadedFiles(remaining);
-    if (remaining.length === 0) setHasDoc(docs.length > 0);
+    // When the user explicitly removes the last file, fully reset hasDoc so the
+    // wizard's step2Ready check correctly requires a new upload rather than
+    // ghosting on other course documents that happen to exist in the library.
+    if (remaining.length === 0) setHasDoc(false);
     // Session-only uploads are deleted from the backend when removed from the UI.
     if (fileToRemove.fileId) {
-      authFetch(`${API}/documents/${fileToRemove.fileId}`, { method: 'DELETE' }).catch(() => {});
+      authFetch(`${API}/documents/${fileToRemove.fileId}`, { method: 'DELETE' })
+        .then(() => fetchDocs()) // Refresh library so the deleted file disappears
+        .catch(() => {});
     }
-  }, [uploadedFiles, docs]);
+  }, [uploadedFiles, fetchDocs]);
 
   const handleLogout = useCallback(() => {
     _clearAuth();
@@ -2204,8 +2298,10 @@ export default function AcademicWritingPage() {
             selectedDocId={selectedDocId} onSelectDoc={setSelectedDocId}
             writingType={writingType} onSelectType={setWritingType}
             uploadedFiles={uploadedFiles} uploading={uploading} uploadError={uploadError} onDrop={handleDrop} onRemoveFile={handleRemoveFile}
-            hasDoc={hasDoc}
-            initialStep={wizardSourceType ? 3 : 1}
+            hasDoc={hasDoc} onSourceTypeChange={setWizardSourceType}
+            topic={wizardTopic}
+            onTopicChange={setWizardTopic}
+            initialStep={wizardSourceType ? 4 : 1}
             initialSourceType={wizardSourceType}
             initialCustomInstructions={wizardInstructions}
             initialUsePersonalStyle={wizardPersonalStyle}
@@ -2213,7 +2309,7 @@ export default function AcademicWritingPage() {
             initialPageCount={wizardPageCount}
             onStart={(ci, ps, is, pc, st) => { setWizardInstructions(ci); setWizardPersonalStyle(ps); setWizardIncludeSources(is); setWizardPageCount(pc); setWizardSourceType(st); router.push('?step=writing'); }}
           />
-        ) : (
+        ) : wizardTopic.trim() ? (
           <WritingPanel
             t={t} he={he}
             hasDoc={hasDoc}
@@ -2229,8 +2325,9 @@ export default function AcademicWritingPage() {
             sourceType={wizardSourceType}
             sourceDocId={selectedDocId}
             sourceUploadFileIds={activeSourceFileIds}
+            initialTopic={wizardTopic}
           />
-        )}
+        ) : null}
       </main>
 
     </div>

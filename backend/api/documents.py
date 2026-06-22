@@ -106,7 +106,9 @@ _EDUCATIONAL_SYNTHESIS_SYSTEM = (
     "RULES:\n"
     "- If the document is in Hebrew, write the entire response in Hebrew.\n"
     "- Use LaTeX ($...$ inline, $$...$$ display) for every mathematical expression.\n"
-    "- Be direct and exam-focused. This is a study guide, not a summary."
+    "- Be direct and exam-focused. This is a study guide, not a summary.\n"
+    "- CONCISENESS: No preamble, no 'Here is your study guide', no closing remarks. "
+    "Begin immediately with '## Bottom Line'."
 )
 
 
@@ -193,6 +195,7 @@ _EPHEMERAL_SYSTEM = (
     "Answer the question in a detailed, well-structured way based strictly and exclusively on the provided content. "
     "Use direct quotes and concrete examples from the document where relevant. "
     "If the answer is not found in the document, state this clearly — never fabricate information not present in the text. "
+    "CONCISENESS: No preamble, no 'Certainly!', no 'Here is the answer'. Start immediately with the answer itself. "
     "CRITICAL RULE: Detect the language of the user's question. Reply exclusively in that same language — "
     "if the user writes in Hebrew, reply in fluent natural Hebrew; if the user writes in English, reply in English."
 )

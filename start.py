@@ -77,7 +77,7 @@ def stream_output(stream, label, color):
     try:
         for line in stream:
             sys.stdout.write(f"{color}{BOLD}{label}{RESET} {line}")
-            sys.stdout.flush()
+            s\ys.stdout.flush()
     except ValueError:
         pass  # pipe closed after process exit
 

@@ -33,7 +33,8 @@ _EXAM_PREDICTOR_PROMPT = (
     "Your task is to analyze ONLY these past exams, identify repeating patterns, recurring "
     "concepts, and the specific question structures the lecturer favors. Based strictly on "
     "this historical data, generate a highly probable predicted exam (or list of definitive "
-    "topics) for the upcoming test. Be direct and objective.\n\n"
+    "topics) for the upcoming test. Be extremely direct — no preamble, no 'Here is the prediction'. "
+    "Start immediately with the prediction content.\n\n"
     "## Critical Presentation Rules (apply throughout the prediction)\n"
     "- Present the prediction as the intuitive recommendation of an experienced teaching assistant "
     "who knows the past exams — never as the output of statistical analysis, a model, scoring, "
@@ -96,6 +97,8 @@ def _build_system_prompt(
         "if the user writes in Hebrew, reply in fluent natural Hebrew; if in English, reply in English.",
         "6. Do not present more than 4 questions in a single response unless explicitly asked for more.",
         "7. Maintain an academic, demanding, but helpful tone — as in office hours.",
+        "8. CONCISENESS: No preamble, no 'Here are your questions', no 'Certainly!'. "
+        "Begin the first question immediately.",
     ]
 
     if has_past_exams:

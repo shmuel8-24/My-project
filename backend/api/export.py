@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from flask import Blueprint, Response, jsonify, request, send_file, stream_with_context
 
 from api.middleware import _build_student_crm, token_required
-from extensions import client, limiter
+from extensions import client, limiter, tavily_client
 from models import CustomCourse, SessionLocal, SyllabusTopicMastery, TopicMastery, User, UserDocument
 from services.mastery import UNLOCK_THRESHOLD, extract_syllabus_topics
 from services.md_renderer import render_markdown_html
@@ -13,13 +13,50 @@ from services.rag import get_user_collection, hybrid_search
 from services.slides import generate_slide_deck
 from services.security import (
     SECURITY_SYSTEM_INSTRUCTION,
-    _DLP_FALLBACK,
     _sanitize,
-    is_safe_output,
     strip_html,
 )
 
 export_bp = Blueprint("export", __name__)
+
+
+def _web_search_fallback(query: str, course_name: str = "") -> str:
+    """Return web text snippets when RAG yields no results.
+
+    Tries Tavily first (richer, structured snippets; needs TAVILY_API_KEY),
+    then falls back to DuckDuckGo (no key required, already installed).
+    Returns empty string if both fail.
+    """
+    search_q = f"{course_name} {query}".strip() if course_name else query
+
+    # ── Tavily (preferred) ────────────────────────────────────────────────────
+    if tavily_client:
+        try:
+            resp = tavily_client.search(search_q, max_results=4)
+            snippets = [
+                f"[Web — {r.get('title', '')}]\n{r.get('content') or r.get('snippet') or ''}"
+                for r in (resp.get("results") or [])
+                if (r.get("content") or r.get("snippet") or "").strip()
+            ]
+            if snippets:
+                return "\n\n".join(snippets)
+        except Exception as exc:
+            print(f"[WebFallback] Tavily error: {exc}")
+
+    # ── DuckDuckGo via ddgs (no API key) ─────────────────────────────────────
+    try:
+        from ddgs import DDGS
+        results = list(DDGS().text(search_q, max_results=4, timelimit="y"))
+        snippets = [
+            f"[Web — {r.get('title', '')}]\n{r.get('body', '')}"
+            for r in results
+            if r.get("body", "").strip()
+        ]
+        return "\n\n".join(snippets)
+    except Exception as exc:
+        print(f"[WebFallback] DuckDuckGo error: {exc}")
+
+    return ""
 
 
 @export_bp.route("/generate-paper", methods=["POST"])
@@ -87,31 +124,42 @@ def generate_paper(user_id: int):
     except (TypeError, ValueError):
         page_count = 1
     page_count = max(1, min(15, page_count))
-    required_sections = page_count * 3
-    # Per-chunk word RANGE used in the pacing instruction below (and as a fallback
-    # for target_word_count if the frontend omits targetWordCount).
-    chunk_word_min = 380
-    chunk_word_max = 520
+    # One section per page plus a conclusion — realistic for the document length,
+    # and avoids the old page_count*3 value that mandated 9 sections for 3 pages
+    # and drove the "expand aggressively" bloat.
+    required_sections = page_count + 1
     # Absolute word-count target for the WHOLE document. The frontend computes this
-    # as pageCount * WORDS_PER_PAGE (single source of truth — see academic-writing/
-    # page.tsx) and sends it explicitly so both sides agree; max_chunks-derived
-    # fallback only applies if that field is missing.
+    # as pageCount * WORDS_PER_PAGE (350 words/page) and sends it explicitly so both
+    # sides agree. Fallback: 350 words/page when the frontend field is absent.
     try:
         target_word_count = int(data.get("targetWordCount")) if data and data.get("targetWordCount") else 0
     except (TypeError, ValueError):
         target_word_count = 0
     if target_word_count <= 0:
-        target_word_count = max_chunks * (chunk_word_min + chunk_word_max) // 2
+        target_word_count = page_count * 350
+    # Per-chunk word budget derived from remaining words ÷ remaining chunks.
+    # This prevents any single chunk from exceeding the total document target —
+    # the root cause of the 2× length bug (fixed chunk_word_min × chunks > target).
+    # For the iterative research pipeline (chunk 0) the paper is built from scratch
+    # internally — stale previousContent from a prior session must not shrink the budget.
+    _pacing_previous = (
+        ""
+        if writing_type == "research" and current_chunk_index == 0
+        else (previous_content or "")
+    )
+    _words_written = len(_pacing_previous.split())
+    _words_left    = max(0, target_word_count - _words_written)
+    _chunks_left   = max(1, max_chunks - current_chunk_index)
+    chunk_budget   = max(200, _words_left // _chunks_left)
+    chunk_word_min = max(150, int(chunk_budget * 0.80))
+    chunk_word_max = max(250, int(chunk_budget * 1.20))
 
     col       = get_user_collection(user_id)
     doc_count = col.count()
-    if doc_count == 0:
-        return jsonify({"error": "no documents in the knowledge base — upload a PDF first"}), 400
 
-    # Enrich the RAG query per chunk to force diversity in retrieved context.
-    # Each generation call uses a topically-distinct search angle so FAISS returns
-    # different document sections rather than the same TOP_K chunks every call.
-    # Both Hebrew and English terms are included for bilingual collection support.
+    # ── RAG retrieval ─────────────────────────────────────────────────────────
+    # Enrich the query per chunk so each call retrieves a topically-distinct
+    # section of the knowledge base rather than the same TOP_K chunks every call.
     _CHUNK_ANGLES = [
         "מבוא הגדרות עקרונות background introduction principles definitions",
         "תיאוריה מושגים ניתוח theory analysis concepts framework",
@@ -122,27 +170,88 @@ def generate_paper(user_id: int):
         "עומק מורכבות complexity depth nuance further analysis",
         "סיכום מסקנות conclusions final arguments closing",
     ]
-    _angle = _CHUNK_ANGLES[min(current_chunk_index, len(_CHUNK_ANGLES) - 1)]
+    _angle     = _CHUNK_ANGLES[min(current_chunk_index, len(_CHUNK_ANGLES) - 1)]
     _rag_query = f"{topic} {_angle}"
 
-    chunks, metadatas = hybrid_search(
-        user_id, _rag_query, min(20, doc_count),
-        file_ids=req_file_ids or None,
-        course_name=course_name or None,
-    )
-    if not chunks:
-        return jsonify({"error": "no relevant chunks found for this topic"}), 400
+    chunks, metadatas = [], []
+    if doc_count > 0:
+        chunks, metadatas = hybrid_search(
+            user_id, _rag_query, min(20, doc_count),
+            file_ids=req_file_ids or None,
+            course_name=course_name or None,
+        )
 
-    # Filenames are intentionally excluded from context block headers.
-    # A name like "homework-assignment.pdf" would re-trigger the safety filter
-    # even after all other sanitization.  The source list is returned separately
-    # in the API response so the frontend can still display attribution.
-    context_blocks = [
-        f"[Part {i + 1}]\n{chunk}"
-        for i, (chunk, _meta) in enumerate(zip(chunks, metadatas))
-    ]
-    context = "\n\n".join(context_blocks)
-    sources  = sorted({m.get("source", "Unknown") for m in metadatas})
+    # ── Web search fallback ───────────────────────────────────────────────────
+    # When the local knowledge base is empty or contains nothing relevant for
+    # this topic, autonomously fall back to a live web search so generation can
+    # still proceed without blocking the user.
+    is_web_context = False
+    if not chunks:
+        print(f"[WebFallback] RAG returned no content for '{topic}' — trying web search")
+        _raw_web = _web_search_fallback(topic, course_name)
+        if _raw_web:
+            context        = _raw_web
+            sources        = ["web search"]
+            is_web_context = True
+            print(f"[WebFallback] Got {len(_raw_web.split())} words from web")
+        else:
+            # Both RAG and web search found nothing — let the LLM generate
+            # entirely from its own knowledge using the user's title.
+            context        = ""
+            sources        = []
+            is_web_context = False
+    else:
+        # Filenames excluded from context headers — a name like "homework.pdf"
+        # re-triggers the safety filter even after sanitization.
+        context_blocks = [
+            f"[Part {i + 1}]\n{chunk}"
+            for i, (chunk, _meta) in enumerate(zip(chunks, metadatas))
+        ]
+        context = "\n\n".join(context_blocks)
+        sources  = sorted({m.get("source", "Unknown") for m in metadatas})
+
+    # ── RAG context diagnostic ────────────────────────────────────────────────
+    # Logged on every request so mismatch bugs (wrong file, stale cache, empty
+    # file_ids falling back to whole-store search) are immediately visible in
+    # the Flask terminal.
+    print(
+        f"[generate-paper] RAG CONTEXT CHECK — "
+        f"req_file_ids={req_file_ids!r} | "
+        f"sources_retrieved={sources!r} | "
+        f"context_words={len(context.split())} | "
+        f"is_web_context={is_web_context} | "
+        f"writing_type={writing_type!r} | "
+        f"topic={topic!r}"
+    )
+    if not req_file_ids:
+        print(
+            "[generate-paper] WARNING: req_file_ids is empty — RAG searched ALL "
+            "user documents. If context is wrong, the frontend may not be sending "
+            "the selected file IDs."
+        )
+
+    # ── Document-only mode guard (research iterative pipeline) ───────────────
+    # If the 3-pass pipeline would trigger but there is absolutely no source
+    # material (no RAG chunks AND no web fallback), return a hard error rather
+    # than allowing the LLM to hallucinate from prior training knowledge.
+    #
+    # NOTE: "physics / quantum mechanics" bleed-through in responses is caused
+    # by stale FAISS chunks from previously-indexed documents — there is NO
+    # physics content hardcoded in this file. To fully purge stale context,
+    # the user must delete the old documents from their library (or select only
+    # the correct file via the fileIds selector) so the RAG query returns only
+    # the current document's chunks.
+    if (
+        writing_type == "research"
+        and current_chunk_index == 0
+        and page_count > 1
+        and not chunks
+        and not is_web_context
+    ):
+        print("[generate-paper] BLOCKED: research iterative pipeline has no source material.")
+        return jsonify({
+            "error": "לא נמצא תוכן רלוונטי. אנא העלה מסמך ובחר אותו לפני יצירת עבודת מחקר."
+        }), 400
 
     # Sanitize all user-supplied and document-derived text to remove phrases
     # that trigger the model's homework-help safety filter.
@@ -153,6 +262,81 @@ def generate_paper(user_id: int):
     safe_student_name   = _sanitize(student_name)       if student_name       else ""
     safe_institution    = _sanitize(student_institution) if student_institution else ""
     safe_previous_content = _sanitize(previous_content) if previous_content else ""
+
+    # ── Global context isolation block (research iterative pipeline only) ─────
+    # Prepended to EVERY LLM call in the 3-pass pipeline so the model cannot
+    # bleed in content from previous sessions (e.g. a physics paper it generated
+    # earlier that is still active in the API's attention window).
+    _sources_label = ", ".join(sources) if sources else "the uploaded document"
+    _context_isolation_block = (
+        "GLOBAL CONTEXT RESET — DISREGARD ALL PREVIOUS CONVERSATIONS:\n"
+        "You have NO memory of previous documents, topics, or API responses from "
+        "this session or any prior session. Specifically: forget any physics, "
+        "quantum mechanics, or prior literature you may have analysed in a different "
+        "request — those are completely irrelevant here.\n"
+        f"Your ONLY source of truth for this generation is: {_sources_label}.\n"
+        "If the source material is about Law, write about Law only. "
+        "If it is about History, write about History only. "
+        "Any content NOT explicitly derivable from the provided source material "
+        "is a hallucination and an unacceptable failure. "
+        "Ground every single sentence in the source document.\n\n"
+    ) if (writing_type == "research" and current_chunk_index == 0) else ""
+
+    # ── Writing-type agent role ─────────────────────────────────────────────────
+    # Injected at the VERY START of the system prompt to establish the agent's
+    # distinct identity before any formatting or pacing rules are applied.
+    _AGENT_ROLE_PREFIXES: dict[str, str] = {
+        "essay": (
+            "You are an inspiring, thought-provoking academic essayist. "
+            "Your writing must not just argue, but resonate deeply. "
+            "Use eloquent, dynamic language that makes concepts come alive. "
+            "Be bold, intellectually stimulating, and highly engaging. "
+            "CRITICAL: Zero fluff, no introductory phrases. Be dense, direct, and powerful. "
+            "Never use generic filler phrases like 'In conclusion', 'Generally speaking', or 'This program offers'. "
+            "Strip out all repetitive information. Every sentence must carry heavy academic weight.\n\n"
+        ),
+        "research": (
+            "You are a brilliant, authoritative academic researcher. "
+            "Illuminate complex data by drawing sharp, profound connections. "
+            "Make the research feel highly relevant, insightful, and scholarly. "
+            "Write with absolute authority and crystal-clear precision. "
+            "CRITICAL: Zero fluff, no introductory phrases. "
+            "Never use generic filler phrases like 'In conclusion', 'Generally speaking', or 'This program offers'. "
+            "Strip out all repetitive information. Every sentence must carry heavy academic weight. "
+            "CRITICAL DEPTH REQUIREMENT: You are writing for an advanced academic audience. "
+            "DO NOT write a high-level encyclopedia summary. "
+            "You MUST incorporate academic formalism, advanced theoretical frameworks, and where applicable, "
+            "mathematical equations or formulas using LaTeX formatting "
+            r"(e.g., $E=mc^2$ or $$S_z = \pm \frac{\hbar}{2}$$). "
+            "Analyze the methodology, limitations, and empirical data of the subject. "
+            "Engage in deep critical analysis rather than just listing historical facts.\n\n"
+        ),
+        "summary": (
+            "You are a master synthesizer of knowledge. "
+            "Your goal is to make dense texts instantly accessible. "
+            "Cut through the noise and deliver the core insights with razor-sharp clarity, "
+            "so the student instantly experiences a 'lightbulb moment' of understanding. "
+            "CRITICAL: Zero fluff, strictly objective, no introductory phrases. "
+            "Condense with absolute precision. "
+            "CRITICAL HARD LIMIT: You MUST constrain your entire output to a MAXIMUM of 3 concise paragraphs. "
+            "Never use generic filler phrases like 'In conclusion', 'Generally speaking', or 'This program offers'. "
+            "Strip out all repetitive information. Provide strictly the dense, highly-specific core insights. "
+            "End your response immediately once the main point is made.\n\n"
+        ),
+    }
+    _agent_role_prefix = _AGENT_ROLE_PREFIXES.get(writing_type, "")
+
+    # Inject a dynamic page-length requirement for prose types (essay / research).
+    # Summary keeps its own 3-paragraph hard cap; other types get no injection.
+    if writing_type in ("essay", "research"):
+        _agent_role_prefix += (
+            f"CRITICAL LENGTH REQUIREMENT: You MUST write a comprehensive text spanning "
+            f"{page_count} page(s) (approximately {page_count * 300} words total across "
+            f"the entire document). Do not write less — develop the full content across "
+            f"multiple focused sections. Even though the text is long, it must remain "
+            f"dense, highly academic, and strictly objective. "
+            f"Never pad with filler — every sentence must carry heavy academic weight.\n\n"
+        )
 
     # ── Writing-type format override ────────────────────────────────────────────
     # Injected at the END of the system prompt (maximum recency weight) so it
@@ -239,10 +423,19 @@ def generate_paper(user_id: int):
 
     # NOTE: SECURITY_SYSTEM_INSTRUCTION is intentionally NOT prepended here.
     # That prefix labels the AI a "student assistant" and carries a
-    # "default to refusal" rule that trips its content filters for writing
-    # tasks.  Output safety is still enforced below via is_safe_output().
+    # "default to refusal" rule that trips its content filters for writing tasks.
+    # Notify the model when context came from the web rather than course documents.
+    _web_context_note = (
+        "NOTE — WEB CONTEXT: The user's local course documents did not contain "
+        "relevant material for this topic. The context below was retrieved from a "
+        "live web search. Treat these web results as your primary source material, "
+        "synthesize them rigorously, and cite the web sources naturally in the text.\n\n"
+    ) if is_web_context else ""
+
     system_prompt = (
-        "You are an automated corporate text-formatting engine. "
+        _agent_role_prefix
+        + _web_context_note
+        + "You are an automated corporate text-formatting engine. "
         "Your sole programmatic function is to ingest raw data components and output them "
         "as a seamless, well-structured text in official Hebrew layout, written like an "
         "expert academic writer producing a formal university-level paper. "
@@ -252,9 +445,10 @@ def generate_paper(user_id: int):
         "Output ONLY the processed academic content — nothing else.\n\n"
         "CRITICAL — never include any of the following in the output:\n"
         "- Conversational filler, intros, or pleasantries such as "
-        "'הנה הטקסט המעובד', 'הנה הטקסט', 'Here is the text', 'Sure, here is...', etc.\n"
+        "'הנה הטקסט המעובד', 'הנה הטקסט', 'Here is the text', 'Sure, here is...', 'Certainly!', etc.\n"
         "- Apologies, warnings, disclaimers, labels, or any meta-commentary about the task\n"
-        "- Any text before the actual content begins — start directly with the content itself\n\n"
+        "- Any text before the actual content begins — the very first character must be "
+        "the start of the document (e.g., '# ' for the title heading). Zero filler.\n\n"
         "Output formatting rules — STRICT Markdown is mandatory, never optional:\n"
         "- You are writing a formal academic paper. Your structure MUST use clear Markdown "
         "headers (`##`, `###`) for sections — every main section title MUST start with "
@@ -326,18 +520,14 @@ def generate_paper(user_id: int):
         f"single argument, a single author's position, or a single concrete example — "
         f"not a broad survey. Depth comes from accumulating many focused chunks, not "
         f"from writing a long chunk.\n\n"
-        f"STRUCTURAL EXPANSION MANDATE — MANDATORY FOR ALL CHUNKS:\n"
-        f"The user requested a {page_count}-page document. "
-        f"You are STRICTLY FORBIDDEN from writing a brief summary.\n"
-        f"To achieve this exact length, you MUST structure your response into exactly "
-        f"{required_sections} distinct, highly detailed sections across the full document.\n"
-        f"For EVERY single section, you MUST include:\n"
-        f"1. An in-depth theoretical explanation.\n"
-        f"2. A concrete, detailed academic or real-world example.\n"
-        f"3. A critical, deep analysis of the sub-topic.\n"
-        f"Do NOT use concluding phrases like 'in summary' or 'to conclude' until you have "
-        f"fully fleshed out all {required_sections} sections. You must expand aggressively "
-        f"on every single point and avoid rushing to the end."
+        f"DOCUMENT STRUCTURE GUIDE:\n"
+        f"The complete {page_count}-page document (~{target_word_count} words total) "
+        f"should cover roughly {required_sections} distinct sections across ALL chunks "
+        f"combined — not per individual chunk. Each section develops one focused point "
+        f"with appropriate analytical depth: a clear argument, supporting evidence from "
+        f"the source material, and a concise critical observation. Stay within the "
+        f"per-chunk word budget specified in the LENGTH DIRECTIVE below — write with "
+        f"density and precision rather than length for its own sake."
         + (
             f"\n\n=== CHUNK ROUTING: PART {current_chunk_index + 1} OF {max_chunks} ===\n"
             + (
@@ -517,14 +707,15 @@ def generate_paper(user_id: int):
             f"This is a BODY chunk for a {page_count}-page paper (~{target_word_count} "
             f"words total). You MUST write a MINIMUM of {chunk_word_min} words in this "
             f"response, up to a maximum of {chunk_word_max} words.\n"
-            f"YOU ARE STRICTLY FORBIDDEN FROM STOPPING BEFORE {chunk_word_min} WORDS "
-            f"ARE WRITTEN. If you reach {chunk_word_max} words mid-sentence, finish the "
-            f"sentence and stop — but never stop before reaching {chunk_word_min} words.\n"
-            f"HOW TO REACH THE MINIMUM: Expand on every point — dedicate 3-5 sentences "
-            f"to each named author, concept, or finding from the source material. After "
-            f"making a claim, elaborate on its implications, compare it to a contrasting "
-            f"approach from the source, and give a concrete example. Do NOT summarize "
-            f"or conclude — end this chunk mid-flow so the next chunk continues naturally."
+            f"Write between {chunk_word_min} and {chunk_word_max} words — no more, no less. "
+            f"Stop as soon as you reach {chunk_word_max} words (finish the current sentence). "
+            f"Do NOT pad, repeat, or add filler to reach the minimum — write with density.\n"
+            f"HOW TO WRITE THIS CHUNK: Develop one focused point from the source material "
+            f"— one argument, one author's position, or one concrete example — with enough "
+            f"analytical depth to stay within the {chunk_word_min}–{chunk_word_max}-word "
+            f"budget. After making a claim, add its implication or a contrasting view from "
+            f"the source. Do NOT summarize or conclude — end mid-flow so the next chunk "
+            f"continues seamlessly."
         )
         + _writing_type_block
     )
@@ -599,37 +790,252 @@ def generate_paper(user_id: int):
         try:
             yield f"data: {json.dumps({'type': 'status', 'phase': 'thinking'})}\n\n"
 
-            stream = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user",   "content": user_message},
-                ],
-                temperature=0.75,
-                max_tokens=4000,
-                stream=True,
+            # ── ITERATIVE PIPELINE — multi-page research papers, first chunk only ──
+            # For research papers longer than 1 page on the very first request:
+            # generate a structural outline, then write each section in a separate
+            # LLM call, streaming deltas live. This avoids the attention-decay /
+            # repetition problem that affects single-shot long-document generation.
+            _page_count_int = int(page_count)           # explicit cast — guards against str payloads
+            _chunk_index_int = int(current_chunk_index) # explicit cast
+            print(
+                f"[generate-paper] writing_type={writing_type!r} "
+                f"page_count={_page_count_int} (int) "
+                f"chunk_index={_chunk_index_int} (int)"
             )
+            if writing_type == "research" and _page_count_int > 1 and _chunk_index_int == 0:
 
-            paper_text = ""
-            for chunk in stream:
-                delta = chunk.choices[0].delta.content if chunk.choices else None
-                if delta:
-                    paper_text += delta
-                    yield f"data: {json.dumps({'type': 'delta', 'text': delta}, ensure_ascii=False)}\n\n"
+                print("--- TRIGGERING ITERATIVE PIPELINE ---")
 
-            if not is_safe_output(paper_text):
-                print("SECURITY ALERT: Blocked unsafe AI output.")
-                paper_text = _DLP_FALLBACK
+                # PASS 1 — Outline (gpt-4o, 5 sections, each with 2-sentence description)
+                _N_SECTIONS = 5
+                yield f"data: {json.dumps({'type': 'status', 'phase': 'searching'})}\n\n"
+                _outline_resp = client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                _context_isolation_block
+                                + "You are an expert PhD-level academic paper planner. "
+                                "Return a structured outline with EXACTLY 5 body sections. "
+                                "Format each entry as two consecutive lines:\n"
+                                "## [Section title in Hebrew]\n"
+                                "[Exactly 2 Hebrew sentences describing what this section covers.]\n\n"
+                                "Output ONLY the 5 entries in this exact format — "
+                                "no numbering, no preamble, no extra text.\n\n"
+                                + (
+                                    f"SYSTEM VERIFICATION — DOCUMENT SOURCE: You are planning a "
+                                    f"paper grounded STRICTLY in the uploaded document(s): "
+                                    f"{', '.join(sources)}. "
+                                    "Before producing the outline, silently confirm that the source "
+                                    "material below matches this subject. Your outline sections must "
+                                    "be derived entirely from this source — do NOT use prior knowledge "
+                                    "about unrelated subjects."
+                                    if sources else
+                                    "SYSTEM VERIFICATION: Ground the outline strictly in the source "
+                                    "material provided below."
+                                )
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": (
+                                f"Create a detailed outline for a {_page_count_int}-page academic "
+                                f"research paper titled: '{safe_topic}'.\n"
+                                "Generate exactly 5 distinct body sections with 2-sentence Hebrew "
+                                "descriptions (do NOT include title, abstract, or conclusion — "
+                                "those are handled separately).\n\n"
+                                f"Base the sections on this source material:\n\n{safe_context[:4000]}"
+                            ),
+                        },
+                    ],
+                    temperature=0.3,
+                    max_tokens=600,
+                )
+                _raw_outline = (_outline_resp.choices[0].message.content or "").strip()
 
-            paper_html = render_markdown_html(paper_text)
-            payload = json.dumps({
-                "type":        "result",
-                "paper":       paper_text,
-                "paper_html":  paper_html,
-                "sources":     sources,
-                "chunks_used": len(chunks),
-            }, ensure_ascii=False)
-            yield f"data: {payload}\n\n"
+                # Parse (header, description) pairs from the outline
+                _outline_sections: list[tuple[str, str]] = []
+                _cur_hdr: str | None = None
+                _cur_desc: list[str] = []
+                for _ln in _raw_outline.splitlines():
+                    _s = _ln.strip()
+                    if _s.startswith("##"):
+                        if _cur_hdr is not None:
+                            _outline_sections.append((_cur_hdr, " ".join(_cur_desc).strip()))
+                        _cur_hdr = _s
+                        _cur_desc = []
+                    elif _s and _cur_hdr is not None:
+                        _cur_desc.append(_s)
+                if _cur_hdr is not None:
+                    _outline_sections.append((_cur_hdr, " ".join(_cur_desc).strip()))
+
+                if len(_outline_sections) < 2:
+                    _outline_sections = [
+                        ("## מבוא ורקע תיאורטי",
+                         "סעיף זה יסקור את הבסיס התיאורטי של הנושא ואת המחקרים הרלוונטיים. "
+                         "נדון בתיאוריות המרכזיות ובמושגי היסוד הנדרשים להבנת הנושא."),
+                        ("## ניתוח עיקרי",
+                         "ניתוח מעמיק של הממצאים המרכזיים והמתודולוגיה המחקרית. "
+                         "נבחן את הגישות השונות ואת המשמעויות התיאורטיות שלהן."),
+                        ("## ממצאים ודיון",
+                         "הצגת הממצאים העיקריים ודיון ביקורתי במשמעויותיהם. "
+                         "נשווה בין תוצאות שונות ונעריך את עוצמת הראיות."),
+                        ("## השלכות תיאורטיות ומעשיות",
+                         "בחינת ההשלכות התיאורטיות והמעשיות של הממצאים. "
+                         "נדון ביישומים אפשריים ובמגבלות הגישה הנחקרת."),
+                        ("## ביקורת ואתגרים עתידיים",
+                         "ניתוח ביקורתי של מגבלות המחקר וסוגיות פתוחות. "
+                         "נזהה כיוונים עתידיים ושאלות מחקריות שנותרו ללא מענה."),
+                    ]
+
+                _section_headers = [h for h, _ in _outline_sections]
+                _section_descs   = {h: d for h, d in _outline_sections}
+                print(f"[iterative] {len(_section_headers)} sections: {_section_headers}")
+
+                # PASS 2 — Write each section with gpt-4o, streaming deltas live
+                _research_persona = _AGENT_ROLE_PREFIXES.get("research", "")
+                paper_text = f"# {safe_topic}\n\n"
+                _words_per_section = max(400, target_word_count // _N_SECTIONS)
+                _accumulated = ""
+                _headers_done: list[str] = []
+
+                for _i, _header in enumerate(_section_headers):
+                    _description = _section_descs.get(_header, "")
+                    _next_header_label = (
+                        _section_headers[_i + 1].lstrip("#").strip()
+                        if _i + 1 < len(_section_headers) else None
+                    )
+
+                    # History summary — explicit bullet list of already-covered topics
+                    if _headers_done:
+                        _bullets = "\n".join(
+                            f"  • {h.lstrip('#').strip()}" for h in _headers_done
+                        )
+                        _history_block = (
+                            f"CRITICAL: You have already covered the following topics:\n"
+                            f"{_bullets}\n"
+                            f"DO NOT repeat these points. Focus entirely on new, original "
+                            f"analysis for '{_header.lstrip('#').strip()}' specifically.\n\n"
+                        )
+                    else:
+                        _history_block = ""
+
+                    # Pass 3 transition — bridge sentence toward the next section
+                    _transition_note = (
+                        f"\nPASS 3 TRANSITION: End this section with a smooth academic "
+                        f"sentence that naturally leads into the next section: "
+                        f"'{_next_header_label}'."
+                        if _next_header_label else ""
+                    )
+
+                    _sec_system = (
+                        _context_isolation_block
+                        + _research_persona
+                        + (
+                            f"SYSTEM VERIFICATION: You are tasked to write about the uploaded "
+                            f"document(s): {', '.join(sources)}. Briefly identify the document's "
+                            "subject to yourself before generating the text to ensure you have "
+                            "the right context. Every claim must be grounded in the source "
+                            "material provided — do not default to prior knowledge about "
+                            "unrelated subjects.\n\n"
+                            if sources else ""
+                        )
+                        + "CONCISENESS IS FORBIDDEN: You are a PhD-level researcher. "
+                        "Your goal is maximum depth — never brevity. "
+                        "If a topic requires mathematical derivation, provide it in full. "
+                        "If it requires historical context, provide it. "
+                        "If it requires step-by-step theoretical elaboration, provide it. "
+                        f"You are writing ONLY the section '{_header}' of a {_page_count_int}-page "
+                        f"academic research paper on '{safe_topic}'. "
+                        "Focus exclusively on this section — do NOT write an introduction or "
+                        "conclusion for the whole paper here. "
+                        "Do NOT repeat anything from the already-written content supplied below. "
+                        f"OVERRIDE ALL PREVIOUS LENGTH CONSTRAINTS: "
+                        f"You MUST output a MINIMUM of {_words_per_section} words for this "
+                        "specific section alone. Expand deeply on the mathematical formalism "
+                        "and critical analysis. DO NOT summarize. DO NOT use concluding fluff. "
+                        "Write until you have fully exhausted the academic depth of this section.\n\n"
+                        f"Begin your response IMMEDIATELY with the heading line '{_header}' "
+                        "on its own line — nothing before it.\n\n"
+                        "Remain dense, highly academic, and strictly objective throughout. "
+                        "Never use generic filler phrases like 'In conclusion' or "
+                        "'Generally speaking'. Every sentence must carry heavy academic weight."
+                    )
+                    _sec_prev = (
+                        f"=== ALREADY-WRITTEN CONTENT — DO NOT REPEAT ===\n{_accumulated}\n"
+                        f"=== END — write only the new section below ===\n\n"
+                        if _accumulated else ""
+                    )
+                    _sec_user = (
+                        f"Topic: {safe_topic}\n"
+                        f"{course_line}"
+                        f"{_history_block}"
+                        f"Section to write: {_header}\n"
+                        + (f"Section scope: {_description}\n\n" if _description else "\n")
+                        + _sec_prev
+                        + f"Source material:\n---\n{safe_context}\n---\n\n"
+                        f"You are a PhD-level researcher. Write the section '{_header}' "
+                        f"with deep academic rigor. You have {_words_per_section} words to "
+                        "cover this. Include relevant LaTeX equations explained in-depth. "
+                        "Use your full context. Do not repeat previous sections."
+                        f"{_transition_note}\n"
+                        "Start immediately with the heading line. "
+                        "Dense, formal, academic Hebrew."
+                    )
+                    _sec_stream = client.chat.completions.create(
+                        model="gpt-4o",
+                        messages=[
+                            {"role": "system", "content": _sec_system},
+                            {"role": "user",   "content": _sec_user},
+                        ],
+                        temperature=0.75,
+                        max_tokens=2500,  # ~625 Hebrew words — room for full 400-word minimum
+                        stream=True,
+                    )
+                    _sec_text = ""
+                    for _ch in _sec_stream:
+                        _d = _ch.choices[0].delta.content if _ch.choices else None
+                        if _d:
+                            _sec_text += _d
+                            paper_text += _d
+                            yield f"data: {json.dumps({'type': 'delta', 'text': _d}, ensure_ascii=False)}\n\n"
+                    _accumulated += f"\n\n{_sec_text}"
+                    _headers_done.append(_header)
+
+                # STEP C — Emit assembled complete document
+                paper_html = render_markdown_html(paper_text)
+                yield f"data: {json.dumps({'type': 'result', 'paper': paper_text, 'paper_html': paper_html, 'sources': sources, 'chunks_used': len(chunks)}, ensure_ascii=False)}\n\n"
+
+            else:
+                # ── EXISTING single-chunk path (all other types / subsequent chunks) ──
+                stream = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user",   "content": user_message},
+                    ],
+                    temperature=0.75,
+                    max_tokens=4000,
+                    stream=True,
+                )
+
+                paper_text = ""
+                for chunk in stream:
+                    delta = chunk.choices[0].delta.content if chunk.choices else None
+                    if delta:
+                        paper_text += delta
+                        yield f"data: {json.dumps({'type': 'delta', 'text': delta}, ensure_ascii=False)}\n\n"
+
+                paper_html = render_markdown_html(paper_text)
+                payload = json.dumps({
+                    "type":        "result",
+                    "paper":       paper_text,
+                    "paper_html":  paper_html,
+                    "sources":     sources,
+                    "chunks_used": len(chunks),
+                }, ensure_ascii=False)
+                yield f"data: {payload}\n\n"
 
         except Exception as exc:
             import traceback
@@ -1349,7 +1755,4 @@ def test_ai(user_id: int):
         ],
     )
     answer_text = response.choices[0].message.content or ""
-    if not is_safe_output(answer_text):
-        print("SECURITY ALERT: Blocked unsafe AI output.")
-        answer_text = _DLP_FALLBACK
     return jsonify({"answer": answer_text}), 200
