@@ -76,7 +76,11 @@ def stream_output(stream, label, color):
     """Read lines from a stream and print them with a colored, fixed-width label."""
     try:
         for line in stream:
-            sys.stdout.write(f"{color}{BOLD}{label}{RESET} {line}")
+            sys.stdout.write(f"{color}{BOLD}{label}{RESE
+            
+            
+            
+            T} {line}")
             sys.stdout.flush()
 
     except ValueError:

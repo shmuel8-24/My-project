@@ -8,6 +8,7 @@ import { useLanguage } from './providers/language';
 import { useCourse }   from './providers/course';
 import { useAuth }     from './providers/auth';
 import { landing } from './locales/landing';
+import { InteractiveHero } from '../components/InteractiveHero';
 
 type Mode = 'magic' | 'password';
 type ForgotView = 'email' | 'sent' | null;
@@ -190,20 +191,15 @@ export default function HomePage() {
   const [blogInView,        setBlogInView]        = useState(false);
   const [activeBlogId,      setActiveBlogId]      = useState<number | null>(null);
 
-  const [loginModalClosing,    setLoginModalClosing]    = useState(false);
   const [registerModalClosing, setRegisterModalClosing] = useState(false);
-  const loginCloseTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
   const registerCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Cleanup timers on unmount
   useEffect(() => () => {
-    if (loginCloseTimerRef.current)    clearTimeout(loginCloseTimerRef.current);
     if (registerCloseTimerRef.current) clearTimeout(registerCloseTimerRef.current);
   }, []);
 
   const closeModal = useCallback(() => {
-    if (loginCloseTimerRef.current) { clearTimeout(loginCloseTimerRef.current); loginCloseTimerRef.current = null; }
-    setLoginModalClosing(false);
     setIsLoginModalOpen(false);
     setIsTransitioning(false);
     setError(''); setNetError(false);
@@ -235,14 +231,10 @@ export default function HomePage() {
     setIsRegisterModalOpen(true);
   }, [closeModal]);
 
-  // Animated close — plays exit animation then fires the actual close
+  // The expanding-card panel's own spring animation plays the close transition —
+  // just flip the state, InteractiveHero handles the rest.
   const handleCloseLoginModal = useCallback(() => {
-    if (loginCloseTimerRef.current) return;
-    setLoginModalClosing(true);
-    loginCloseTimerRef.current = setTimeout(() => {
-      loginCloseTimerRef.current = null;
-      closeModal();
-    }, 240);
+    closeModal();
   }, [closeModal]);
 
   const handleCloseRegisterModal = useCallback(() => {
@@ -711,400 +703,8 @@ export default function HomePage() {
         </div>
       </header>
 
-      {/* ─── Hero ─── */}
-      <main
-        className="relative z-10 flex items-center justify-center"
-        style={{ minHeight: 'calc(100vh - 116px)', padding: '40px 24px' }}
-      >
-        <div
-          style={{
-            position: 'relative', width: '100%', maxWidth: '520px',
-            background: 'rgba(255,255,255,0.68)', backdropFilter: 'blur(18px)',
-            WebkitBackdropFilter: 'blur(18px)', borderRadius: '24px',
-            padding: '52px 44px 44px',
-            boxShadow: '0 8px 48px rgba(30,42,69,0.10), 0 1px 8px rgba(30,42,69,0.06)',
-            border: '1px solid rgba(255,255,255,0.85)', textAlign: 'center',
-          }}
-        >
-          <p style={{ fontSize: '0.8125rem', fontWeight: 500, color: '#8899aa', letterSpacing: '0.04em', marginBottom: '16px' }}>
-            {t.heroBadge}
-          </p>
-          <h1 style={{ fontSize: 'clamp(2rem, 5vw, 2.7rem)', fontWeight: 800, color: '#1a2540', lineHeight: 1.22, marginBottom: '36px', fontFamily: 'Georgia, serif' }}>
-            {t.heroTitle1}<br />
-            {t.heroTitle2}
-          </h1>
-          <button
-            onClick={openModal}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: '8px',
-              padding: '13px 32px', borderRadius: '12px', fontSize: '1rem',
-              fontWeight: 600, color: 'white', backgroundColor: '#517B3E',
-              border: 'none', cursor: 'pointer',
-              boxShadow: '0 4px 16px rgba(81,123,62,0.38)',
-              transition: 'opacity 0.2s, transform 0.1s',
-            }}
-          >
-            {t.heroCta}
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="9 18 3 12 9 6"/>
-            </svg>
-          </button>
-        </div>
-
-      </main>
-
-      {/* ─── Solutions ─── */}
-      <section ref={solutionsRef} id="solutions" className="relative z-10 py-24 px-6">
-        <div style={{ maxWidth: '960px', margin: '0 auto' }}>
-          <h2
-            className={solutionsVisible ? 'animate-fade-scale-lift' : 'reveal-hidden'}
-            style={{
-              textAlign: 'center',
-              fontSize: 'clamp(1.6rem, 3.5vw, 2.2rem)',
-              fontWeight: 800,
-              color: '#2A3B22',
-              marginBottom: '56px',
-              fontFamily: 'Georgia, serif',
-              letterSpacing: '-0.01em',
-            }}
-          >
-            {t.solutionsTitle}
-          </h2>
-
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 420px), 1fr))',
-              gap: '24px',
-            }}
-          >
-            {/* Card 1 */}
-            <div
-              className={solutionsVisible ? 'animate-fade-scale-lift delay-fade' : 'reveal-hidden'}
-              style={{
-                '--delay': '0.1s',
-                background: 'rgba(255,255,255,0.72)',
-                backdropFilter: 'blur(16px)',
-                WebkitBackdropFilter: 'blur(16px)',
-                borderRadius: '20px',
-                padding: '32px 28px',
-                border: '1px solid rgba(255,255,255,0.85)',
-                boxShadow: '0 4px 24px rgba(30,42,69,0.07), 0 1px 4px rgba(30,42,69,0.04)',
-              } as React.CSSProperties}
-            >
-              <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: 'rgba(81,123,62,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '20px' }}>
-                <MessagesSquare size={22} color="#517B3E" strokeWidth={1.8} />
-              </div>
-              <h3 style={{ fontSize: '1.125rem', fontWeight: 700, color: '#2A3B22', marginBottom: '10px' }}>
-                {t.card1Title}
-              </h3>
-              <p style={{ fontSize: '0.9375rem', color: '#4d5a3e', lineHeight: 1.65, margin: 0 }}>
-                {t.card1Desc}
-              </p>
-            </div>
-
-            {/* Card 2 */}
-            <div
-              className={solutionsVisible ? 'animate-fade-scale-lift delay-fade' : 'reveal-hidden'}
-              style={{
-                '--delay': '0.3s',
-                background: 'rgba(255,255,255,0.72)',
-                backdropFilter: 'blur(16px)',
-                WebkitBackdropFilter: 'blur(16px)',
-                borderRadius: '20px',
-                padding: '32px 28px',
-                border: '1px solid rgba(255,255,255,0.85)',
-                boxShadow: '0 4px 24px rgba(30,42,69,0.07), 0 1px 4px rgba(30,42,69,0.04)',
-              } as React.CSSProperties}
-            >
-              <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: 'rgba(81,123,62,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '20px' }}>
-                <PenTool size={22} color="#517B3E" strokeWidth={1.8} />
-              </div>
-              <h3 style={{ fontSize: '1.125rem', fontWeight: 700, color: '#2A3B22', marginBottom: '10px' }}>
-                {t.card2Title}
-              </h3>
-              <p style={{ fontSize: '0.9375rem', color: '#4d5a3e', lineHeight: 1.65, margin: 0 }}>
-                {t.card2Desc}
-              </p>
-            </div>
-
-            {/* Card 3 */}
-            <div
-              className={solutionsVisible ? 'animate-fade-scale-lift delay-fade' : 'reveal-hidden'}
-              style={{
-                '--delay': '0.5s',
-                background: 'rgba(255,255,255,0.72)',
-                backdropFilter: 'blur(16px)',
-                WebkitBackdropFilter: 'blur(16px)',
-                borderRadius: '20px',
-                padding: '32px 28px',
-                border: '1px solid rgba(255,255,255,0.85)',
-                boxShadow: '0 4px 24px rgba(30,42,69,0.07), 0 1px 4px rgba(30,42,69,0.04)',
-              } as React.CSSProperties}
-            >
-              <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: 'rgba(81,123,62,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '20px' }}>
-                <TrendingUp size={22} color="#517B3E" strokeWidth={1.8} />
-              </div>
-              <h3 style={{ fontSize: '1.125rem', fontWeight: 700, color: '#2A3B22', marginBottom: '10px' }}>
-                {t.card3Title}
-              </h3>
-              <p style={{ fontSize: '0.9375rem', color: '#4d5a3e', lineHeight: 1.65, margin: 0 }}>
-                {t.card3Desc}
-              </p>
-            </div>
-
-            {/* Card 4 */}
-            <div
-              className={solutionsVisible ? 'animate-fade-scale-lift delay-fade' : 'reveal-hidden'}
-              style={{
-                '--delay': '0.7s',
-                background: 'rgba(255,255,255,0.72)',
-                backdropFilter: 'blur(16px)',
-                WebkitBackdropFilter: 'blur(16px)',
-                borderRadius: '20px',
-                padding: '32px 28px',
-                border: '1px solid rgba(255,255,255,0.85)',
-                boxShadow: '0 4px 24px rgba(30,42,69,0.07), 0 1px 4px rgba(30,42,69,0.04)',
-              } as React.CSSProperties}
-            >
-              <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: 'rgba(81,123,62,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '20px' }}>
-                <GraduationCap size={22} color="#517B3E" strokeWidth={1.8} />
-              </div>
-              <h3 style={{ fontSize: '1.125rem', fontWeight: 700, color: '#2A3B22', marginBottom: '10px' }}>
-                {t.card4Title}
-              </h3>
-              <p style={{ fontSize: '0.9375rem', color: '#4d5a3e', lineHeight: 1.65, margin: 0 }}>
-                {t.card4Desc}
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ─── Blog ─── */}
-      <section ref={blogRef} id="blog" className="relative z-10 py-24 px-6">
-        <div style={{ maxWidth: '960px', margin: '0 auto' }}>
-          <h2
-            className={blogInView ? 'animate-fade-scale-lift' : 'reveal-hidden'}
-            style={{
-              textAlign: 'center',
-              fontSize: 'clamp(1.6rem, 3.5vw, 2.2rem)',
-              fontWeight: 800,
-              color: '#2A3B22',
-              marginBottom: '56px',
-              fontFamily: 'Georgia, serif',
-              letterSpacing: '-0.01em',
-            }}
-          >
-            {t.blogTitle}
-          </h2>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {t.blogs.map((blog, idx) => (
-              <div
-                key={blog.id}
-                className={`flex flex-col ${blogInView ? 'animate-fade-scale-lift delay-fade' : 'reveal-hidden'}`}
-                style={{
-                  '--delay': `${0.15 + idx * 0.15}s`,
-                  background: 'rgba(253,252,249,0.60)',
-                  backdropFilter: 'blur(12px)',
-                  WebkitBackdropFilter: 'blur(12px)',
-                  borderRadius: '20px',
-                  padding: '28px 24px 24px',
-                  border: '1px solid #D9E2D1',
-                  boxShadow: '0 2px 12px rgba(30,42,69,0.05)',
-                } as React.CSSProperties}
-              >
-                <h3
-                  style={{
-                    fontSize: '1rem',
-                    fontWeight: 700,
-                    color: '#2A3B22',
-                    lineHeight: 1.45,
-                    marginBottom: '14px',
-                    flexGrow: 0,
-                  }}
-                >
-                  {blog.title}
-                </h3>
-                <p
-                  style={{
-                    fontSize: '0.875rem',
-                    color: '#5a6a52',
-                    lineHeight: 1.7,
-                    margin: 0,
-                    flexGrow: 1,
-                    marginBottom: '24px',
-                  }}
-                >
-                  {blog.excerpt}
-                </p>
-                <button
-                  onClick={() => setActiveBlogId(blog.id)}
-                  style={{
-                    alignSelf: 'flex-start',
-                    padding: '8px 18px',
-                    borderRadius: '8px',
-                    fontSize: '0.8125rem',
-                    fontWeight: 600,
-                    color: '#517B3E',
-                    background: 'rgba(81,123,62,0.10)',
-                    border: '1px solid rgba(81,123,62,0.25)',
-                    cursor: 'pointer',
-                    transition: 'background 0.2s, border-color 0.2s',
-                  }}
-                  onMouseEnter={e => {
-                    (e.currentTarget as HTMLButtonElement).style.background = 'rgba(81,123,62,0.18)';
-                    (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(81,123,62,0.45)';
-                  }}
-                  onMouseLeave={e => {
-                    (e.currentTarget as HTMLButtonElement).style.background = 'rgba(81,123,62,0.10)';
-                    (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(81,123,62,0.25)';
-                  }}
-                >
-                  {blog.readMore} →
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ─── Back to Top ─── */}
-      <button
-        onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-        aria-label="Back to top"
-        className={`fixed bottom-8 right-8 z-50 transition-all duration-300 ${showTopBtn ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 translate-y-4 pointer-events-none'}`}
-        style={{
-          width: '48px',
-          height: '48px',
-          borderRadius: '50%',
-          background: 'rgba(157,192,139,0.82)',
-          backdropFilter: 'blur(12px)',
-          WebkitBackdropFilter: 'blur(12px)',
-          border: '1px solid rgba(255,255,255,0.55)',
-          boxShadow: '0 4px 16px rgba(42,59,34,0.20)',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-        onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(157,192,139,1)'; }}
-        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(157,192,139,0.82)'; }}
-      >
-        <ChevronUp size={20} color="#2A3B22" strokeWidth={2.5} />
-      </button>
-
-      {/* ═══════════════════════════════════════════════════════════════════
-          BLOG ARTICLE MODAL
-      ═══════════════════════════════════════════════════════════════════ */}
-      {activeBlogId !== null && (() => {
-        const blog = t.blogs.find(b => b.id === activeBlogId);
-        if (!blog) return null;
-        return (
-          <div
-            className="fixed inset-0 bg-black/40 backdrop-blur-md z-50 flex items-center justify-center overflow-y-auto py-8 px-4"
-            onClick={() => setActiveBlogId(null)}
-          >
-            <div
-              className="animate-slide-up-fade"
-              dir={lang === 'he' ? 'rtl' : 'ltr'}
-              onClick={e => e.stopPropagation()}
-              style={{
-                position: 'relative',
-                width: '100%',
-                maxWidth: '660px',
-                background: 'rgba(253,252,249,0.88)',
-                backdropFilter: 'blur(24px)',
-                WebkitBackdropFilter: 'blur(24px)',
-                borderRadius: '24px',
-                padding: '52px 44px 44px',
-                boxShadow: '0 16px 64px rgba(30,42,69,0.18), 0 2px 8px rgba(30,42,69,0.08)',
-                border: '1px solid rgba(255,255,255,0.85)',
-              }}
-            >
-              {/* Close button */}
-              <button
-                onClick={() => setActiveBlogId(null)}
-                aria-label="Close"
-                style={{
-                  position: 'absolute',
-                  top: '18px',
-                  right: '18px',
-                  width: '36px',
-                  height: '36px',
-                  borderRadius: '50%',
-                  background: 'rgba(81,123,62,0.10)',
-                  border: '1px solid rgba(81,123,62,0.20)',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  transition: 'background 0.2s',
-                }}
-                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(81,123,62,0.20)'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(81,123,62,0.10)'; }}
-              >
-                <X size={16} color="#2A3B22" strokeWidth={2.5} />
-              </button>
-
-              {/* Article content */}
-              <h2
-                style={{
-                  fontSize: 'clamp(1.1rem, 3vw, 1.4rem)',
-                  fontWeight: 800,
-                  color: '#2A3B22',
-                  lineHeight: 1.4,
-                  marginBottom: '24px',
-                  fontFamily: 'Georgia, serif',
-                  paddingInlineEnd: '32px',
-                }}
-              >
-                {blog.title}
-              </h2>
-              <p
-                style={{
-                  fontSize: '1rem',
-                  color: '#3d4d35',
-                  lineHeight: 1.8,
-                  margin: 0,
-                }}
-              >
-                {blog.fullText}
-              </p>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* ═══════════════════════════════════════════════════════════════════
-          LOGIN MODAL
-      ═══════════════════════════════════════════════════════════════════ */}
-      {isLoginModalOpen && (
-        <div
-          className="fixed inset-0 bg-black/40 backdrop-blur-md z-50 flex items-center justify-center overflow-y-auto py-8"
-          style={{ animation: loginModalClosing ? 'overlay-exit 0.26s ease-in both' : 'overlay-enter 0.3s ease-out both' }}
-          onClick={handleCloseLoginModal}
-        >
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{
-              position: 'relative',
-              width: '100%',
-              maxWidth: '440px',
-              margin: '0 20px',
-              background: 'rgba(255,255,255,0.72)',
-              backdropFilter: 'blur(20px)',
-              WebkitBackdropFilter: 'blur(20px)',
-              borderRadius: '24px',
-              padding: '48px 44px 44px',
-              boxShadow: '0 16px 64px rgba(30,42,69,0.22), 0 2px 12px rgba(30,42,69,0.10)',
-              border: '1px solid rgba(255,255,255,0.88)',
-              animation: loginModalClosing
-                ? 'pricing-exit 0.22s cubic-bezier(0.4,0,0.6,1) both'
-                : 'pricing-enter 0.38s cubic-bezier(0.16,1,0.3,1) both',
-            }}
-          >
+      {/* ─── Interactive Hero — expands into the login/auth panel ─── */}
+      <InteractiveHero onOpenAuth={openModal} lang={lang} isExpanded={isLoginModalOpen}>
             {isTransitioning ? (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 0 36px', gap: '22px' }}>
                 <div
@@ -1451,9 +1051,331 @@ export default function HomePage() {
             )}
               </>
             )}
+      </InteractiveHero>
+
+      {/* ─── Solutions ─── */}
+      <section ref={solutionsRef} id="solutions" className="relative z-10 py-24 px-6">
+        <div style={{ maxWidth: '960px', margin: '0 auto' }}>
+          <h2
+            className={solutionsVisible ? 'animate-fade-scale-lift' : 'reveal-hidden'}
+            style={{
+              textAlign: 'center',
+              fontSize: 'clamp(1.6rem, 3.5vw, 2.2rem)',
+              fontWeight: 800,
+              color: '#2A3B22',
+              marginBottom: '56px',
+              fontFamily: 'Georgia, serif',
+              letterSpacing: '-0.01em',
+            }}
+          >
+            {t.solutionsTitle}
+          </h2>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 420px), 1fr))',
+              gap: '24px',
+            }}
+          >
+            {/* Card 1 */}
+            <div
+              className={solutionsVisible ? 'animate-fade-scale-lift delay-fade' : 'reveal-hidden'}
+              style={{
+                '--delay': '0.1s',
+                background: 'rgba(255,255,255,0.72)',
+                backdropFilter: 'blur(16px)',
+                WebkitBackdropFilter: 'blur(16px)',
+                borderRadius: '20px',
+                padding: '32px 28px',
+                border: '1px solid rgba(255,255,255,0.85)',
+                boxShadow: '0 4px 24px rgba(30,42,69,0.07), 0 1px 4px rgba(30,42,69,0.04)',
+              } as React.CSSProperties}
+            >
+              <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: 'rgba(81,123,62,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '20px' }}>
+                <MessagesSquare size={22} color="#517B3E" strokeWidth={1.8} />
+              </div>
+              <h3 style={{ fontSize: '1.125rem', fontWeight: 700, color: '#2A3B22', marginBottom: '10px' }}>
+                {t.card1Title}
+              </h3>
+              <p style={{ fontSize: '0.9375rem', color: '#4d5a3e', lineHeight: 1.65, margin: 0 }}>
+                {t.card1Desc}
+              </p>
+            </div>
+
+            {/* Card 2 */}
+            <div
+              className={solutionsVisible ? 'animate-fade-scale-lift delay-fade' : 'reveal-hidden'}
+              style={{
+                '--delay': '0.3s',
+                background: 'rgba(255,255,255,0.72)',
+                backdropFilter: 'blur(16px)',
+                WebkitBackdropFilter: 'blur(16px)',
+                borderRadius: '20px',
+                padding: '32px 28px',
+                border: '1px solid rgba(255,255,255,0.85)',
+                boxShadow: '0 4px 24px rgba(30,42,69,0.07), 0 1px 4px rgba(30,42,69,0.04)',
+              } as React.CSSProperties}
+            >
+              <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: 'rgba(81,123,62,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '20px' }}>
+                <PenTool size={22} color="#517B3E" strokeWidth={1.8} />
+              </div>
+              <h3 style={{ fontSize: '1.125rem', fontWeight: 700, color: '#2A3B22', marginBottom: '10px' }}>
+                {t.card2Title}
+              </h3>
+              <p style={{ fontSize: '0.9375rem', color: '#4d5a3e', lineHeight: 1.65, margin: 0 }}>
+                {t.card2Desc}
+              </p>
+            </div>
+
+            {/* Card 3 */}
+            <div
+              className={solutionsVisible ? 'animate-fade-scale-lift delay-fade' : 'reveal-hidden'}
+              style={{
+                '--delay': '0.5s',
+                background: 'rgba(255,255,255,0.72)',
+                backdropFilter: 'blur(16px)',
+                WebkitBackdropFilter: 'blur(16px)',
+                borderRadius: '20px',
+                padding: '32px 28px',
+                border: '1px solid rgba(255,255,255,0.85)',
+                boxShadow: '0 4px 24px rgba(30,42,69,0.07), 0 1px 4px rgba(30,42,69,0.04)',
+              } as React.CSSProperties}
+            >
+              <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: 'rgba(81,123,62,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '20px' }}>
+                <TrendingUp size={22} color="#517B3E" strokeWidth={1.8} />
+              </div>
+              <h3 style={{ fontSize: '1.125rem', fontWeight: 700, color: '#2A3B22', marginBottom: '10px' }}>
+                {t.card3Title}
+              </h3>
+              <p style={{ fontSize: '0.9375rem', color: '#4d5a3e', lineHeight: 1.65, margin: 0 }}>
+                {t.card3Desc}
+              </p>
+            </div>
+
+            {/* Card 4 */}
+            <div
+              className={solutionsVisible ? 'animate-fade-scale-lift delay-fade' : 'reveal-hidden'}
+              style={{
+                '--delay': '0.7s',
+                background: 'rgba(255,255,255,0.72)',
+                backdropFilter: 'blur(16px)',
+                WebkitBackdropFilter: 'blur(16px)',
+                borderRadius: '20px',
+                padding: '32px 28px',
+                border: '1px solid rgba(255,255,255,0.85)',
+                boxShadow: '0 4px 24px rgba(30,42,69,0.07), 0 1px 4px rgba(30,42,69,0.04)',
+              } as React.CSSProperties}
+            >
+              <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: 'rgba(81,123,62,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '20px' }}>
+                <GraduationCap size={22} color="#517B3E" strokeWidth={1.8} />
+              </div>
+              <h3 style={{ fontSize: '1.125rem', fontWeight: 700, color: '#2A3B22', marginBottom: '10px' }}>
+                {t.card4Title}
+              </h3>
+              <p style={{ fontSize: '0.9375rem', color: '#4d5a3e', lineHeight: 1.65, margin: 0 }}>
+                {t.card4Desc}
+              </p>
+            </div>
           </div>
         </div>
-      )}
+      </section>
+
+      {/* ─── Blog ─── */}
+      <section ref={blogRef} id="blog" className="relative z-10 py-24 px-6">
+        <div style={{ maxWidth: '960px', margin: '0 auto' }}>
+          <h2
+            className={blogInView ? 'animate-fade-scale-lift' : 'reveal-hidden'}
+            style={{
+              textAlign: 'center',
+              fontSize: 'clamp(1.6rem, 3.5vw, 2.2rem)',
+              fontWeight: 800,
+              color: '#2A3B22',
+              marginBottom: '56px',
+              fontFamily: 'Georgia, serif',
+              letterSpacing: '-0.01em',
+            }}
+          >
+            {t.blogTitle}
+          </h2>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {t.blogs.map((blog, idx) => (
+              <div
+                key={blog.id}
+                className={`flex flex-col ${blogInView ? 'animate-fade-scale-lift delay-fade' : 'reveal-hidden'}`}
+                style={{
+                  '--delay': `${0.15 + idx * 0.15}s`,
+                  background: 'rgba(253,252,249,0.60)',
+                  backdropFilter: 'blur(12px)',
+                  WebkitBackdropFilter: 'blur(12px)',
+                  borderRadius: '20px',
+                  padding: '28px 24px 24px',
+                  border: '1px solid #D9E2D1',
+                  boxShadow: '0 2px 12px rgba(30,42,69,0.05)',
+                } as React.CSSProperties}
+              >
+                <h3
+                  style={{
+                    fontSize: '1rem',
+                    fontWeight: 700,
+                    color: '#2A3B22',
+                    lineHeight: 1.45,
+                    marginBottom: '14px',
+                    flexGrow: 0,
+                  }}
+                >
+                  {blog.title}
+                </h3>
+                <p
+                  style={{
+                    fontSize: '0.875rem',
+                    color: '#5a6a52',
+                    lineHeight: 1.7,
+                    margin: 0,
+                    flexGrow: 1,
+                    marginBottom: '24px',
+                  }}
+                >
+                  {blog.excerpt}
+                </p>
+                <button
+                  onClick={() => setActiveBlogId(blog.id)}
+                  style={{
+                    alignSelf: 'flex-start',
+                    padding: '8px 18px',
+                    borderRadius: '8px',
+                    fontSize: '0.8125rem',
+                    fontWeight: 600,
+                    color: '#517B3E',
+                    background: 'rgba(81,123,62,0.10)',
+                    border: '1px solid rgba(81,123,62,0.25)',
+                    cursor: 'pointer',
+                    transition: 'background 0.2s, border-color 0.2s',
+                  }}
+                  onMouseEnter={e => {
+                    (e.currentTarget as HTMLButtonElement).style.background = 'rgba(81,123,62,0.18)';
+                    (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(81,123,62,0.45)';
+                  }}
+                  onMouseLeave={e => {
+                    (e.currentTarget as HTMLButtonElement).style.background = 'rgba(81,123,62,0.10)';
+                    (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(81,123,62,0.25)';
+                  }}
+                >
+                  {blog.readMore} →
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ─── Back to Top ─── */}
+      <button
+        onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+        aria-label="Back to top"
+        className={`fixed bottom-8 right-8 z-50 transition-all duration-300 ${showTopBtn ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 translate-y-4 pointer-events-none'}`}
+        style={{
+          width: '48px',
+          height: '48px',
+          borderRadius: '50%',
+          background: 'rgba(157,192,139,0.82)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          border: '1px solid rgba(255,255,255,0.55)',
+          boxShadow: '0 4px 16px rgba(42,59,34,0.20)',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+        onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(157,192,139,1)'; }}
+        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(157,192,139,0.82)'; }}
+      >
+        <ChevronUp size={20} color="#2A3B22" strokeWidth={2.5} />
+      </button>
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          BLOG ARTICLE MODAL
+      ═══════════════════════════════════════════════════════════════════ */}
+      {activeBlogId !== null && (() => {
+        const blog = t.blogs.find(b => b.id === activeBlogId);
+        if (!blog) return null;
+        return (
+          <div
+            className="fixed inset-0 bg-black/40 backdrop-blur-md z-50 flex items-center justify-center overflow-y-auto py-8 px-4"
+            onClick={() => setActiveBlogId(null)}
+          >
+            <div
+              className="animate-slide-up-fade"
+              dir={lang === 'he' ? 'rtl' : 'ltr'}
+              onClick={e => e.stopPropagation()}
+              style={{
+                position: 'relative',
+                width: '100%',
+                maxWidth: '660px',
+                background: 'rgba(253,252,249,0.88)',
+                backdropFilter: 'blur(24px)',
+                WebkitBackdropFilter: 'blur(24px)',
+                borderRadius: '24px',
+                padding: '52px 44px 44px',
+                boxShadow: '0 16px 64px rgba(30,42,69,0.18), 0 2px 8px rgba(30,42,69,0.08)',
+                border: '1px solid rgba(255,255,255,0.85)',
+              }}
+            >
+              {/* Close button */}
+              <button
+                onClick={() => setActiveBlogId(null)}
+                aria-label="Close"
+                style={{
+                  position: 'absolute',
+                  top: '18px',
+                  right: '18px',
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '50%',
+                  background: 'rgba(81,123,62,0.10)',
+                  border: '1px solid rgba(81,123,62,0.20)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'background 0.2s',
+                }}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(81,123,62,0.20)'; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(81,123,62,0.10)'; }}
+              >
+                <X size={16} color="#2A3B22" strokeWidth={2.5} />
+              </button>
+
+              {/* Article content */}
+              <h2
+                style={{
+                  fontSize: 'clamp(1.1rem, 3vw, 1.4rem)',
+                  fontWeight: 800,
+                  color: '#2A3B22',
+                  lineHeight: 1.4,
+                  marginBottom: '24px',
+                  fontFamily: 'Georgia, serif',
+                  paddingInlineEnd: '32px',
+                }}
+              >
+                {blog.title}
+              </h2>
+              <p
+                style={{
+                  fontSize: '1rem',
+                  color: '#3d4d35',
+                  lineHeight: 1.8,
+                  margin: 0,
+                }}
+              >
+                {blog.fullText}
+              </p>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ═══════════════════════════════════════════════════════════════════
           REGISTER MODAL — 3-step wizard

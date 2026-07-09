@@ -146,10 +146,70 @@
   50%       { box-shadow: 0 0 0 5px rgba(74,222,128,0.36), 0 0 28px rgba(74,222,128,0.24); }
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   ANIMATED BACKGROUND — living dashboard blobs
+   All keyframes use only `transform` so they run on the compositor thread
+   and never trigger layout or paint.
+══════════════════════════════════════════════════════════════════════════ */
+
+/* Blob A — large matcha light, top-left */
+@keyframes ab-blob-a {
+  0%   { transform: translate(  0px,   0px) scale(1.00); }
+  30%  { transform: translate( 90px,  70px) scale(1.08); }
+  65%  { transform: translate(155px,  25px) scale(0.94); }
+  100% { transform: translate( 70px, 110px) scale(1.06); }
+}
+
+/* Blob B — deep blue, center-right */
+@keyframes ab-blob-b {
+  0%   { transform: translate(  0px,   0px) scale(1.00); }
+  40%  { transform: translate(-130px,  90px) scale(1.10); }
+  100% { transform: translate( -70px, -75px) scale(0.90); }
+}
+
+/* Blob C — cream light, top-right */
+@keyframes ab-blob-c {
+  0%   { transform: translate(   0px,   0px) scale(1.00); }
+  50%  { transform: translate(-110px, 100px) scale(1.14); }
+  100% { transform: translate( -55px, -50px) scale(0.93); }
+}
+
+/* Blob D — matcha accent, bottom-left */
+@keyframes ab-blob-d {
+  0%   { transform: translate(  0px,   0px) scale(1.00); }
+  35%  { transform: translate(100px, -90px) scale(0.92); }
+  100% { transform: translate( 55px,-150px) scale(1.08); }
+}
+
+/* Blob E — sage pulse, centre */
+@keyframes ab-blob-e {
+  0%   { transform: translate(  0px,   0px) scale(1.00); }
+  50%  { transform: translate( -65px,  85px) scale(1.20); }
+  100% { transform: translate(  45px, -65px) scale(0.86); }
+}
+
+/* Honour user preference — freeze blobs for users who request reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .ab-blob { animation: none !important; }
+}
+
 /* ── Eco neon card pulse (dark cards with neon glow) ─────────────────────── */
 @keyframes ecoNeonPulse {
   0%, 100% { box-shadow: 0 0 0 2px rgba(74,222,128,0.10), 0 8px 32px rgba(0,0,0,0.18); }
   50%       { box-shadow: 0 0 0 3px rgba(74,222,128,0.32), 0 8px 40px rgba(74,222,128,0.18); }
+}
+
+/* ── Hero icon — gentle perpetual bob (starts after entrance animation) ──── */
+@keyframes hero-icon-bob {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-11px); }
+}
+.hero-icon-bob {
+  animation: hero-icon-bob 3.8s ease-in-out infinite;
+  animation-delay: 1.1s; /* lets the Framer Motion entrance finish first */
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-icon-bob { animation: none !important; }
 }
 
 /* ── Mascot floating / breathing ─────────────────────────────────────────── */

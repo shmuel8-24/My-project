@@ -7,7 +7,9 @@ import { Settings as IconSettings, Home, BookOpen, PenTool, Presentation as Pres
 import { useAuth }     from '../providers/auth';
 import { useLanguage } from '../providers/language';
 import { useCourse, COURSES, type Course } from '../providers/course';
-import CoursePill        from '../../components/CoursePill';
+import CoursePill            from '../../components/CoursePill';
+import { DashboardCarousel }    from '../../components/DashboardCarousel';
+import { AnimatedBackground }   from '../../components/AnimatedBackground';
 
 
 /* ── Design tokens — Matcha theme ────────────────────────────────────────── */
@@ -159,26 +161,6 @@ function CourseOptionCard({ course, he, onSelect }: { course: Course; he: boolea
           {he ? 'לחץ לבחירת קורס' : 'Click to select'}
         </p>
       </div>
-    </button>
-  );
-}
-
-/* ── Quick Action Card — clean white with matcha hover ───────────────────── */
-function CrystalCard({ title, subtitle, onClick }: { title: string; subtitle: string; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className="flex flex-col gap-1.5 p-6 rounded-2xl w-full text-right bg-white border border-[#C8DFC0] hover:bg-[#F4FAF0] hover:border-[#90C083] hover:-translate-y-0.5 active:scale-[0.99] transition-all duration-200"
-      style={{ boxShadow: '0 2px 10px rgba(20,42,16,0.09), 0 1px 3px rgba(20,42,16,0.05)' }}
-      onMouseEnter={e => {
-        (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 8px 24px rgba(20,42,16,0.14), 0 2px 6px rgba(20,42,16,0.07)';
-      }}
-      onMouseLeave={e => {
-        (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 2px 10px rgba(20,42,16,0.09), 0 1px 3px rgba(20,42,16,0.05)';
-      }}
-    >
-      <p className="font-bold text-xl text-[#1C3329]">{title}</p>
-      <p className="text-sm text-[#527061]">{subtitle}</p>
     </button>
   );
 }
@@ -471,7 +453,10 @@ export default function DashboardPage() {
       style={{ background: D.pageBg }}
     >
 
-      {/* Subtle leaf watermarks */}
+      {/* ── Animated living background — z-0, behind all content ── */}
+      <AnimatedBackground />
+
+      {/* Subtle leaf watermarks — z-0, DOM-order above AnimatedBackground */}
       <div className="fixed inset-0 pointer-events-none select-none overflow-hidden" style={{ zIndex: 0 }}>
         <svg style={{ position:'absolute', top:'-70px', right:'-40px', width:'340px', opacity:.04, transform:'rotate(22deg)' }} viewBox="0 0 100 150" fill="#2A3B22" aria-hidden="true"><path d="M50 8C76 8 92 33 92 62C92 100 70 140 50 148C30 140 8 100 8 62C8 33 24 8 50 8Z"/></svg>
         <svg style={{ position:'absolute', bottom:'-50px', left:'-25px', width:'260px', opacity:.035, transform:'rotate(-18deg) scaleX(-1)' }} viewBox="0 0 100 150" fill="#2A3B22" aria-hidden="true"><path d="M50 8C76 8 92 33 92 62C92 100 70 140 50 148C30 140 8 100 8 62C8 33 24 8 50 8Z"/></svg>
@@ -607,7 +592,7 @@ export default function DashboardPage() {
 
           {renderedCourse ? (
             <>
-              {/* Action cards */}
+              {/* Action carousel */}
               <div>
                 <div style={{ display:'flex', alignItems:'center', gap:8, padding:'0 4px', marginBottom:16 }}>
                   <div style={{ width:4, height:16, borderRadius:9999, background:'linear-gradient(180deg,#4ADE80,#2C4A3B)', flexShrink:0 }} />
@@ -615,14 +600,11 @@ export default function DashboardPage() {
                     {he ? 'פעולות לקורס זה' : 'Actions for this course'}
                   </p>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <CrystalCard title={he ? 'מרחב לימוד'      : 'StudyLab'}         subtitle={he ? 'שאל על החומר'                    : 'Ask about material'}           onClick={() => router.push('/workspace')} />
-                  <CrystalCard title={he ? 'הראש של המרצה'   : "Prof's Brain"}     subtitle={he ? 'סימולציית מבחן'                  : 'Exam simulation'}              onClick={() => router.push('/workspace/professor-simulator')} />
-                  <CrystalCard title={he ? 'שליטה בחומר'     : 'Mastery'}          subtitle={he ? 'חידונים ומעקב'                   : 'Quizzes & tracking'}           onClick={() => router.push(`/mastery?course=${renderedCourse.id}`)} />
-                  <CrystalCard title={he ? 'כתיבה אקדמית'    : 'Academic Writing'} subtitle={he ? 'כתיבת עבודות בסגנון האישי שלך'  : 'Write papers in your style'}   onClick={() => router.push('/academic-writing')} />
-                  <CrystalCard title={he ? 'צור מצגת'        : 'Create Presentation'} subtitle={he ? 'מצגת מקצועית מהחומר שלך'      : 'A professional deck from your materials'} onClick={() => router.push('/presentation-generator')} />
-                  <CrystalCard title={he ? 'המסמכים שלי'     : 'My Documents'}     subtitle={he ? 'ניהול הקבצים שהעלית'             : 'Manage your uploaded files'}   onClick={() => router.push('/my-documents')} />
-                </div>
+                <DashboardCarousel
+                  lang={lang}
+                  courseId={renderedCourse.id}
+                  onNavigate={path => router.push(path)}
+                />
               </div>
             </>
           ) : (

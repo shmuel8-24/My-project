@@ -48,6 +48,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     ├── middleware.ts        # Edge auth guard: all protected routes; hybrid Supabase + Flask-JWT cookie
     ├── src/
     │   ├── components/
+    │   │   ├── InteractiveHero.tsx     # Landing-page expanding hero → login panel (see prose below) — /
+    │   │   ├── DashboardCarousel.tsx   # Drag-to-snap quick-actions carousel — /dashboard
+    │   │   ├── AnimatedBackground.tsx  # Fixed z-0 living background (CSS blobs + FM spotlight) — /dashboard
     │   │   ├── CoursePill.tsx          # Global course selector pill (name badge is static/non-clickable)
     │   │   ├── Sidebar.tsx             # SidebarDocumentsLink nav item (→ /my-documents)
     │   │   ├── AIThinkingIndicator.tsx # Streaming phase indicator (thinking/searching/running)
@@ -65,7 +68,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     │   │   ├── uploadFile.ts            # uploadAndIndexFile(files, {courseName}) → UploadFileResult; emits EVT_DOCUMENTS_UPDATED on success
     │   │   └── eventBus.ts             # Singleton event bus; EVT_DOCUMENTS_UPDATED constant; eventBus.on() returns unsubscribe fn (use as useEffect cleanup)
     │   └── app/
-    │       ├── page.tsx                        # Landing page + auth modal
+    │       ├── page.tsx                        # Landing page — auth form lives inside InteractiveHero, not a separate modal
     │       ├── layout.tsx                      # Root layout: LanguageProvider → CourseProvider → AuthProvider → DocumentProvider → PresentationProvider
     │       ├── globals.css                     # Tailwind v4 entry + keyframes + matcha design tokens
     │       ├── error.tsx                       # Route-segment error boundary (matcha-themed, RTL)
@@ -382,6 +385,14 @@ Next.js 16 · React 19 · TypeScript · Tailwind CSS v4 · `react-dropzone` v15 
 - `/admin/*` (additionally requires `is_admin` claim in JWT payload)
 - `/login`, `/register` — authenticated users bounced to `/dashboard` or `/course-picker`
 
+**Landing page hero (`page.tsx` + `components/InteractiveHero.tsx`):** The auth entry point is not a traditional modal — `InteractiveHero` renders one persistent `motion.div` that morphs in place via Framer Motion's `layout` prop (spring physics) between two states, driven by `isExpanded={isLoginModalOpen}` from the parent:
+- **Resting** — a compact, light frosted-glass card (h1 + CTA button only; no icon/illustration/badge — deliberately minimal) sitting mid-page.
+- **Expanded** — the same node grows to fill the viewport as a dark matcha-green glassmorphic panel; the actual login/OTP/forgot-password form (owned by `page.tsx`, passed down as `children`) renders inside a light glass sub-card centered within it. There's no separate route or modal element — clicking the CTA just flips `isLoginModalOpen`.
+
+Two hard-won gotchas specific to this pattern (see also the framer-motion gotchas below):
+- The hero and auth content are **both permanently mounted**, crossfading via a plain `animate={{ opacity }}` — never `AnimatePresence` mount/unmount here, since an exit/enter cycle fights the ancestor's in-progress `layout` spring (see the framer-motion gotcha above).
+- The `<main>` wrapper's `zIndex` is bumped dynamically (`isExpanded ? 50 : 10`) above the page header's `z-20` — a `position: fixed` descendant is confined to its ancestor's stacking context, so without this the expanded full-viewport panel would paint *behind* the header.
+
 **Post-login redirect:** After successful login/OTP, `page.tsx` routes to `WORKSPACE_ROUTE = '/dashboard'` (the Course Hub Home, not `/workspace`).
 
 **Provider tree** (`layout.tsx`):
@@ -463,7 +474,7 @@ Each page has its own copy-pasted hamburger-triggered sidebar: backdrop (`z-40`)
 These two pages share one `AdminShell.tsx` component providing the sidebar/header/footer chrome. There is no `admin/layout.tsx`; both pages wrap their content directly in `<AdminShell>...</AdminShell>`. `AdminShell`'s sidebar extends the standard nav with an always-visible "Admin CT" section — not gated on `isAdmin` since `AdminShell` is only ever rendered on confirmed-admin routes (each page's own auth-guard effect still calls `router.replace('/?login=true')` for non-admins before rendering `AdminShell`). Page content sits on `AdminShell`'s `#97AB92` background inside `max-w-7xl`/`max-w-6xl mx-auto` containers.
 
 **`/my-documents` page:**
-The primary document management page (`my-documents/page.tsx`, ~966 lines). Has its own full-nav sidebar (`MyDocumentsSidebar`), full document list per active course, upload zone, download, and delete. All full-nav sidebars across the app link here via a `Folder`-icon nav item. The dashboard `CrystalCard` "המסמכים שלי" also routes here.
+The primary document management page (`my-documents/page.tsx`, ~966 lines). Has its own full-nav sidebar (`MyDocumentsSidebar`), full document list per active course, upload zone, download, and delete. All full-nav sidebars across the app link here via a `Folder`-icon nav item. The dashboard's "המסמכים שלי" carousel card also routes here.
 
 **`/workspace/documents` route:**
 Legacy thin alias at `workspace/documents/page.tsx` — renders `<ProfilePageInner>` which opens directly on the Documents tab. Retained for backwards compatibility; new navigation goes to `/my-documents` instead.
@@ -483,6 +494,8 @@ After registration, users land on `/onboarding`. Onboarding data saved via `POST
   - Accent green: `#517B3E` / `#2A3B22`
   - `globals.css` defines `@theme inline` tokens `--color-matcha-50` through `--color-matcha-950` and utility classes `.animate-mastery-pulse`, `.animate-jewel-glow`, etc.
 - **framer-motion** — installed (`v12`). Use `AnimatePresence mode="popLayout"` for list items, `mode="wait"` for step transitions. The `layout` prop on containers animates height changes. Use `position: fixed` dropdowns to escape `overflow` constraints.
+  - **Gotcha:** never nest an `AnimatePresence` (either `"wait"` or `"popLayout"` mode) directly inside an ancestor that also has an in-flight `layout` transition on the same state change (e.g. a card that both resizes via `layout` and swaps its children via `AnimatePresence` on the same toggle). The exiting child's box keeps getting re-measured against the still-animating parent, which can stall `onExitComplete` indefinitely — observed as the whole tab's `requestAnimationFrame` loop freezing (page becomes unresponsive; DevTools eval still works, but nothing paints). Prefer keeping both branches permanently mounted and crossfading with a plain `animate={{ opacity }}` instead — see `InteractiveHero.tsx`.
+  - **Gotcha:** a `position: fixed` (or `absolute`) descendant cannot escape an ancestor's *stacking context* — only its normal-flow layout. If a fixed full-viewport element is nested inside a container with its own `z-index` (e.g. `className="relative z-10"`), that container's z-index (not the fixed child's own, higher one) determines paint order against siblings like a fixed header. Bump the container's z-index dynamically instead of only the child's.
 - **KaTeX** — `katex/dist/katex.min.css` imported in `layout.tsx`. Workspace uses `remark-math` + `rehype-katex`. Academic writing uses `mathtex-script-type` (from backend HTML) plus auto-render fallback.
 - **`AcademicRichEditor`** — must always be loaded `dynamic(() => import(...), { ssr: false })` — `@uiw/react-md-editor` touches `window` at module evaluation time.
 - **Workspace tab persistence** — both `ChatInterface` and `PaperWriter` are always mounted; inactive tab hidden with `hidden`.
@@ -490,12 +503,12 @@ After registration, users land on `/onboarding`. Onboarding data saved via `POST
 
 **Dashboard (`dashboard/page.tsx`):**
 - Owl mascot (`/assets/mascot/charley.PNG`) displayed beside the greeting header
-- `CrystalCard` component shows text-only (no emoji icon) — do not add an `icon` prop back
+- `AnimatedBackground` (`components/AnimatedBackground.tsx`) renders fixed, `z-0`, behind everything: 5 CSS-only blurred blobs animated purely via `transform` (compositor thread, no layout/paint cost, frozen under `prefers-reduced-motion`) plus one Framer-Motion-driven spotlight on an elliptical orbit using `useMotionValue`/`useAnimationFrame` (bypasses React re-render). The pre-existing SVG leaf watermarks render as a sibling immediately after it (same `z-0`, later in DOM order so they paint on top).
 - `D` design-token object at the top centralises all colours
 - **Course Selector view** (when `selectedCourse === null`): uses `COURSES` + `customCourses` from the provider
-- **Course Focus view** (when course selected): `CrystalCard` quick actions + `MaterialRow` list
+- **Course Focus view** (when course selected): `DashboardCarousel` (`components/DashboardCarousel.tsx`) quick-actions carousel — replaced the older static `CrystalCard` grid. A `CARDS` array (StudyLab/Academic Writing/Mastery/Prof's Brain/My Documents/Create Presentation, each with route + icon + accent colour) drives a drag-to-snap horizontal track (`useMotionValue` + spring snap on drag-end, keyboard arrow-key navigation, dot indicators). The active (centred) card is scaled up and highlighted; clicking a non-active card scrolls it to center instead of navigating — a second click is needed to actually navigate.
 - **Course switch ceremony**: selecting a new course triggers a Framer Motion fade-out → pulsing loader (shows incoming course icon + spinner) → fade-in with new course data. `displayedCourse` state lags `selectedCourse` by 395 ms to keep the DOM correct during the transition. The page wrapper is `motion.div` with a mount animation (`initial={{ opacity: 0, y: 14 }}`).
-- The "Create Presentation" `CrystalCard` routes to `/presentation-generator` (3-step wizard). `/presentation` (RAG deck from already-indexed docs, topic-only, no upload) is a separate, intentionally distinct feature and is not linked from the dashboard.
+- The "Create Presentation" card routes to `/presentation-generator` (3-step wizard). `/presentation` (RAG deck from already-indexed docs, topic-only, no upload) is a separate, intentionally distinct feature and is not linked from the dashboard.
 
 **`CoursePill.tsx`** — The main pill (showing course name + icon) is a **static `<div>`**, not a button. It does not navigate anywhere. The chevron `▾` button opens the quick-switch dropdown; the `×` button clears the course. The "no course selected" pill (`📚 בחר קורס ▾`) IS a button → routes to `/course-picker`.
 
