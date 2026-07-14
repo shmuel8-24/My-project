@@ -577,21 +577,25 @@ export default function MyDocumentsPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // ── Load ALL documents across all courses ─────────────────────────────────
-  // My Documents shows the user's full library so they can manage files globally.
-  // Each DocCard displays a course badge so the user can see which course each
-  // file belongs to.  Uploading still tags to the currently active course.
+  // ── Load documents for the active course only ─────────────────────────────
+  // When a course is selected via the CoursePill dropdown, the library is
+  // strictly scoped to that course (backend filters by course_name) — a new
+  // or empty course therefore renders an empty state. With no course active,
+  // the full cross-course library is shown so the user can still manage files
+  // globally. Each DocCard displays a course badge either way.
+  const activeCourseName = selectedCourse?.name ?? null;
   const fetchDocuments = useCallback(() => {
+    const courseParam = activeCourseName ? `&course_name=${encodeURIComponent(activeCourseName)}` : '';
     const request = Promise.resolve()
       .then(() => { setDocsLoading(true); })
       // _t cache-buster forces the browser past any cached GET response.
-      .then(() => fetch(`${API}/api/profile/documents?_t=${Date.now()}`, { credentials: 'include' }));
+      .then(() => fetch(`${API}/api/profile/documents?_t=${Date.now()}${courseParam}`, { credentials: 'include' }));
     request
       .then(r => (r && r.ok) ? r.json() : { documents: [] })
       .then((data: { documents: DocItem[] }) => setDocuments(data.documents ?? []))
       .catch(() => setDocuments([]))
       .finally(() => setDocsLoading(false));
-  }, []);
+  }, [activeCourseName]);
 
   useEffect(() => {
     if (!authUser || !courseHydrated) return;
@@ -898,7 +902,9 @@ export default function MyDocumentsPage() {
                 {docsLoading
                   ? (he ? 'טוען...' : 'Loading…')
                   : documents.length > 0
-                    ? (he ? `${documents.length} מסמכים בכל הקורסים` : `${documents.length} document${documents.length === 1 ? '' : 's'} across all courses`)
+                    ? (selectedCourse
+                        ? (he ? `${documents.length} מסמכים בקורס ${selectedCourse.name}` : `${documents.length} document${documents.length === 1 ? '' : 's'} in ${selectedCourse.name}`)
+                        : (he ? `${documents.length} מסמכים בכל הקורסים` : `${documents.length} document${documents.length === 1 ? '' : 's'} across all courses`))
                     : (he ? 'הספרייה שלך ריקה' : 'Your library is empty')}
               </p>
             </div>
@@ -931,7 +937,7 @@ export default function MyDocumentsPage() {
             )}
           </div>
 
-          {/* Content — shows ALL documents across all courses */}
+          {/* Content — scoped to the active course, or the full library when none is selected */}
           {docsLoading ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {[0, 1, 2, 3, 4, 5].map(i => (
@@ -941,11 +947,17 @@ export default function MyDocumentsPage() {
           ) : documents.length === 0 ? (
             <EmptyState
               icon={FolderPlus}
-              title={he ? 'הספרייה ריקה' : 'Library is empty'}
-              description={he
-                ? 'טרם הועלו מסמכים. עבור למרחב הלימוד כדי להעלות חומרי לימוד לאחד הקורסים שלך.'
-                : 'No documents uploaded yet. Go to StudyLab to upload materials for one of your courses.'}
-              action={{
+              title={selectedCourse
+                ? (he ? `אין מסמכים בקורס ${selectedCourse.name}` : `No documents in ${selectedCourse.name}`)
+                : (he ? 'הספרייה ריקה' : 'Library is empty')}
+              description={selectedCourse
+                ? (he
+                    ? 'טרם הועלו מסמכים לקורס זה. השתמשו בכפתור ״העלאת מסמך״ למעלה כדי להתחיל.'
+                    : 'No documents uploaded to this course yet. Use the "Upload Document" button above to get started.')
+                : (he
+                    ? 'טרם הועלו מסמכים. עבור למרחב הלימוד כדי להעלות חומרי לימוד לאחד הקורסים שלך.'
+                    : 'No documents uploaded yet. Go to StudyLab to upload materials for one of your courses.')}
+              action={selectedCourse ? undefined : {
                 label: he ? 'מעבר למרחב הלימוד' : 'Go to StudyLab',
                 onClick: () => router.push('/workspace'),
               }}
