@@ -51,6 +51,22 @@ _SUGGEST_SYSTEM_FALLBACK = (
     "If the user's topic is clearly written in English, generate the title in English instead."
 )
 
+# Course-only mode: no topic AND no RAG context (empty/new course) — derive a
+# generic but plausible academic title purely from the course name.
+_SUGGEST_SYSTEM_COURSE_ONLY = (
+    "You are an expert academic writing assistant. "
+    "The user has not provided a topic and no course materials are available yet. "
+    "Based STRICTLY on the given course name, generate exactly ONE plausible, general, "
+    "and engaging academic research paper title that a student in this course might write. "
+    "CRITICAL CONSTRAINT: The title MUST contain a STRICT MAXIMUM of 4 words. "
+    "Count every word before returning — do not exceed 4 words under any circumstances. "
+    'Return ONLY a valid JSON object in this exact format: '
+    '{"title": "הכותרת שלך כאן"}. '
+    "No additional text, no markdown formatting, no preamble. "
+    "CRITICAL RULE: Generate the title in Hebrew by default. "
+    "If the course name is clearly written in English, generate the title in English instead."
+)
+
 
 @writing_bp.route("/api/writing/suggest-titles", methods=["POST"])
 @token_required
@@ -60,6 +76,10 @@ def suggest_titles(user_id: int):
     When `topic` is empty the endpoint scans the course materials autonomously
     (broad FAISS query, top-10 chunks) and derives a title from what it finds.
     When `topic` is provided it grounds the suggestion in both the topic and RAG.
+    When `topic` is empty AND the scan finds no chunks (new/empty course), it
+    falls back to generating a general title from `course_name` alone rather
+    than failing — this endpoint never 400s solely because of an empty topic
+    or empty RAG results.
     """
     data        = request.get_json(silent=True) or {}
     print("✨ Suggest Titles Route Hit. Payload:", data)
@@ -101,9 +121,15 @@ def suggest_titles(user_id: int):
         # No RAG — topic only
         system_prompt = _SUGGEST_SYSTEM_FALLBACK
         user_content  = f"הנושא: {topic}"
+    elif course_name:
+        # No RAG and no topic (empty/new course) — fall back to a general
+        # title derived from the course name alone instead of erroring out.
+        system_prompt = _SUGGEST_SYSTEM_COURSE_ONLY
+        user_content  = f"שם הקורס: {course_name}"
     else:
-        # No RAG and no topic — nothing to work with
-        return jsonify({"error": "לא נמצאו מסמכים בקורס. אנא העלה חומרי לימוד תחילה."}), 400
+        # No RAG, no topic, and no course name — nothing at all to ground on.
+        system_prompt = _SUGGEST_SYSTEM_COURSE_ONLY
+        user_content  = "שם הקורס: קורס אקדמי כללי"
 
     # --- LLM call ------------------------------------------------
     title: str = ""
@@ -128,10 +154,13 @@ def suggest_titles(user_id: int):
     except Exception:
         pass
 
-    # --- Deterministic fallback (topic-only path) ----------------
-    # Keep fallback within 4 words: take only the first 4 words of the topic.
+    # --- Deterministic fallback (LLM call failed or returned nothing) --
+    # Keep fallback within 4 words.
     if not title and topic:
         words = topic.rstrip(".").split()
+        title = " ".join(words[:4])
+    elif not title and course_name:
+        words = course_name.split()
         title = " ".join(words[:4])
     elif not title:
         return jsonify({"error": "לא הצלחנו לייצר כותרת מהחומרים הקיימים."}), 500

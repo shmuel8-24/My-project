@@ -24,7 +24,7 @@ from extensions import (
     TOP_K,
 )
 from models import ChatMessage, ChatSession, SessionLocal, UserDocument, sql_func
-from services.pdf import extract_pptx_slides
+from services.pdf import extract_docx_text, extract_pptx_slides
 from services.rag import get_chunks_for_files, get_user_collection, get_user_images, rebuild_user_bm25, hybrid_search
 from services.security import (
     SECURITY_SYSTEM_INSTRUCTION,
@@ -36,8 +36,16 @@ from services.security import (
 
 documents_bp = Blueprint("documents", __name__)
 
-_ALLOWED_EXTS = {".pdf", ".pptx", ".png", ".jpg", ".jpeg"}
+_ALLOWED_EXTS = {".pdf", ".pptx", ".docx", ".doc", ".ppt", ".png", ".jpg", ".jpeg"}
 _IMG_MIME     = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
+
+# Legacy binary Office formats (pre-2007 OLE compound-file format). Neither
+# python-docx nor python-pptx can parse these — both only read the modern
+# OOXML .docx/.pptx zip format — and no conversion tool (LibreOffice/antiword)
+# is available in this environment. Rather than reject the upload outright,
+# these are stored and registered like any other document but indexed with
+# zero chunks; see the dedicated branch in upload_pdf() below.
+_LEGACY_OFFICE_EXTS = {".doc", ".ppt"}
 
 _UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "uploads")
 
@@ -382,8 +390,20 @@ def upload_pdf(user_id: int):
     errors:       list[dict] = []
 
     for file in valid_files:
+        # secure_filename() strips every non-ASCII character. For a filename
+        # with no ASCII/digit characters at all (e.g. Hebrew-only, extremely
+        # common in this app: "עבודה.docx") it can eat the extension entirely
+        # — "עבודה.docx" -> "docx", no dot survives — which then fails the
+        # _ALLOWED_EXTS check below and rejects an otherwise-valid file as
+        # "unsupported file type". If every file in a batch has a
+        # non-ASCII-only name, this makes the WHOLE upload return
+        # "all files failed to process". Always resolve `ext` from the
+        # ORIGINAL filename, and reattach it if sanitization dropped it.
+        orig_ext = os.path.splitext(file.filename)[1].lower()
         filename = secure_filename(file.filename)
-        ext      = os.path.splitext(filename.lower())[1]
+        if os.path.splitext(filename)[1].lower() != orig_ext:
+            filename = f"file_{hashlib.md5(file.filename.encode()).hexdigest()[:10]}{orig_ext}"
+        ext = orig_ext
 
         if ext not in _ALLOWED_EXTS:
             errors.append({"source": file.filename, "error": "unsupported file type"})
@@ -502,12 +522,56 @@ def upload_pdf(user_id: int):
             continue
         # ────────────────────────────────────────────────────────────────────
 
+        # Legacy binary Office formats (.doc / .ppt) have no parser available
+        # in this environment — store and register the file so the upload
+        # still succeeds, but skip extraction/embedding (0 chunks). This keeps
+        # a batch upload from failing outright just because one file is a
+        # pre-2007 format; the user can re-save as .docx/.pptx to get RAG
+        # search over its content.
+        if ext in _LEGACY_OFFICE_EXTS:
+            _reg_db = SessionLocal()
+            try:
+                _exists = _reg_db.query(UserDocument).filter(
+                    UserDocument.user_id == user_id,
+                    UserDocument.file_id == file_id,
+                ).first()
+                if not _exists:
+                    _reg_db.add(UserDocument(user_id=user_id, file_id=file_id, filename=filename,
+                                             file_size_bytes=len(raw_bytes), course_name=course_name,
+                                             is_past_exam=is_past_exam, is_session_only=is_session_only))
+                    _reg_db.commit()
+                    _save_upload_file(user_id, file_id, filename, raw_bytes)
+            except Exception as reg_exc:
+                print(f"[upload] WARNING: could not register document ownership: {reg_exc}")
+                _reg_db.rollback()
+            finally:
+                _reg_db.close()
+
+            text_results.append({
+                "source":          filename,
+                "file_id":         file_id,
+                "size":            len(raw_bytes),
+                "pages_scanned":   0,
+                "pages_with_text": 0,
+                "chunks_stored":   0,
+                "total_chars":     0,
+                "type":            "doc" if ext == ".doc" else "ppt",
+                "text_extracted":  False,
+                "message":         "הקובץ נשמר, אך פורמט ישן זה אינו נתמך לחיפוש AI — "
+                                    "שמור מחדש כ-.docx / .pptx כדי לאפשר חיפוש בתוכן.",
+            })
+            continue
+
         slides_data: list[dict] = []
         try:
             if ext == ".pptx":
                 slides_data, page_count = extract_pptx_slides(raw_bytes)
                 pages_with_text = len(slides_data)
                 file_type       = "pptx"
+            elif ext == ".docx":
+                slides_data, page_count = extract_docx_text(raw_bytes)
+                pages_with_text = len(slides_data)
+                file_type       = "docx"
             else:
                 with fitz.open(stream=raw_bytes, filetype="pdf") as doc:
                     page_count = len(doc)

@@ -35,6 +35,8 @@ export interface UploadFileResult {
   files:   UploadedFileEntry[];
   /** Backend error message, if any. */
   error?:  string;
+  /** Per-file rejection reasons (e.g. {source: "x.doc", error: "unsupported file type"}) — populated whenever the backend skips one or more files, even on an otherwise-successful (ok: true) response. */
+  errors?: { source: string; error: string }[];
   /** True when the HTTP response was 2xx. */
   ok:      boolean;
 }
@@ -83,8 +85,15 @@ export async function uploadAndIndexFile(
   const result: UploadFileResult = {
     files:  Array.isArray(data.files) ? data.files : [],
     error:  data.error,
+    errors: Array.isArray(data.errors) ? data.errors : undefined,
     ok:     res.ok,
   };
+  if (result.errors?.length) {
+    // Per-file rejection detail from the backend (e.g. an unsupported
+    // extension after filename sanitization) — logged even when other files
+    // in the same batch succeeded, so a partial failure isn't silent.
+    result.errors.forEach(e => console.log('[uploadAndIndexFile] File rejected by backend:', e));
+  }
   if (result.ok) {
     // Wait 1 s before notifying subscribers.  Flask's /upload-pdf returns 200
     // only after the SQLite commit completes, so in practice this delay is

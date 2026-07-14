@@ -218,7 +218,7 @@ const TR = {
     writingTypeSec:  'סוג כתיבה',
     rightTitle:      'העלאת חומרים חדשים',
     dragDrop:        'גרור ושחרר קבצים',
-    dragHint:        'PDF, PPTX, תמונות — לחץ לבחירה',
+    dragHint:        'PDF, Word, PowerPoint, תמונות — לחץ לבחירה',
     dropHere:        'שחרר כאן!',
     uploading:       'מעלה...',
     uploadedOk:      (n: number) => `${n} קטעים · הועלה בהצלחה`,
@@ -276,7 +276,7 @@ const TR = {
     writingTypeSec:  'Writing Type',
     rightTitle:      'Upload New Material',
     dragDrop:        'Drag & drop files',
-    dragHint:        'PDF, PPTX, images — click to select',
+    dragHint:        'PDF, Word, PowerPoint, images — click to select',
     dropHere:        'Drop here!',
     uploading:       'Uploading...',
     uploadedOk:      (n: number) => `${n} chunks · Uploaded`,
@@ -606,7 +606,10 @@ function Wizard({
     onDrop: handleDropWithScanning,
     accept: {
       'application/pdf': [],
-      'application/vnd.openxmlformats-officedocument.presentationml.presentation': [],
+      'application/msword': ['.doc'],
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+      'application/vnd.ms-powerpoint': ['.ppt'],
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
       'image/png': [], 'image/jpeg': [],
     },
     disabled: uploading || sourceType !== 'upload',
@@ -793,7 +796,7 @@ function Wizard({
               <SourceTile id="upload"
                 emoji="📤"
                 title={t.rightTitle}
-                subtitle={he ? 'גרור קבצים חדשים (PDF, PPTX, תמונות)' : 'Drag & drop new files (PDF, PPTX, images)'} />
+                subtitle={he ? 'גרור קבצים חדשים (PDF, Word, PowerPoint, תמונות)' : 'Drag & drop new files (PDF, Word, PowerPoint, images)'} />
               <SourceTile id="documents"
                 emoji="📄"
                 title={t.docsSec}
@@ -2210,6 +2213,9 @@ export default function AcademicWritingPage() {
   /* File upload */
   const handleDrop = useCallback(async (files: File[]) => {
     if (!files.length || uploading) return;
+    // Debug visibility: log every file handed to the wizard before it's sent
+    // to the backend, so a rejection can be traced to a specific name/type.
+    files.forEach(f => console.log('[Academic Writing] Dropped file:', f.name, '| MIME:', f.type || '(none)', '| size:', f.size));
     setUploading(true);
     try {
       // Shared pipeline: uploadAndIndexFile → /upload-pdf → FAISS + SQLite
@@ -2219,7 +2225,7 @@ export default function AcademicWritingPage() {
         // that appear in My Documents and the global library like any other file.
       });
       if (!result.ok) {
-        console.error('[Academic Writing] upload failed:', result.error);
+        console.error('[Academic Writing] upload failed:', result.error, result.errors ?? '(no per-file detail)');
         setUploadError(result.error ?? (he ? 'שגיאה בהעלאת הקובץ' : 'Upload failed'));
         return;
       }
