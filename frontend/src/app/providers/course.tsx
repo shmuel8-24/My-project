@@ -41,16 +41,29 @@ export function CourseProvider({ children }: { children: ReactNode }) {
   const [customCourses,   setCustomCoursesState]  = useState<Course[]>([]);
 
   useEffect(() => {
-    const storedCustom   = localStorage.getItem('levy_ai_custom_courses');
-    const storedSelected = localStorage.getItem('levy_ai_course');
+    const hydrate = () => {
+      Promise.resolve()
+        .then(() => {
+          const storedCustom   = localStorage.getItem('levy_ai_custom_courses');
+          const storedSelected = localStorage.getItem('levy_ai_course');
+          if (storedCustom) setCustomCoursesState(JSON.parse(storedCustom) as Course[]);
+          setSelectedCourseState(storedSelected ? (JSON.parse(storedSelected) as Course) : null);
+        })
+        .catch(() => {})
+        .finally(() => setCourseHydrated(true));
+    };
 
-    Promise.resolve()
-      .then(() => {
-        if (storedCustom)   setCustomCoursesState(JSON.parse(storedCustom) as Course[]);
-        if (storedSelected) setSelectedCourseState(JSON.parse(storedSelected) as Course);
-      })
-      .catch(() => {})
-      .finally(() => setCourseHydrated(true));
+    hydrate();
+
+    // A page restored from the browser's back/forward cache resumes with
+    // whatever state it had when frozen. If that was mid-hydration (still
+    // null), this mount-only effect would never rerun to fix it, leaving
+    // any course-gated page stuck blank until a hard refresh. Re-hydrating
+    // on `pageshow` (fired with `persisted: true` on a bfcache restore)
+    // guarantees selectedCourse always resolves on back/forward navigation.
+    const onPageShow = (e: PageTransitionEvent) => { if (e.persisted) hydrate(); };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
   }, []);
 
   const setSelectedCourse = useCallback((course: Course | null) => {

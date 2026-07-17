@@ -3,7 +3,13 @@ import type { NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 
 /**
- * Edge middleware — guards all protected routes before any HTML is transmitted.
+ * Edge proxy — guards all protected routes before any HTML is transmitted.
+ *
+ * (Next.js 16 renamed the `middleware.ts` file convention to `proxy.ts` and
+ * the exported `middleware()` function to `proxy()`. This file was migrated
+ * from the old `middleware.ts` — same logic, new convention. Next.js silently
+ * ignores a `middleware.ts` file on this version: no warning, no execution,
+ * so keeping the old name/export would leave every route guard below dead.)
  *
  * ┌─────────────────────────────────────────────────────────────────────────┐
  * │  Auth strategy: HYBRID (Supabase + Flask JWT fallback)                  │
@@ -31,7 +37,8 @@ import { createServerClient } from '@supabase/ssr';
  * │    Absent → redirect to /course-picker.                                 │
  * │                                                                         │
  * │  AUTH PAGES (/login, /register) — authenticated users are bounced to    │
- * │    /dashboard (if active course) or /course-picker.                     │
+ * │    /admin (if admin), else /dashboard (if active course) or             │
+ * │    /course-picker.                                                       │
  * └─────────────────────────────────────────────────────────────────────────┘
  */
 
@@ -65,11 +72,11 @@ function redirectTo(path: string, req: NextRequest): NextResponse {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════ */
-export async function middleware(request: NextRequest): Promise<NextResponse> {
+export async function proxy(request: NextRequest): Promise<NextResponse> {
   const { pathname } = request.nextUrl;
 
   /* Start with a mutable response so Supabase can refresh its session cookies. */
-  let response = NextResponse.next({ request });
+  const response = NextResponse.next({ request });
 
   /* ── Layer 1: Supabase auth (when configured) ────────────────────────── */
   const SUPABASE_URL  = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -117,6 +124,7 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   /* /login and /register — bounce already-authenticated users away */
   if (pathname === '/login' || pathname === '/register') {
     if (isAuthenticated) {
+      if (isAdmin) return redirectTo('/admin', request);
       const courseActive = request.cookies.get('levy_ai_course_active')?.value;
       return redirectTo(courseActive ? '/dashboard' : '/course-picker', request);
     }

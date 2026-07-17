@@ -2,6 +2,7 @@ import base64
 import hashlib
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
 import fitz
@@ -46,6 +47,18 @@ _IMG_MIME     = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg
 # these are stored and registered like any other document but indexed with
 # zero chunks; see the dedicated branch in upload_pdf() below.
 _LEGACY_OFFICE_EXTS = {".doc", ".ppt"}
+
+# Cap on Vision-OCR fallback calls per PDF (see the scanned-page branch in
+# _process_upload_files() below) — bounds worst-case Vision API cost/latency for
+# a large all-scanned document within a single upload request.
+_MAX_OCR_PAGES_PER_PDF = 60
+
+# Concurrency cap for the Vision-OCR fallback — how many scanned-PDF pages are
+# OCR'd in parallel via a thread pool (the OpenAI call is I/O-bound, so threads
+# are sufficient without needing an async client). Bounds wall-clock latency
+# for a large scanned document while staying comfortably under OpenAI's
+# per-account rate limits.
+_OCR_CONCURRENCY = 6
 
 _UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "uploads")
 
@@ -575,9 +588,24 @@ def upload_pdf(user_id: int):
             else:
                 with fitz.open(stream=raw_bytes, filetype="pdf") as doc:
                     page_count = len(doc)
+                    ocr_pages_used = 0
                     for page_idx, page in enumerate(doc, start=1):
                         page_text = page.get_text("text")
                         if page_text and page_text.strip():
+                            slides_data.append({"text": page_text, "page_number": page_idx})
+                            continue
+                        # No text layer on this page — likely a scanned/photographed
+                        # page rather than a "born-digital" PDF. Fall back to the same
+                        # Vision OCR pipeline used for standalone image uploads, capped
+                        # per file so an all-scanned PDF can't trigger an unbounded
+                        # number of Vision calls (and multi-minute request) in one go.
+                        if ocr_pages_used >= _MAX_OCR_PAGES_PER_PDF:
+                            continue
+                        ocr_pages_used += 1
+                        page_png  = page.get_pixmap(matrix=fitz.Matrix(2, 2)).tobytes("png")
+                        page_text = _extract_text_via_vision(
+                            page_png, "image/png", f"{filename} (page {page_idx})", user_id)
+                        if page_text.strip():
                             slides_data.append({"text": page_text, "page_number": page_idx})
                 pages_with_text = len(slides_data)
                 file_type       = "pdf"

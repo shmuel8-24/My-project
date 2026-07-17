@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef, Suspense } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { Settings as IconSettings, Minus, Plus, Home, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, LogOut, Folder, Sparkles } from 'lucide-react';
 import { useAuth }          from '../providers/auth';
@@ -1999,7 +1999,12 @@ function WritingPanel({
 }
 
 /* ─── Page ───────────────────────────────────────────────────────────────── */
-export default function AcademicWritingPage() {
+// `useSearchParams()` below opts this tree into client-side rendering, which
+// Next.js requires to be wrapped in a Suspense boundary (build fails with
+// "useSearchParams() should be wrapped in a suspense boundary" otherwise —
+// see the exported wrapper at the bottom of this file). Same pattern as
+// profile/page.tsx's ProfilePageInner / ProfilePage split.
+function AcademicWritingPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user: authUser, isLoading: authLoading } = useAuth();
@@ -2370,5 +2375,13 @@ export default function AcademicWritingPage() {
       </main>
 
     </div>
+  );
+}
+
+export default function AcademicWritingPage() {
+  return (
+    <Suspense fallback={null}>
+      <AcademicWritingPageInner />
+    </Suspense>
   );
 }

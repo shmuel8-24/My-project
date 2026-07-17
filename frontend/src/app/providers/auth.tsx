@@ -63,7 +63,7 @@ interface AuthContextValue {
 
 /* ── Internal helpers ─────────────────────────────────────────────────────── */
 
-function clearAuthStorage() {
+export function clearAuthStorage() {
   AUTH_KEYS.forEach(k => localStorage.removeItem(k));
   // Clear the presence + course cookies set from JS
   document.cookie = 'levy_ai_session=; path=/; SameSite=Lax; max-age=0';
@@ -100,8 +100,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    setUser(readUserFromStorage());
-    setIsLoading(false);
+    const hydrate = () => {
+      setUser(readUserFromStorage());
+      setIsLoading(false);
+    };
+
+    hydrate();
+
+    // See CourseProvider's identical pattern: a page restored from the
+    // browser's back/forward cache resumes frozen at whatever state it had
+    // when the tab was paused. Re-syncing from localStorage on `pageshow`
+    // (persisted: true) ensures `user`/`isLoading` never stay stuck stale
+    // after back/forward navigation.
+    const onPageShow = (e: PageTransitionEvent) => { if (e.persisted) hydrate(); };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
   }, []);
 
   // Re-sync context from localStorage (called after server sets a new cookie).

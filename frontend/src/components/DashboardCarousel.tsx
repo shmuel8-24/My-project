@@ -156,6 +156,16 @@ export function DashboardCarousel({ lang, courseId, onNavigate }: Props) {
   const [activeIndex,     setActiveIndex]     = useState(0);
   const [hasMeasured,     setHasMeasured]     = useState(false);
   const [dragConstraints, setDragConstraints] = useState({ left: 0, right: 0 });
+  // Whether the row of cards is wider than the container — only then does
+  // peek/scroll behaviour make sense. On wide desktop viewports all cards
+  // usually fit, in which case the row is simply centred and static.
+  const [needsScroll,     setNeedsScroll]     = useState(true);
+  // Tracks an in-progress mouse/touch/pen drag so the container can switch
+  // between "cursor-grab" (resting) and "cursor-grabbing" (actively
+  // dragging) — driven by real React state rather than the CSS `:active`
+  // pseudo-class, which only reflects "mouse button down", not "drag
+  // gesture recognised by Framer Motion".
+  const [isDragging,      setIsDragging]      = useState(false);
 
   /* Motion value ──────────────────────────────────────────── */
   const x = useMotionValue(0);
@@ -163,7 +173,23 @@ export function DashboardCarousel({ lang, courseId, onNavigate }: Props) {
   /* Helpers — stable callbacks that read mutable refs ─────── */
   const getStep   = useCallback(() => cardWRef.current + CARD_GAP,                                        []);
   const getCenter = useCallback(() => (containerWRef.current - cardWRef.current) / 2,                     []);
-  const getSnapX  = useCallback((i: number) => getCenter() - i * getStep(),  [getCenter, getStep]);
+  const getTotalW = useCallback(
+    () => CARDS.length * cardWRef.current + (CARDS.length - 1) * CARD_GAP,
+    [],
+  );
+  // Snap position for card i, clamped so the track never reveals empty
+  // space before the first card or after the last one. When every card
+  // fits within the container, the whole row is centred as a static group
+  // instead of centring only the "active" card (which is what produced the
+  // huge rogue left-hand gap on wide desktop viewports).
+  const getSnapX = useCallback((i: number) => {
+    const containerW = containerWRef.current;
+    const total       = getTotalW();
+    if (total <= containerW) return (containerW - total) / 2;
+    const raw = getCenter() - i * getStep();
+    const min = containerW - total; // right edge of last card == container's right edge
+    return Math.min(0, Math.max(min, raw));               // max 0 == left edge of first card == container's left edge
+  }, [getCenter, getStep, getTotalW]);
 
   /* Measurement + re-positioning on resize ───────────────── */
   useEffect(() => {
@@ -175,13 +201,21 @@ export function DashboardCarousel({ lang, courseId, onNavigate }: Props) {
       containerWRef.current = cW;
       cardWRef.current      = kW;
 
-      // Reposition track to keep active card centred
+      const total  = CARDS.length * kW + (CARDS.length - 1) * CARD_GAP;
+      const scroll = total > cW;
+      setNeedsScroll(scroll);
+
+      // Reposition track to keep active card centred (or the whole row
+      // centred as a static group when everything already fits)
       x.set(getSnapX(activeIdxRef.current));
 
       // Store constraints in state so render never reads refs directly
-      const s = kW + CARD_GAP;
-      const c = (cW - kW) / 2;
-      setDragConstraints({ right: c, left: c - (CARDS.length - 1) * s });
+      if (scroll) {
+        setDragConstraints({ right: 0, left: cW - total });
+      } else {
+        const centered = (cW - total) / 2;
+        setDragConstraints({ right: centered, left: centered });
+      }
       setHasMeasured(true);
     };
 
@@ -221,9 +255,13 @@ export function DashboardCarousel({ lang, courseId, onNavigate }: Props) {
     );
   }, [x, prefersReduced, getSnapX]);
 
+  /* Drag start → grabbing cursor ──────────────────────────── */
+  const handleDragStart = useCallback(() => setIsDragging(true), []);
+
   /* Drag end → snap ──────────────────────────────────────── */
   const handleDragEnd = useCallback(
     (_e: PointerEvent | MouseEvent | TouchEvent, info: PanInfo) => {
+      setIsDragging(false);
       // Mark as "dragged" so card click is suppressed
       wasDraggedRef.current = Math.abs(info.offset.x) > 5;
 
@@ -274,27 +312,42 @@ export function DashboardCarousel({ lang, courseId, onNavigate }: Props) {
       aria-label={he ? 'פעולות מהירות' : 'Quick Actions'}
     >
       {/* ── Arrow buttons + track ── */}
+      {/* Arrows use physical left/right (not insetInlineStart/End) — the track below
+          stays dir="ltr" regardless of page language, so logical properties would flip
+          the buttons to the wrong physical side under RTL. */}
       <div className="relative">
 
-        {/* Previous arrow */}
-        <button
-          aria-label={he ? 'הקודם' : 'Previous'}
-          onClick={() => goTo(activeIndex - 1)}
-          disabled={activeIndex === 0}
-          className="hidden md:flex absolute top-1/2 -translate-y-1/2 z-10 w-10 h-10
-                     items-center justify-center rounded-full border border-[#C8DFC0]
-                     bg-white/92 shadow-md hover:bg-white hover:shadow-lg
-                     disabled:opacity-25 disabled:cursor-not-allowed
-                     transition-all duration-200"
-          style={{ insetInlineStart: -20 }}
-        >
-          <ChevronLeft className="w-5 h-5 text-[#517B3E]" />
-        </button>
+        {/* Previous arrow — only shown when the row actually overflows the container */}
+        {needsScroll && (
+          <button
+            aria-label={he ? 'הקודם' : 'Previous'}
+            onClick={() => goTo(activeIndex - 1)}
+            disabled={activeIndex === 0}
+            className="hidden md:flex absolute top-1/2 -translate-y-1/2 z-10 w-10 h-10
+                       items-center justify-center rounded-full border border-[#C8DFC0]
+                       bg-white/92 shadow-md hover:bg-white hover:shadow-lg
+                       disabled:opacity-25 disabled:cursor-not-allowed
+                       transition-all duration-200"
+            style={{ left: -20 }}
+          >
+            <ChevronLeft className="w-5 h-5 text-[#517B3E]" />
+          </button>
+        )}
 
-        {/* Track container */}
+        {/* Track container — mouse/touch/pen click-and-drag scrolling is
+            handled by Framer Motion's `drag="x"` on the track below (it
+            listens for pointerdown on itself, which covers mouse, touch,
+            and pen uniformly, and already accounts for the track's
+            RTL-normalising `dir="ltr"` — dragging left always advances to
+            later cards regardless of page language). `isDragging` mirrors
+            that gesture into a real cursor-class swap. */}
         <div
           ref={containerRef}
-          className="overflow-hidden cursor-grab active:cursor-grabbing"
+          className={[
+            'overflow-hidden',
+            needsScroll ? (isDragging ? 'cursor-grabbing' : 'cursor-grab') : '',
+          ].join(' ')}
+          onMouseLeave={() => setIsDragging(false)}
           dir="ltr"   /* always LTR internally; card text sets its own dir */
           tabIndex={0}
           onKeyDown={handleKeyDown}
@@ -302,11 +355,12 @@ export function DashboardCarousel({ lang, courseId, onNavigate }: Props) {
         >
           <motion.div
             style={{ x, paddingTop: 20, paddingBottom: 28 }}
-            className="flex flex-row"
-            drag="x"
+            className="flex flex-row select-none"
+            drag={needsScroll ? 'x' : false}
             dragConstraints={dragConstraints}
             dragElastic={0.06}
             dragMomentum={false}
+            onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
           >
             {CARDS.map((card, i) => {
@@ -433,20 +487,22 @@ export function DashboardCarousel({ lang, courseId, onNavigate }: Props) {
           </motion.div>
         </div>
 
-        {/* Next arrow */}
-        <button
-          aria-label={he ? 'הבא' : 'Next'}
-          onClick={() => goTo(activeIndex + 1)}
-          disabled={activeIndex === CARDS.length - 1}
-          className="hidden md:flex absolute top-1/2 -translate-y-1/2 z-10 w-10 h-10
-                     items-center justify-center rounded-full border border-[#C8DFC0]
-                     bg-white/92 shadow-md hover:bg-white hover:shadow-lg
-                     disabled:opacity-25 disabled:cursor-not-allowed
-                     transition-all duration-200"
-          style={{ insetInlineEnd: -20 }}
-        >
-          <ChevronRight className="w-5 h-5 text-[#517B3E]" />
-        </button>
+        {/* Next arrow — only shown when the row actually overflows the container */}
+        {needsScroll && (
+          <button
+            aria-label={he ? 'הבא' : 'Next'}
+            onClick={() => goTo(activeIndex + 1)}
+            disabled={activeIndex === CARDS.length - 1}
+            className="hidden md:flex absolute top-1/2 -translate-y-1/2 z-10 w-10 h-10
+                       items-center justify-center rounded-full border border-[#C8DFC0]
+                       bg-white/92 shadow-md hover:bg-white hover:shadow-lg
+                       disabled:opacity-25 disabled:cursor-not-allowed
+                       transition-all duration-200"
+            style={{ right: -20 }}
+          >
+            <ChevronRight className="w-5 h-5 text-[#517B3E]" />
+          </button>
+        )}
       </div>
 
       {/* ── Dot indicators ── */}

@@ -11,8 +11,8 @@
  * Must live inside both AuthProvider and CourseProvider in the tree.
  */
 
-import { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import { useAuth } from './auth';
+import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
+import { useAuth, clearAuthStorage } from './auth';
 import { useCourse } from './course';
 
 const API = 'http://localhost:5003';
@@ -32,12 +32,14 @@ export interface DocInfo {
 interface DocumentContextValue {
   docs:        DocInfo[];
   docsLoading: boolean;
+  docsError:   'unauthorized' | null;
   refetchDocs: () => void;
 }
 
 const DocumentContext = createContext<DocumentContextValue>({
   docs:        [],
   docsLoading: false,
+  docsError:   null,
   refetchDocs: () => {},
 });
 
@@ -45,24 +47,40 @@ const DocumentContext = createContext<DocumentContextValue>({
 
 export function DocumentProvider({ children }: { children: React.ReactNode }) {
   const { user: authUser } = useAuth();
-  const { selectedCourse }  = useCourse();
+  const { selectedCourse, setSelectedCourse } = useCourse();
 
   const [docs,        setDocs]        = useState<DocInfo[]>([]);
   const [docsLoading, setDocsLoading] = useState(false);
+  const [docsError,   setDocsError]   = useState<'unauthorized' | null>(null);
+  // `authUser`/`selectedCourse` are derived from localStorage and only reflect
+  // "there is locally cached profile/course data" — not "the session is still
+  // valid server-side". If the real JWT has expired, every mount/course-change
+  // refetches, 401s, and (previously) redirected without ever invalidating
+  // that stale local signal — so the next page load read the same stale
+  // localStorage, refetched, 401'd, and redirected again: an infinite reload
+  // loop that floods the backend with /documents requests. This ref stops
+  // this provider instance from firing more than one such redirect.
+  const loggedOutRef = useRef(false);
 
   const refetchDocs = useCallback(() => {
-    if (!authUser || !selectedCourse) {
+    if (!authUser || !selectedCourse || loggedOutRef.current) {
       setDocs([]);
       return;
     }
     setDocsLoading(true);
+    setDocsError(null);
     // _t cache-buster forces the browser past any cached response so every
     // call to refetchDocs() always reaches the Flask server.
     const url = `${API}/documents?course_name=${encodeURIComponent(selectedCourse.name)}&_t=${Date.now()}`;
     fetch(url, { credentials: 'include' })
       .then(r => {
         if (r.status === 401) {
-          // Mirror the per-page authFetch 401 behaviour.
+          // Mirror the per-page authFetch 401 behaviour — crucially including
+          // the clear step those wrappers do and this one previously skipped.
+          loggedOutRef.current = true;
+          setDocsError('unauthorized');
+          clearAuthStorage();
+          setSelectedCourse(null);
           window.location.href = '/?login=true';
           return { documents: [] as DocInfo[] };
         }
@@ -73,13 +91,13 @@ export function DocumentProvider({ children }: { children: React.ReactNode }) {
       })
       .catch(() => setDocs([]))
       .finally(() => setDocsLoading(false));
-  }, [authUser, selectedCourse]);
+  }, [authUser, selectedCourse, setSelectedCourse]);
 
   /* Fetch on mount and whenever the active course changes */
   useEffect(() => { refetchDocs(); }, [refetchDocs]);
 
   return (
-    <DocumentContext.Provider value={{ docs, docsLoading, refetchDocs }}>
+    <DocumentContext.Provider value={{ docs, docsLoading, docsError, refetchDocs }}>
       {children}
     </DocumentContext.Provider>
   );

@@ -441,6 +441,22 @@ export default function DashboardPage() {
     window.location.href = '/';
   }, [setSelectedCourse]);
 
+  // Never render a bare blank screen while course state is still resolving
+  // (e.g. right after a browser back/forward navigation, before the
+  // pageshow-triggered re-hydration in CourseProvider lands) — a stuck
+  // `return null` here is what previously produced a permanently blank
+  // page until a hard refresh. Show a lightweight spinner instead so
+  // content always paints the instant state resolves.
+  if (!courseHydrated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: D.pageBg }}>
+        <div
+          className="w-10 h-10 rounded-full border-[3px] animate-spin"
+          style={{ borderColor: 'rgba(28,51,41,0.18)', borderTopColor: '#1C3329' }}
+        />
+      </div>
+    );
+  }
   if (!selectedCourse) return null;
 
   return (

@@ -9,7 +9,7 @@ import { useCourse, type Course } from '../providers/course';
 import Skeleton        from '../../components/ui/Skeleton';
 import { useHaptics }  from '../../hooks/useHaptics';
 import { playSwitch }  from '../../utils/audio';
-import { Plus, Trash2, MoreVertical, Edit2, FileUp } from 'lucide-react';
+import { Plus, Trash2, MoreVertical, Edit2, FileUp, LogOut } from 'lucide-react';
 
 const API = 'http://localhost:5003';
 
@@ -163,7 +163,7 @@ function DeleteModal({
 /* ── Main page ────────────────────────────────────────────────────────────── */
 export default function CoursePickerPage() {
   const router = useRouter();
-  const { user: authUser, isLoading: authLoading } = useAuth();
+  const { user: authUser, isLoading: authLoading, logout } = useAuth();
   const { lang } = useLanguage();
   const { selectedCourse, setSelectedCourse, customCourses, removeCustomCourse } = useCourse();
   const he = lang === 'he';
@@ -357,6 +357,19 @@ export default function CoursePickerPage() {
             <path d="M50 8C76 8 92 33 92 62C92 100 70 140 50 148C30 140 8 100 8 62C8 33 24 8 50 8Z"/>
           </svg>
         </div>
+
+        {/* Sign out — this page has no other nav chrome, so it needs its own exit */}
+        <button
+          type="button"
+          onClick={logout}
+          className="fixed top-6 z-20 flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors duration-150"
+          style={{ insetInlineEnd: '24px', background: 'rgba(255,255,255,0.55)', color: '#527061', border: '1px solid rgba(255,255,255,0.7)' }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.85)'; e.currentTarget.style.color = '#1C3329'; }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.55)'; e.currentTarget.style.color = '#527061'; }}
+        >
+          <LogOut className="w-3.5 h-3.5" />
+          {he ? 'התנתק' : 'Sign Out'}
+        </button>
 
         <div className="relative z-10 flex flex-col items-center w-full max-w-3xl">
 

@@ -14,6 +14,12 @@ type Mode = 'magic' | 'password';
 type ForgotView = 'email' | 'sent' | null;
 const WORKSPACE_ROUTE = '/course-picker';
 
+/* Admins skip the student course-selection flow entirely and land on the
+   admin dashboard; students go to the usual course picker. */
+function postLoginRoute(isAdmin: boolean): string {
+  return isAdmin ? '/admin' : WORKSPACE_ROUTE;
+}
+
 /* ─── Shared input focus/blur handlers ───────────────────────────────────── */
 const focusInput = (e: React.FocusEvent<HTMLInputElement>) => {
   e.target.style.borderColor = '#517B3E';
@@ -151,13 +157,28 @@ export default function HomePage() {
 
   const { lang, toggleLanguage } = useLanguage();
   const t = landing[lang];
-  const { setSelectedCourse } = useCourse();
-  const { updateToken } = useAuth();
+  const { selectedCourse, setSelectedCourse, courseHydrated } = useCourse();
+  const { user: authUser, isLoading: authLoading, updateToken } = useAuth();
 
-  /* Clear any lingering course selection whenever the auth screen mounts. */
+  /* Clear any lingering course selection only for a genuinely logged-out
+     visitor landing on the auth screen. An already-authenticated user can
+     also reach `/` — e.g. via browser back-navigation, since the post-login
+     redirect below uses router.push (not .replace) and leaves `/` in
+     history — and CourseProvider is a root-level singleton shared by every
+     route, so wiping selectedCourse here would silently and permanently
+     destroy their active course, leaving /dashboard blank (it renders
+     nothing without a selected course) until they manually reselect one.
+     Bounce that case straight back into the app instead, mirroring how
+     middleware.ts already redirects an authenticated visitor away from
+     /login and /register. */
   useEffect(() => {
+    if (authLoading || !courseHydrated) return;
+    if (authUser) {
+      router.replace(authUser.isAdmin ? '/admin' : (selectedCourse ? '/dashboard' : '/course-picker'));
+      return;
+    }
     Promise.resolve().then(() => setSelectedCourse(null));
-  }, [setSelectedCourse]);
+  }, [authLoading, authUser, courseHydrated, selectedCourse, setSelectedCourse, router]);
 
   /* ── Register modal state ── */
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
@@ -413,7 +434,7 @@ export default function HomePage() {
       // JWT is now HttpOnly — set by Flask. Sync the auth context from localStorage.
       updateToken();
       setIsTransitioning(true);
-      setTimeout(() => router.push(WORKSPACE_ROUTE), 1800);
+      setTimeout(() => router.push(postLoginRoute(data.is_admin === true)), 1800);
     } catch { setNetError(true); }
     finally   { setOtpLoading(false); }
   };
@@ -441,7 +462,7 @@ export default function HomePage() {
       // JWT is now HttpOnly — set by Flask. Sync the auth context from localStorage.
       updateToken();
       setIsTransitioning(true);
-      setTimeout(() => router.push(WORKSPACE_ROUTE), 1800);
+      setTimeout(() => router.push(postLoginRoute(data.is_admin === true)), 1800);
     } catch { setNetError(true); }
     finally   { setLoading(false); }
   };

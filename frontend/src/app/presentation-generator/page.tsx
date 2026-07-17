@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef, Suspense } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { useDropzone } from 'react-dropzone';
 import { Settings as IconSettings, Home, BookOpen, PenTool, Presentation as PresentationIcon, Brain, Target, Monitor, LogOut, Folder, Check, FileText, BookOpen as DocIcon } from 'lucide-react';
@@ -352,7 +352,12 @@ function Sidebar({
 }
 
 /* ── Page ─────────────────────────────────────────────────────────────────── */
-export default function PresentationGeneratorPage() {
+// `useSearchParams()` below opts this tree into client-side rendering, which
+// Next.js requires to be wrapped in a Suspense boundary (build fails with
+// "useSearchParams() should be wrapped in a suspense boundary" otherwise —
+// see the exported wrapper at the bottom of this file). Same pattern as
+// profile/page.tsx's ProfilePageInner / ProfilePage split.
+function PresentationGeneratorPageInner() {
   const { user: authUser, isLoading: authLoading } = useAuth();
   const { lang, toggleLanguage } = useLanguage();
   const he = lang === 'he';
@@ -1087,5 +1092,13 @@ export default function PresentationGeneratorPage() {
         </div>
       </main>
     </div>
+  );
+}
+
+export default function PresentationGeneratorPage() {
+  return (
+    <Suspense fallback={null}>
+      <PresentationGeneratorPageInner />
+    </Suspense>
   );
 }
