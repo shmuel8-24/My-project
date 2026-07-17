@@ -8,20 +8,30 @@
  * page — no dark fill, no glow aura, blends with the page background.
  *
  * Expanded state (`isExpanded === true`, driven by the parent's
- * `isLoginModalOpen`): the SAME `motion.div` (no route change, no
- * separate modal element — one persistent node) grows via Framer Motion's
- * `layout` projection to fill the viewport and becomes a deep matcha-green
- * glassmorphic immersive panel. `children` (the login/auth panel content,
- * owned and passed down by page.tsx) renders inside a light glass sub-card
- * centered within that panel — the app's actual entry point into the
- * Workspace, since the Workspace itself lives behind auth and can't be
- * pre-rendered here.
+ * `isLoginModalOpen`): the SAME `motion.div` (no route change, no separate
+ * modal element — one persistent node) grows via Framer Motion's `layout`
+ * projection to fill the viewport as its own chrome (tint, border, shadow,
+ * corners, padding) fades away — see `CHROME_TRANSITION`. This component owns
+ * NO background of its own (deliberately — an earlier version rendered a
+ * second copy of `OrganicBackground` in here that crossfaded on top of
+ * page.tsx's own copy; since the two were sized differently — one to this
+ * card's box, one to the whole scrollable page — the crossfade briefly showed
+ * two mismatched blob layouts overlapping, which read as the background
+ * "shifting"). Instead, the card's tint simply fades toward transparent,
+ * revealing `page.tsx`'s single, never-remounted `<OrganicBackground />`
+ * underneath — same DOM node before, during, and after this whole transition.
+ * `children` (the login/auth panel content, owned and passed down by
+ * page.tsx) renders inside a light glass sub-card centered within the
+ * expanded panel — the app's actual entry point into the Workspace, since the
+ * Workspace itself lives behind auth and can't be pre-rendered here.
  *
- * The hero content and `children` are both permanently mounted and crossfade
- * via opacity (not AnimatePresence — an exit/enter mount cycle fights the
- * parent's in-progress `layout` spring, see the comment at the crossfade
- * below); the box itself morphs via the `layout` prop with weighty spring
- * physics.
+ * Every visual change on this expand/collapse (box size via `layout`, the
+ * chrome fade, the hero/auth content crossfade) is driven by plain `animate`
+ * prop changes on permanently-mounted elements — deliberately NOT
+ * AnimatePresence anywhere in this file. An exit/enter mount cycle fights the
+ * parent's in-progress `layout` spring (see the comment at the crossfade
+ * below), so nothing here ever unmounts on its way out; everything just
+ * animates toward opacity/size 0 instead.
  */
 
 import { motion } from 'framer-motion';
@@ -36,6 +46,14 @@ interface Props {
 }
 
 const SPRING = { type: 'spring', stiffness: 100, damping: 20 } as const;
+
+/* Chrome-fade timing — shared by every value that should "melt away" in sync
+   as the card grows into the fullscreen panel (background tint, border,
+   shadow, corners, padding). Written as same-structure rgba pairs (only the
+   alpha channel moves) rather than to 'none'/'transparent' so Framer Motion's
+   color/shadow interpolation has a matching shape on both ends instead of
+   snapping. */
+const CHROME_TRANSITION = { duration: 0.45, ease: [0.22, 1, 0.36, 1] } as const;
 
 export function InteractiveHero({ onOpenAuth, lang, isExpanded, children }: Props) {
   const t  = landing[lang];
@@ -58,7 +76,16 @@ export function InteractiveHero({ onOpenAuth, lang, isExpanded, children }: Prop
       {/* ── The expanding card itself — light glass at rest, dark immersive panel when expanded ── */}
       <motion.div
         layout
-        transition={{ layout: SPRING }}
+        animate={{
+          backgroundColor: isExpanded ? 'rgba(255,255,255,0)'    : 'rgba(255,255,255,0.68)',
+          borderRadius:    isExpanded ? 0                        : 24,
+          padding:         isExpanded ? '0px 0px'                : '64px 44px',
+          boxShadow:       isExpanded
+            ? '0 8px 48px rgba(30,42,69,0), 0 1px 8px rgba(30,42,69,0)'
+            : '0 8px 48px rgba(30,42,69,0.10), 0 1px 8px rgba(30,42,69,0.06)',
+          borderColor:     isExpanded ? 'rgba(255,255,255,0)'    : 'rgba(255,255,255,0.85)',
+        }}
+        transition={{ layout: SPRING, default: CHROME_TRANSITION }}
         style={{
           position:             isExpanded ? 'fixed' : 'relative',
           inset:                isExpanded ? 0 : 'auto',
@@ -66,15 +93,10 @@ export function InteractiveHero({ onOpenAuth, lang, isExpanded, children }: Prop
           width:                isExpanded ? '100vw' : '100%',
           height:               isExpanded ? '100vh' : 'auto',
           maxWidth:             isExpanded ? '100vw' : '520px',
-          backgroundColor:      isExpanded ? 'rgba(10,26,17,0.96)' : 'rgba(255,255,255,0.68)',
-          backdropFilter:       'blur(18px)',
-          WebkitBackdropFilter: 'blur(18px)',
-          borderRadius:         isExpanded ? 0 : 24,
-          padding:              isExpanded ? 0 : '64px 44px',
-          boxShadow:            isExpanded
-            ? 'none'
-            : '0 8px 48px rgba(30,42,69,0.10), 0 1px 8px rgba(30,42,69,0.06)',
-          border:               isExpanded ? 'none' : '1px solid rgba(255,255,255,0.85)',
+          backdropFilter:       isExpanded ? 'none' : 'blur(18px)',
+          WebkitBackdropFilter: isExpanded ? 'none' : 'blur(18px)',
+          borderWidth:          '1px',
+          borderStyle:          'solid',
           overflowY:            isExpanded ? 'auto' : 'visible',
           textAlign:            'center',
         }}
@@ -86,7 +108,7 @@ export function InteractiveHero({ onOpenAuth, lang, isExpanded, children }: Prop
             aria-hidden="true"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            transition={{ duration: 0.6, delay: 0.15 }}
+            transition={{ duration: 0.6, delay: 0.25 }}
             style={{
               position: 'absolute',
               inset: 0,
@@ -110,7 +132,7 @@ export function InteractiveHero({ onOpenAuth, lang, isExpanded, children }: Prop
             key="hero-content"
             initial={false}
             animate={{ opacity: isExpanded ? 0 : 1 }}
-            transition={{ duration: 0.18 }}
+            transition={{ duration: 0.22, ease: [0.4, 0, 0.2, 1] }}
             style={{
               pointerEvents: isExpanded ? 'none' : 'auto',
               display: 'flex',
@@ -183,7 +205,7 @@ export function InteractiveHero({ onOpenAuth, lang, isExpanded, children }: Prop
             key="auth-content"
             initial={false}
             animate={{ opacity: isExpanded ? 1 : 0 }}
-            transition={{ duration: 0.22, delay: isExpanded ? 0.18 : 0 }}
+            transition={{ duration: 0.35, delay: isExpanded ? 0.30 : 0, ease: [0.22, 1, 0.36, 1] }}
             style={{
               position: 'absolute',
               inset: 0,
