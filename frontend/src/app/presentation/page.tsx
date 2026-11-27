@@ -9,7 +9,7 @@ import { useCourse }   from '../providers/course';
 import CoursePill      from '../../components/CoursePill';
 import { type Slide, SlideRenderer } from '../../components/SlideLayouts';
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5003';
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5003';
 
 /* ── Auth / fetch helpers ─────────────────────────────────────────────────── */
 async function authFetch(url: string, init: RequestInit = {}) {

@@ -5,7 +5,7 @@ import { useCourse } from './course';
 import { useLanguage } from './language';
 import type { DeckSlide } from '../../components/SlideViewer';
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5003';
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5003';
 
 async function authFetch(url: string, init: RequestInit = {}) {
   return fetch(url, { ...init, credentials: 'include' });

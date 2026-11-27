@@ -5,7 +5,7 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth, AUTH_KEYS } from '../providers/auth';
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5003';
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5003';
 
 // ── Static option sets ────────────────────────────────────────────────────────
 

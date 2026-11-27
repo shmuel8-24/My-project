@@ -1,4 +1,4 @@
-
+#!/usr/bin/env python3
 """Unified startup script — runs Flask backend and Next.js frontend in parallel."""
 
 

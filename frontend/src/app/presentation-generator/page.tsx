@@ -11,7 +11,7 @@ import { usePresentationGenerator } from '../providers/presentation';
 import CoursePill      from '../../components/CoursePill';
 import SlideViewer     from '../../components/SlideViewer';
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5003';
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5003';
 
 function authFetch(url: string, init: RequestInit = {}) {
   return fetch(url, { ...init, credentials: 'include' });

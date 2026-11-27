@@ -25,7 +25,7 @@ const AcademicRichEditor = dynamic(
   { ssr: false },
 );
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5003';
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5003';
 
 /* ─── Auth helpers ───────────────────────────────────────────────────────── */
 const UPLOADS_STORAGE_KEY      = 'unote_academic_uploads';

@@ -10,7 +10,7 @@ import CoursePill        from '../../components/CoursePill';
 import Skeleton          from '../../components/ui/Skeleton';
 import { playSuccess }   from '../../utils/audio';
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5003';
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5003';
 
 
 /* ── Quiz types ───────────────────────────────────────────────────────────────── */

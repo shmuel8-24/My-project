@@ -13,7 +13,7 @@ import { OrganicBackground } from '../components/OrganicBackground';
 
 type Mode = 'magic' | 'password';
 type ForgotView = 'email' | 'sent' | null;
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5003';
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5003';
 const WORKSPACE_ROUTE = '/course-picker';
 
 /* Admins skip the student course-selection flow entirely and land on the

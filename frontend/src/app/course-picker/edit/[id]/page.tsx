@@ -8,7 +8,7 @@ import { useAuth }     from '../../../providers/auth';
 import { useLanguage } from '../../../providers/language';
 import { useCourse }   from '../../../providers/course';
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5003';
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5003';
 
 const COLOR_OPTIONS = [
   { id: 'green',  value: '#4A7C59', label: 'ירוק',  bg: '#D1E6D9' },

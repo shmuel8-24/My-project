@@ -15,7 +15,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 
-const FLASK = process.env.API_URL ?? 'http://localhost:5003';
+const FLASK = process.env.API_URL || 'http://localhost:5003';
 
 async function proxy(req: NextRequest, segments: string[]): Promise<NextResponse> {
   const upstream = `${FLASK}/${segments.join('/')}`;

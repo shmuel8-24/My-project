@@ -11,7 +11,7 @@ import { useAuth } from '../providers/auth';
  * Flask's CORS config already allows localhost:3000, so no proxy is needed.
  * Set NEXT_PUBLIC_API_URL in frontend/.env.local to override the default.
  */
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5003';
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5003';
 
 function authFetch(url: string, init: RequestInit = {}) {
   return fetch(url, {

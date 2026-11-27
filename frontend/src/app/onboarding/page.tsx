@@ -8,7 +8,7 @@ import {
   PartyPopper, ArrowRight, ArrowLeft, Check, AlertCircle,
 } from 'lucide-react';
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5003';
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5003';
 
 // ─── Static data ──────────────────────────────────────────────────────────────
 
