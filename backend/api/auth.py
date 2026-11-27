@@ -23,11 +23,13 @@ auth_bp = Blueprint("auth", __name__)
 
 # ── Cookie helpers ─────────────────────────────────────────────────────────────
 _COOKIE_SECURE = os.getenv("FLASK_ENV") == "production"
+_COOKIE_DOMAIN = os.getenv("COOKIE_DOMAIN", "").strip() or None
 
 
 def _set_jwt_cookie(response, token: str) -> None:
     """Attach the JWT as an HttpOnly, SameSite=Lax cookie.
     secure=True only in production so localhost dev still works over plain HTTP.
+    Set COOKIE_DOMAIN=.uvinote.com in production when frontend & API use subdomains.
     """
     response.set_cookie(
         "levy_ai_token",
@@ -36,6 +38,7 @@ def _set_jwt_cookie(response, token: str) -> None:
         httponly=True,
         secure=_COOKIE_SECURE,
         samesite="Lax",
+        domain=_COOKIE_DOMAIN,
         path="/",
     )
 
@@ -49,6 +52,7 @@ def _clear_jwt_cookie(response) -> None:
         httponly=True,
         secure=_COOKIE_SECURE,
         samesite="Lax",
+        domain=_COOKIE_DOMAIN,
         path="/",
     )
 

@@ -11,7 +11,7 @@ import { useHaptics }  from '../../hooks/useHaptics';
 import { playSwitch }  from '../../utils/audio';
 import { Plus, Trash2, MoreVertical, Edit2, FileUp, LogOut } from 'lucide-react';
 
-const API = 'http://localhost:5003';
+const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5003';
 
 /* ── Time-based greeting ──────────────────────────────────────────────────── */
 function getGreeting(he: boolean): string {

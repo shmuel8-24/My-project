@@ -15,7 +15,7 @@ import { createContext, useContext, useState, useCallback, useEffect, useRef } f
 import { useAuth, clearAuthStorage } from './auth';
 import { useCourse } from './course';
 
-const API = 'http://localhost:5003';
+const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5003';
 
 /* ── Shared type ─────────────────────────────────────────────────────────── */
 

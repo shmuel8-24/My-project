@@ -3,6 +3,8 @@
 import { useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
+const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5003';
+
 const INPUT_STYLE: React.CSSProperties = {
   padding: '12px 14px',
   borderRadius: '10px',
@@ -41,7 +43,7 @@ function ResetPasswordForm() {
     if (password !== confirm)  { setError('הסיסמאות אינן תואמות'); return; }
     setLoading(true);
     try {
-      const res  = await fetch('http://localhost:5003/api/reset-password', {
+      const res  = await fetch(`${API}/api/reset-password`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ token, password }),

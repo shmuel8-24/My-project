@@ -23,7 +23,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const API = 'http://localhost:5003';
+const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5003';
 
 /* ─── Auth helpers ───────────────────────────────────────────────────────────── */
 const _AUTH_KEYS = [
@@ -1446,7 +1446,7 @@ function ChatInterface({ hasDoc, sessionId, initialMessages, onSessionCreated, o
                   : 'webm';
         fd.append('audio', blob, `recording.${ext}`);
 
-        const res = await authFetch('http://localhost:5003/api/transcribe', { method: 'POST', body: fd, mode: 'cors' });
+        const res = await authFetch(`${API}/api/transcribe`, { method: 'POST', body: fd, mode: 'cors' });
 
         // Guard against non-JSON bodies (e.g. 502 proxy error)
         let data: { text?: string; error?: string } = {};
