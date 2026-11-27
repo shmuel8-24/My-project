@@ -253,7 +253,7 @@ Combines FAISS L2 similarity and BM25 via Reciprocal Rank Fusion (RRF constant 6
 5. Non-empty `_images_map` → message sent as OpenAI multi-part array (text + image_url), activating vision.
 6. Events: `{type:"status", phase}` → `{type:"result", ...}` | `{type:"error"}`.
 
-**Academic paper generation (`/generate-paper`) — SSE stream, two paths:**
+**Academic paper generation (`/generate-paper`) — SSE stream, two paths:** 
 
 **Path A — single-chunk (all types except research > 1 page):** Stateless per-call — no conversation history stored. The frontend accumulates approved sections and sends the full `previousContent` on each subsequent call. An anti-repetition engine in the system prompt forces the model to catalog already-mentioned authors/cases/arguments. Prompt text is sanitized via `_sanitize()` to avoid homework-filter refusals. **RAG diversity**: the FAISS query is enriched per chunk with a chapter-specific angle phrase from `_CHUNK_ANGLES`, retrieving topically-distinct sections rather than the same TOP_K chunks repeated.
 
